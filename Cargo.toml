@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/urdf-core",
+    "crates/urdf-renderer",
+    "crates/urdf-frontend",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["URDF Editor Contributors"]
+
+[workspace.dependencies]
+# Graphics (matching wiz versions)
+wgpu = "23.0"
+egui = "0.30"
+eframe = { version = "0.30", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+egui_dock = "0.15"
+egui-wgpu = "0.30"
+egui-snarl = "0.6"
+
+# Math
+glam = "0.29"
+bytemuck = { version = "1", features = ["derive"] }
+
+# STL/URDF
+stl_io = "0.7"
+urdf-rs = "0.9"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+parking_lot = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+rfd = "0.15"
+
+# Internal crates
+urdf-core = { path = "crates/urdf-core" }
+urdf-renderer = { path = "crates/urdf-renderer" }
+urdf-frontend = { path = "crates/urdf-frontend" }
