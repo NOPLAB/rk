@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use urdf_core::StlUnit;
 
-use crate::app_state::{AppAction, SharedAppState};
+use crate::app_state::{AppAction, PrimitiveType, SharedAppState};
 use crate::panels::Panel;
 
 /// Part list panel with drag-and-drop hierarchy
@@ -156,6 +156,26 @@ impl Panel for PartListPanel {
                             &mut actions,
                         );
                     }
+                }
+            }
+
+            // Empty space area for context menu (right-click on empty space)
+            let remaining = ui.available_size();
+            if remaining.y > 0.0 {
+                let (rect, response) = ui.allocate_exact_size(remaining, egui::Sense::click());
+
+                // Only show context menu if clicked in this empty area
+                response.context_menu(|ui| {
+                    Self::show_tree_context_menu(ui, app_state);
+                });
+
+                // Visual feedback for drop target in empty area
+                if self.dragging_part.is_some() && response.hovered() {
+                    ui.painter().rect_stroke(
+                        rect,
+                        2.0,
+                        egui::Stroke::new(1.0, egui::Color32::GRAY),
+                    );
                 }
             }
         });
@@ -610,5 +630,52 @@ impl PartListPanel {
                 }
             });
         });
+    }
+
+    /// Show context menu for creating new objects
+    fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
+        // Import STL
+        if ui.button("Import STL...").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("STL files", &["stl", "STL"])
+                .pick_file()
+            {
+                app_state.lock().queue_action(AppAction::ImportStl(path));
+            }
+            ui.close_menu();
+        }
+
+        ui.separator();
+
+        // Create Primitives submenu
+        ui.menu_button("Create Primitives", |ui| {
+            if ui.button("Box").clicked() {
+                app_state.lock().queue_action(AppAction::CreatePrimitive {
+                    primitive_type: PrimitiveType::Box,
+                    name: None,
+                });
+                ui.close_menu();
+            }
+            if ui.button("Cylinder").clicked() {
+                app_state.lock().queue_action(AppAction::CreatePrimitive {
+                    primitive_type: PrimitiveType::Cylinder,
+                    name: None,
+                });
+                ui.close_menu();
+            }
+            if ui.button("Sphere").clicked() {
+                app_state.lock().queue_action(AppAction::CreatePrimitive {
+                    primitive_type: PrimitiveType::Sphere,
+                    name: None,
+                });
+                ui.close_menu();
+            }
+        });
+
+        // Create Empty
+        if ui.button("Create Empty...").clicked() {
+            app_state.lock().queue_action(AppAction::CreateEmpty { name: None });
+            ui.close_menu();
+        }
     }
 }

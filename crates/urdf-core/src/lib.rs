@@ -11,6 +11,8 @@ pub mod assembly;
 pub mod inertia;
 pub mod project;
 pub mod export;
+pub mod import;
+pub mod primitive;
 pub mod stl;
 
 pub use part::*;
@@ -18,4 +20,6 @@ pub use assembly::*;
 pub use inertia::*;
 pub use project::*;
 pub use export::*;
+pub use import::*;
+pub use primitive::*;
 pub use stl::*;

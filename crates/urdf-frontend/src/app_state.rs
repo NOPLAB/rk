@@ -158,11 +158,33 @@ impl AppState {
     }
 }
 
+/// Primitive type for creating geometric shapes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimitiveType {
+    Box,
+    Cylinder,
+    Sphere,
+}
+
+impl PrimitiveType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            PrimitiveType::Box => "Box",
+            PrimitiveType::Cylinder => "Cylinder",
+            PrimitiveType::Sphere => "Sphere",
+        }
+    }
+}
+
 /// Actions that can be performed on the app state
 #[derive(Debug, Clone)]
 pub enum AppAction {
     /// Import an STL file
     ImportStl(PathBuf),
+    /// Create a primitive shape
+    CreatePrimitive { primitive_type: PrimitiveType, name: Option<String> },
+    /// Create an empty part (no geometry)
+    CreateEmpty { name: Option<String> },
     /// Select a part
     SelectPart(Option<Uuid>),
     /// Delete selected part
@@ -187,6 +209,8 @@ pub enum AppAction {
     NewProject,
     /// Connect a part to base_link
     ConnectToBaseLink(Uuid),
+    /// Import a URDF file
+    ImportUrdf(PathBuf),
 }
 
 pub type SharedAppState = Arc<Mutex<AppState>>;

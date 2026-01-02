@@ -5,9 +5,12 @@ use std::sync::Arc;
 use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
 use parking_lot::Mutex;
 
-use urdf_core::{load_stl_with_unit, Joint, JointPoint, Link, Pose, Project};
+use urdf_core::{
+    generate_box_mesh, generate_cylinder_mesh, generate_sphere_mesh,
+    import_urdf, load_stl_with_unit, ImportOptions, Joint, JointPoint, Link, Part, Pose, Project,
+};
 
-use crate::app_state::{create_shared_state, AppAction, SharedAppState};
+use crate::app_state::{create_shared_state, AppAction, PrimitiveType, SharedAppState};
 use crate::panels::{Panel, PartListPanel, PropertiesPanel, ViewportPanel};
 use crate::viewport_state::{SharedViewportState, ViewportState};
 
@@ -401,7 +404,131 @@ impl UrdfEditorApp {
                         }
                     }
                 }
-                _ => {
+                AppAction::ImportUrdf(path) => {
+                    let stl_unit = self.app_state.lock().stl_import_unit;
+                    let options = ImportOptions {
+                        base_dir: path.parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+                        stl_unit,
+                        default_color: [0.7, 0.7, 0.7, 1.0],
+                    };
+
+                    match import_urdf(&path, &options) {
+                        Ok(project) => {
+                            tracing::info!(
+                                "Imported URDF: {} ({} links, {} joints, {} parts)",
+                                project.name,
+                                project.assembly.links.len(),
+                                project.assembly.joints.len(),
+                                project.parts.len()
+                            );
+
+                            // Clear viewport
+                            if let Some(ref viewport_state) = self.viewport_state {
+                                viewport_state.lock().clear_parts();
+                                viewport_state.lock().clear_overlays();
+                            }
+
+                            // Add parts to viewport and fit camera
+                            if let Some(ref viewport_state) = self.viewport_state {
+                                let mut total_center = glam::Vec3::ZERO;
+                                let mut max_radius: f32 = 1.0;
+                                let part_count = project.parts.len() as f32;
+
+                                for part in &project.parts {
+                                    viewport_state.lock().add_part(part);
+
+                                    // Accumulate for camera fitting
+                                    let center = glam::Vec3::new(
+                                        (part.bbox_min[0] + part.bbox_max[0]) / 2.0,
+                                        (part.bbox_min[1] + part.bbox_max[1]) / 2.0,
+                                        (part.bbox_min[2] + part.bbox_max[2]) / 2.0,
+                                    );
+                                    total_center += center;
+
+                                    let extent = glam::Vec3::new(
+                                        part.bbox_max[0] - part.bbox_min[0],
+                                        part.bbox_max[1] - part.bbox_min[1],
+                                        part.bbox_max[2] - part.bbox_min[2],
+                                    );
+                                    max_radius = max_radius.max(extent.length() / 2.0);
+                                }
+
+                                if part_count > 0.0 {
+                                    total_center /= part_count;
+                                    viewport_state.lock().renderer.camera.fit_all(total_center, max_radius * 2.0);
+                                }
+                            }
+
+                            // Load into app state
+                            self.app_state.lock().load_project(project, path);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to import URDF: {}", e);
+                        }
+                    }
+                }
+                AppAction::CreatePrimitive { primitive_type, name } => {
+                    // Generate unique name
+                    let existing_count = self.app_state.lock().parts.len();
+                    let part_name = name.unwrap_or_else(|| {
+                        format!("{}_{}", primitive_type.name(), existing_count + 1)
+                    });
+
+                    // Generate mesh based on primitive type (default size: 0.1m)
+                    let (vertices, normals, indices) = match primitive_type {
+                        PrimitiveType::Box => generate_box_mesh([0.1, 0.1, 0.1]),
+                        PrimitiveType::Cylinder => generate_cylinder_mesh(0.05, 0.1),
+                        PrimitiveType::Sphere => generate_sphere_mesh(0.05),
+                    };
+
+                    // Create part
+                    let mut part = Part::new(&part_name);
+                    part.vertices = vertices;
+                    part.normals = normals;
+                    part.indices = indices;
+                    part.calculate_bounding_box();
+
+                    // Set material name based on primitive type
+                    part.material_name = Some(format!("{}_material", primitive_type.name().to_lowercase()));
+
+                    tracing::info!(
+                        "Created primitive: {} ({} vertices)",
+                        part.name,
+                        part.vertices.len()
+                    );
+
+                    // Add to viewport
+                    if let Some(ref viewport_state) = self.viewport_state {
+                        let mut vp = viewport_state.lock();
+                        vp.add_part(&part);
+
+                        // Fit camera if this is the first part
+                        let center = part.center();
+                        let radius = part.size().length() / 2.0;
+                        vp.renderer.camera.fit_all(center, radius.max(0.5));
+                    }
+
+                    // Add to app state
+                    self.app_state.lock().add_part(part);
+                }
+                AppAction::CreateEmpty { name } => {
+                    // Generate unique name
+                    let existing_count = self.app_state.lock().parts.len();
+                    let part_name = name.unwrap_or_else(|| {
+                        format!("Empty_{}", existing_count + 1)
+                    });
+
+                    // Create empty part (no geometry)
+                    let part = Part::new(&part_name);
+
+                    tracing::info!("Created empty part: {}", part.name);
+
+                    // Add to app state (no viewport mesh for empty parts)
+                    self.app_state.lock().add_part(part);
+                }
+                AppAction::AddJointPoint { .. } | AppAction::RemoveJointPoint { .. } => {
                     tracing::warn!("Unhandled action: {:?}", action);
                 }
             }
@@ -483,6 +610,15 @@ impl eframe::App for UrdfEditorApp {
                             .pick_file()
                         {
                             self.app_state.lock().queue_action(AppAction::ImportStl(path));
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Import URDF...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("URDF files", &["urdf", "URDF", "xml"])
+                            .pick_file()
+                        {
+                            self.app_state.lock().queue_action(AppAction::ImportUrdf(path));
                         }
                         ui.close_menu();
                     }
