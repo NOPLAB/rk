@@ -144,30 +144,11 @@ impl UrdfEditorApp {
                 AppAction::SelectPart(part_id) => {
                     self.app_state.lock().select_part(part_id);
 
-                    // Update viewport selection
+                    // Update viewport selection (mesh highlighting)
                     if let Some(ref viewport_state) = self.viewport_state {
                         viewport_state.lock().set_selected_part(part_id);
-
-                        // Update overlays for selected part
-                        let state = self.app_state.lock();
-                        if let Some(id) = part_id {
-                            if let Some(part) = state.get_part(id) {
-                                let selected_point = state.selected_joint_point.map(|(_, idx)| idx);
-                                drop(state);
-
-                                let mut vp = viewport_state.lock();
-                                let state = self.app_state.lock();
-                                if let Some(part) = state.get_part(id) {
-                                    vp.update_axes_for_part(part);
-                                    vp.update_markers_for_part(part, selected_point);
-                                    vp.show_gizmo_for_part(part);
-                                }
-                            }
-                        } else {
-                            drop(state);
-                            viewport_state.lock().clear_overlays();
-                        }
                     }
+                    // Overlays are updated in update_overlays() called after process_actions
                 }
                 AppAction::DeleteSelectedPart => {
                     let selected = self.app_state.lock().selected_part;
@@ -282,7 +263,19 @@ impl UrdfEditorApp {
                 let mut vp = viewport_state.lock();
                 vp.update_axes_for_part(&part_clone);
                 vp.update_markers_for_part(&part_clone, selected_point);
+
+                // Show gizmo based on selection
+                if let Some(point_idx) = selected_point {
+                    // Show gizmo at joint point position
+                    vp.show_gizmo_for_joint_point(&part_clone, point_idx);
+                } else {
+                    // Show gizmo at part center
+                    vp.show_gizmo_for_part(&part_clone);
+                }
             }
+        } else {
+            // No selection - clear overlays
+            viewport_state.lock().clear_overlays();
         }
     }
 }

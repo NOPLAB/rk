@@ -27,6 +27,7 @@ pub struct GizmoInteraction {
     pub drag_start_pos: Vec3,
     pub part_start_transform: Mat4,
     pub part_id: Option<Uuid>,
+    pub selected_joint_point: Option<usize>,
     pub gizmo_position: Vec3,
     pub gizmo_scale: f32,
 }
@@ -232,9 +233,35 @@ impl ViewportState {
         self.gizmo.gizmo_position = world_center;
         self.gizmo.gizmo_scale = scale;
         self.gizmo.part_id = Some(part.id);
+        self.gizmo.selected_joint_point = None; // Not a joint point
         self.gizmo.part_start_transform = part.origin_transform;
 
         self.renderer.show_gizmo(&self.queue, world_center, scale);
+    }
+
+    /// Show gizmo for a joint point
+    pub fn show_gizmo_for_joint_point(&mut self, part: &Part, point_idx: usize) {
+        if let Some(jp) = part.joint_points.get(point_idx) {
+            // Transform joint point position by part's origin transform
+            let world_pos = part.origin_transform.transform_point3(jp.position);
+
+            // Scale gizmo based on part size (smaller for joint points)
+            let extent = Vec3::new(
+                part.bbox_max[0] - part.bbox_min[0],
+                part.bbox_max[1] - part.bbox_min[1],
+                part.bbox_max[2] - part.bbox_min[2],
+            );
+            let scale = (extent.length() * 0.15).max(0.05);
+
+            // Store gizmo state
+            self.gizmo.gizmo_position = world_pos;
+            self.gizmo.gizmo_scale = scale;
+            self.gizmo.part_id = Some(part.id);
+            self.gizmo.selected_joint_point = Some(point_idx); // Track which joint point
+            self.gizmo.part_start_transform = part.origin_transform;
+
+            self.renderer.show_gizmo(&self.queue, world_pos, scale);
+        }
     }
 
     /// Hide gizmo
