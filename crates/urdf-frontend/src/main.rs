@@ -13,16 +13,15 @@ fn main() -> eframe::Result<()> {
 
     tracing::info!("Starting URDF Editor");
 
-    // Configure wgpu for better compatibility (especially WSL2 with llvmpipe)
+    // Configure wgpu - allow all backends and let wgpu choose the best one
     let wgpu_options = egui_wgpu::WgpuConfiguration {
         wgpu_setup: egui_wgpu::WgpuSetup::CreateNew {
-            // Use GL backend for llvmpipe compatibility
-            supported_backends: wgpu::Backends::GL,
-            power_preference: wgpu::PowerPreference::LowPower,
-            device_descriptor: std::sync::Arc::new(|_adapter| wgpu::DeviceDescriptor {
+            supported_backends: wgpu::Backends::all(),
+            power_preference: wgpu::PowerPreference::default(),
+            device_descriptor: std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
                 label: Some("urdf-editor device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                required_limits: adapter.limits(),
                 memory_hints: wgpu::MemoryHints::default(),
             }),
         },
