@@ -356,7 +356,11 @@ impl Renderer {
 
     /// Hit test gizmo
     pub fn gizmo_hit_test(&self, ray_origin: glam::Vec3, ray_dir: glam::Vec3, gizmo_pos: glam::Vec3, scale: f32) -> GizmoAxis {
-        self.gizmo_renderer.hit_test(ray_origin, ray_dir, gizmo_pos, scale)
+        // Calculate distance-based scale to match shader behavior
+        let camera_distance = (self.camera.position - gizmo_pos).length();
+        let distance_scale = camera_distance * 0.15;
+        let adjusted_scale = scale * distance_scale;
+        self.gizmo_renderer.hit_test(ray_origin, ray_dir, gizmo_pos, adjusted_scale)
     }
 
     /// Render the scene.

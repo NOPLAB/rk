@@ -42,8 +42,18 @@ fn vs_main(
         instance.transform_2,
         instance.transform_3,
     );
-    let scale = instance.scale_highlight.x;
+    let base_scale = instance.scale_highlight.x;
     let highlighted_axis = i32(instance.scale_highlight.y);
+
+    // Get gizmo world position from transform matrix
+    let gizmo_world_pos = transform[3].xyz;
+
+    // Calculate distance from camera to gizmo
+    let camera_distance = length(camera.eye.xyz - gizmo_world_pos);
+
+    // Scale gizmo based on camera distance to maintain constant screen size
+    let distance_scale = camera_distance * 0.15;
+    let scale = base_scale * distance_scale;
 
     let scaled_pos = in.position * scale;
     let world_pos = transform * vec4<f32>(scaled_pos, 1.0);
