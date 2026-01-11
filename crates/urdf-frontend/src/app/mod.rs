@@ -11,6 +11,7 @@ use parking_lot::Mutex;
 
 use crate::actions::{ActionContext, dispatch_action};
 use crate::state::{SharedAppState, SharedViewportState, ViewportState, create_shared_state};
+use crate::update::{SharedUpdateStatus, UpdateStatus, check_for_updates, create_update_status};
 
 pub use dock::{PanelType, UrdfTabViewer, create_dock_layout};
 pub use menu::{MenuAction, render_menu_bar};
@@ -21,6 +22,9 @@ pub struct UrdfEditorApp {
     dock_state: DockState<PanelType>,
     app_state: SharedAppState,
     viewport_state: Option<SharedViewportState>,
+    update_status: SharedUpdateStatus,
+    /// Whether the update notification has been dismissed
+    update_dismissed: bool,
 }
 
 impl UrdfEditorApp {
@@ -38,10 +42,16 @@ impl UrdfEditorApp {
         // Create dock layout
         let dock_state = create_dock_layout();
 
+        // Start update check in background
+        let update_status = create_update_status();
+        check_for_updates(update_status.clone());
+
         Self {
             dock_state,
             app_state: create_shared_state(),
             viewport_state,
+            update_status,
+            update_dismissed: false,
         }
     }
 
@@ -52,6 +62,45 @@ impl UrdfEditorApp {
 
         for action in actions {
             dispatch_action(action, &ctx);
+        }
+    }
+
+    /// Show update notification banner
+    fn show_update_banner(&mut self, ctx: &egui::Context) {
+        let status = self.update_status.lock().clone();
+
+        if let UpdateStatus::UpdateAvailable {
+            latest_version,
+            release_url,
+        } = status
+        {
+            egui::TopBottomPanel::top("update_banner").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+
+                    ui.colored_label(
+                        egui::Color32::from_rgb(100, 200, 100),
+                        format!(
+                            "New version {} available! (current: {})",
+                            latest_version,
+                            crate::update::CURRENT_VERSION
+                        ),
+                    );
+
+                    if ui.hyperlink_to("Download", &release_url).clicked() {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Err(e) = open::that(&release_url) {
+                            tracing::warn!("Failed to open URL: {}", e);
+                        }
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Dismiss").clicked() {
+                            self.update_dismissed = true;
+                        }
+                    });
+                });
+            });
         }
     }
 }
@@ -68,6 +117,11 @@ impl eframe::App for UrdfEditorApp {
                     self.dock_state = create_dock_layout();
                 }
             }
+        }
+
+        // Update notification banner
+        if !self.update_dismissed {
+            self.show_update_banner(ctx);
         }
 
         // Dock area
