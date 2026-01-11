@@ -11,6 +11,7 @@ license-file = "TERMS_OF_SERVICE.txt"
 icons = [
     "assets/icons/32x32.png",
     "assets/icons/128x128.png",
+    "assets/icons/256x256.png",
     "assets/icons/512x512.png",
     "assets/icons/rk.ico",
 ]
@@ -23,6 +24,7 @@ main = true
 compression = "lzma"
 installMode = "currentUser"
 languages = ["English", "Japanese"]
+installer-icon = "assets/icons/rk.ico"
 
 [windows]
 allowDowngrades = true
