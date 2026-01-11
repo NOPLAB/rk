@@ -1,0 +1,33 @@
+name = "rk"
+productName = "RK"
+version = "0.1.0"
+identifier = "dev.nopp.rk"
+description = "A visual editor for URDF (Unified Robot Description Format) files"
+authors = ["RK Contributors"]
+binaries-dir = "target/release"
+out-dir = "dist"
+before-packaging-command = "cargo build --release"
+icons = [
+    "assets/icons/32x32.png",
+    "assets/icons/128x128.png",
+    "assets/icons/512x512.png",
+]
+
+[[binaries]]
+path = "rk"
+main = true
+
+[nsis]
+compression = "lzma"
+installMode = "currentUser"
+languages = ["English", "Japanese"]
+
+[macos]
+minimumSystemVersion = "10.13"
+
+[deb]
+depends = ["libc6", "libgcc-s1", "libxcb1", "libxkbcommon0"]
+section = "graphics"
+priority = "optional"
+
+[appimage]

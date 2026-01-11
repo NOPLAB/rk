@@ -1,3 +1,7 @@
 /target
 
-node_modules
+node_modules/
+
+.cargo-packager/
+dist/
+

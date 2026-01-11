@@ -3,9 +3,11 @@ name = "urdf-frontend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "A visual editor for URDF (Unified Robot Description Format) files"
+build = "build.rs"
 
 [[bin]]
-name = "urdf-editor"
+name = "rk"
 path = "src/main.rs"
 
 [dependencies]
@@ -22,3 +24,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rfd = { workspace = true }
 uuid = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

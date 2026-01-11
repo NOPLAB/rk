@@ -24,7 +24,7 @@ fn main() -> eframe::Result<()> {
             supported_backends: wgpu::Backends::all(),
             power_preference: wgpu::PowerPreference::default(),
             device_descriptor: std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
-                label: Some("urdf-editor device"),
+                label: Some("rk device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: adapter.limits(),
                 memory_hints: wgpu::MemoryHints::default(),
@@ -43,7 +43,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "urdf-editor",
+        "rk",
         native_options,
         Box::new(|cc| Ok(Box::new(urdf_frontend::UrdfEditorApp::new(cc)))),
     )
