@@ -35,11 +35,17 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
+    // Load app icon
+    let icon =
+        eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icons/256x256.png"))
+            .expect("Failed to load icon");
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_title("URDF Editor"),
+            .with_title("URDF Editor")
+            .with_icon(icon),
         wgpu_options,
         ..Default::default()
     };
