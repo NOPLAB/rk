@@ -13,8 +13,5 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.3.0",
     "prettier": "^3.4.2"
-  },
-  "lint-staged": {
-    "*.{js,ts,jsx,tsx,json,md,yaml,yml}": "prettier --write"
   }
 }
