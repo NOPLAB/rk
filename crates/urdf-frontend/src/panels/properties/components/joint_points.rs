@@ -4,9 +4,12 @@ use egui::{DragValue, Ui};
 use glam::Vec3;
 use uuid::Uuid;
 
-use urdf_core::{JointLimits, JointPoint, JointType, MAX_JOINT_POINTS};
+use urdf_core::{JointLimits, JointPoint, JointType};
 
-use crate::panels::properties::{PropertyComponent, PropertyContext};
+use crate::panels::properties::{JointPointAction, PropertyComponent, PropertyContext};
+
+/// Maximum number of joint points per part
+const MAX_JOINT_POINTS: usize = 8;
 
 /// Joint points list component
 pub struct JointPointsComponent {
@@ -41,26 +44,26 @@ impl PropertyComponent for JointPointsComponent {
     fn ui(&mut self, ui: &mut Ui, ctx: &mut PropertyContext) -> bool {
         let mut changed = false;
         let selected_point = ctx.selected_joint_point;
+        let part_id = ctx.part_id;
 
         // Header with count badge
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!(
-                    "{}/{}",
-                    ctx.part.joint_points.len(),
-                    MAX_JOINT_POINTS
-                ));
+                ui.label(format!("{}/{}", ctx.joint_points.len(), MAX_JOINT_POINTS));
             });
         });
 
         // Add button
-        let can_add = ctx.part.joint_points.len() < MAX_JOINT_POINTS;
+        let can_add = ctx.joint_points.len() < MAX_JOINT_POINTS;
         ui.add_enabled_ui(can_add, |ui| {
             if ui.button("Add Joint Point").clicked() {
                 let center = ctx.part.center();
-                let point =
-                    JointPoint::new(format!("point_{}", ctx.part.joint_points.len() + 1), center);
-                let _ = ctx.part.add_joint_point(point);
+                let point = JointPoint::new(
+                    format!("point_{}", ctx.joint_points.len() + 1),
+                    part_id,
+                    center,
+                );
+                ctx.joint_point_actions.push(JointPointAction::Add(point));
                 changed = true;
             }
         });
@@ -73,10 +76,11 @@ impl PropertyComponent for JointPointsComponent {
         egui::ScrollArea::vertical()
             .id_salt("joint_points_scroll")
             .show(ui, |ui| {
-                for (idx, point) in ctx.part.joint_points.iter_mut().enumerate() {
+                for (idx, point) in ctx.joint_points.iter_mut().enumerate() {
                     let is_selected = selected_point == Some(idx);
+                    let point_id = point.id;
 
-                    ui.push_id(point.id, |ui| {
+                    ui.push_id(point_id, |ui| {
                         let header = egui::CollapsingHeader::new(&point.name)
                             .default_open(is_selected)
                             .show(ui, |ui| {
@@ -84,6 +88,8 @@ impl PropertyComponent for JointPointsComponent {
                                 ui.horizontal(|ui| {
                                     ui.label("Name:");
                                     if ui.text_edit_singleline(&mut point.name).changed() {
+                                        ctx.joint_point_actions
+                                            .push(JointPointAction::Update(point.clone()));
                                         changed = true;
                                     }
                                 });
@@ -98,6 +104,8 @@ impl PropertyComponent for JointPointsComponent {
                                         .add(DragValue::new(&mut point.position.x).speed(0.01))
                                         .changed()
                                     {
+                                        ctx.joint_point_actions
+                                            .push(JointPointAction::Update(point.clone()));
                                         changed = true;
                                     }
                                     ui.label("Y:");
@@ -105,6 +113,8 @@ impl PropertyComponent for JointPointsComponent {
                                         .add(DragValue::new(&mut point.position.y).speed(0.01))
                                         .changed()
                                     {
+                                        ctx.joint_point_actions
+                                            .push(JointPointAction::Update(point.clone()));
                                         changed = true;
                                     }
                                     ui.label("Z:");
@@ -112,6 +122,8 @@ impl PropertyComponent for JointPointsComponent {
                                         .add(DragValue::new(&mut point.position.z).speed(0.01))
                                         .changed()
                                     {
+                                        ctx.joint_point_actions
+                                            .push(JointPointAction::Update(point.clone()));
                                         changed = true;
                                     }
                                 });
@@ -121,7 +133,7 @@ impl PropertyComponent for JointPointsComponent {
                                     ui.label("Type:");
                                     egui::ComboBox::from_id_salt(format!(
                                         "joint_type_{}",
-                                        point.id
+                                        point_id
                                     ))
                                     .selected_text(point.joint_type.display_name())
                                     .show_ui(ui, |ui| {
@@ -134,6 +146,8 @@ impl PropertyComponent for JointPointsComponent {
                                                 )
                                                 .changed()
                                             {
+                                                ctx.joint_point_actions
+                                                    .push(JointPointAction::Update(point.clone()));
                                                 changed = true;
                                             }
                                         }
@@ -147,16 +161,22 @@ impl PropertyComponent for JointPointsComponent {
                                         if ui.selectable_label(point.axis == Vec3::X, "X").clicked()
                                         {
                                             point.axis = Vec3::X;
+                                            ctx.joint_point_actions
+                                                .push(JointPointAction::Update(point.clone()));
                                             changed = true;
                                         }
                                         if ui.selectable_label(point.axis == Vec3::Y, "Y").clicked()
                                         {
                                             point.axis = Vec3::Y;
+                                            ctx.joint_point_actions
+                                                .push(JointPointAction::Update(point.clone()));
                                             changed = true;
                                         }
                                         if ui.selectable_label(point.axis == Vec3::Z, "Z").clicked()
                                         {
                                             point.axis = Vec3::Z;
+                                            ctx.joint_point_actions
+                                                .push(JointPointAction::Update(point.clone()));
                                             changed = true;
                                         }
                                     });
@@ -164,47 +184,71 @@ impl PropertyComponent for JointPointsComponent {
 
                                 // Limits (for revolute/prismatic)
                                 if point.joint_type.has_limits() {
-                                    let limits = point.limits.get_or_insert(JointLimits::default());
+                                    // Initialize limits if needed
+                                    if point.limits.is_none() {
+                                        point.limits = Some(JointLimits::default());
+                                    }
+                                    // Work with a copy to avoid borrow issues
+                                    let mut limits_copy = point.limits.unwrap();
+                                    let mut limits_changed = false;
+
                                     ui.collapsing("Limits", |ui| {
                                         ui.horizontal(|ui| {
                                             ui.label("Lower:");
                                             if ui
-                                                .add(DragValue::new(&mut limits.lower).speed(0.01))
+                                                .add(
+                                                    DragValue::new(&mut limits_copy.lower)
+                                                        .speed(0.01),
+                                                )
                                                 .changed()
                                             {
-                                                changed = true;
+                                                limits_changed = true;
                                             }
                                         });
                                         ui.horizontal(|ui| {
                                             ui.label("Upper:");
                                             if ui
-                                                .add(DragValue::new(&mut limits.upper).speed(0.01))
+                                                .add(
+                                                    DragValue::new(&mut limits_copy.upper)
+                                                        .speed(0.01),
+                                                )
                                                 .changed()
                                             {
-                                                changed = true;
+                                                limits_changed = true;
                                             }
                                         });
                                         ui.horizontal(|ui| {
                                             ui.label("Effort:");
                                             if ui
-                                                .add(DragValue::new(&mut limits.effort).speed(1.0))
+                                                .add(
+                                                    DragValue::new(&mut limits_copy.effort)
+                                                        .speed(1.0),
+                                                )
                                                 .changed()
                                             {
-                                                changed = true;
+                                                limits_changed = true;
                                             }
                                         });
                                         ui.horizontal(|ui| {
                                             ui.label("Velocity:");
                                             if ui
                                                 .add(
-                                                    DragValue::new(&mut limits.velocity).speed(0.1),
+                                                    DragValue::new(&mut limits_copy.velocity)
+                                                        .speed(0.1),
                                                 )
                                                 .changed()
                                             {
-                                                changed = true;
+                                                limits_changed = true;
                                             }
                                         });
                                     });
+
+                                    if limits_changed {
+                                        point.limits = Some(limits_copy);
+                                        ctx.joint_point_actions
+                                            .push(JointPointAction::Update(point.clone()));
+                                        changed = true;
+                                    }
                                 } else {
                                     point.limits = None;
                                 }
@@ -212,7 +256,7 @@ impl PropertyComponent for JointPointsComponent {
                                 // Delete button
                                 ui.separator();
                                 if ui.button("Delete").clicked() {
-                                    point_to_remove = Some(point.id);
+                                    point_to_remove = Some(point_id);
                                 }
                             });
 
@@ -225,11 +269,12 @@ impl PropertyComponent for JointPointsComponent {
 
         // Handle remove action
         if let Some(point_id) = point_to_remove {
-            ctx.part.remove_joint_point(point_id);
+            ctx.joint_point_actions
+                .push(JointPointAction::Remove(point_id));
             changed = true;
         }
 
-        if ctx.part.joint_points.is_empty() {
+        if ctx.joint_points.is_empty() {
             ui.weak("No joint points defined.\nClick 'Add Joint Point' to create one.");
         }
 

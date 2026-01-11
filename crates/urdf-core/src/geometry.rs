@@ -5,18 +5,34 @@ use serde::{Deserialize, Serialize};
 /// Geometry type for visual/collision elements
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GeometryType {
-    Mesh,
-    Box { size: [f32; 3] },
-    Cylinder { radius: f32, length: f32 },
-    Sphere { radius: f32 },
-    Capsule { radius: f32, length: f32 },
+    /// Mesh geometry with optional path
+    Mesh {
+        path: Option<String>,
+    },
+    Box {
+        size: [f32; 3],
+    },
+    Cylinder {
+        radius: f32,
+        length: f32,
+    },
+    Sphere {
+        radius: f32,
+    },
+    Capsule {
+        radius: f32,
+        length: f32,
+    },
 }
 
 impl GeometryType {
     /// Convert to URDF XML string for export
-    pub fn to_urdf_xml(&self) -> String {
+    pub fn to_urdf_xml(&self, mesh_uri: Option<&str>) -> String {
         match self {
-            GeometryType::Mesh => "<!-- mesh -->".to_string(),
+            GeometryType::Mesh { path } => {
+                let uri = mesh_uri.or(path.as_deref()).unwrap_or("");
+                format!("<mesh filename=\"{}\"/>", uri)
+            }
             GeometryType::Box { size } => {
                 format!("<box size=\"{} {} {}\"/>", size[0], size[1], size[2])
             }
@@ -32,12 +48,19 @@ impl GeometryType {
             }
         }
     }
+
+    /// Check if this is a mesh geometry
+    pub fn is_mesh(&self) -> bool {
+        matches!(self, GeometryType::Mesh { .. })
+    }
 }
 
 impl From<&urdf_rs::Geometry> for GeometryType {
     fn from(geometry: &urdf_rs::Geometry) -> Self {
         match geometry {
-            urdf_rs::Geometry::Mesh { .. } => GeometryType::Mesh,
+            urdf_rs::Geometry::Mesh { filename, .. } => GeometryType::Mesh {
+                path: Some(filename.clone()),
+            },
             urdf_rs::Geometry::Box { size } => GeometryType::Box {
                 size: [size.0[0] as f32, size.0[1] as f32, size.0[2] as f32],
             },

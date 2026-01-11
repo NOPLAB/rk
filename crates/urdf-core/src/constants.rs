@@ -14,6 +14,3 @@ pub const SPHERE_LON_SEGMENTS: u32 = 32;
 
 /// Default color for parts and visuals (gray, RGBA)
 pub const DEFAULT_COLOR: [f32; 4] = [0.5, 0.5, 0.5, 1.0];
-
-/// Maximum joint points per part
-pub use crate::part::MAX_JOINT_POINTS;

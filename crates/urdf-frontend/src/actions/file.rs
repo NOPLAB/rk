@@ -199,7 +199,22 @@ fn sync_joint_points_from_assembly(project: &mut Project) {
     use glam::Vec3;
     use urdf_core::JointPoint;
 
-    for joint in project.assembly.joints.values_mut() {
+    // Collect information about joints that need joint points
+    struct JointPointInfo {
+        joint_id: uuid::Uuid,
+        is_parent: bool,
+        part_id: uuid::Uuid,
+        name: String,
+        position: Vec3,
+        orientation: glam::Quat,
+        joint_type: urdf_core::JointType,
+        axis: Vec3,
+        limits: Option<urdf_core::JointLimits>,
+    }
+
+    let mut to_create: Vec<JointPointInfo> = Vec::new();
+
+    for (joint_id, joint) in &project.assembly.joints {
         // Get link names for naming joint points
         let parent_link_name = project
             .assembly
@@ -229,10 +244,11 @@ fn sync_joint_points_from_assembly(project: &mut Project) {
         // Create joint point on parent part if not exists
         if joint.parent_joint_point.is_none()
             && let Some(part_id) = parent_part_id
-            && let Some(part) = project.parts.iter_mut().find(|p| p.id == part_id)
         {
-            let jp = JointPoint {
-                id: uuid::Uuid::new_v4(),
+            to_create.push(JointPointInfo {
+                joint_id: *joint_id,
+                is_parent: true,
+                part_id,
                 name: format!("joint_to_{}", child_link_name),
                 position: Vec3::new(
                     joint.origin.xyz[0],
@@ -248,29 +264,48 @@ fn sync_joint_points_from_assembly(project: &mut Project) {
                 joint_type: joint.joint_type,
                 axis: joint.axis,
                 limits: joint.limits,
-            };
-            let jp_id = jp.id;
-            part.joint_points.push(jp);
-            joint.parent_joint_point = Some(jp_id);
+            });
         }
 
         // Create joint point on child part if not exists
         if joint.child_joint_point.is_none()
             && let Some(part_id) = child_part_id
-            && let Some(part) = project.parts.iter_mut().find(|p| p.id == part_id)
         {
-            let jp = JointPoint {
-                id: uuid::Uuid::new_v4(),
+            to_create.push(JointPointInfo {
+                joint_id: *joint_id,
+                is_parent: false,
+                part_id,
                 name: format!("joint_from_{}", parent_link_name),
                 position: Vec3::ZERO,
                 orientation: glam::Quat::IDENTITY,
                 joint_type: joint.joint_type,
                 axis: joint.axis,
                 limits: joint.limits,
-            };
-            let jp_id = jp.id;
-            part.joint_points.push(jp);
-            joint.child_joint_point = Some(jp_id);
+            });
+        }
+    }
+
+    // Now apply the changes
+    for info in to_create {
+        let jp = JointPoint {
+            id: uuid::Uuid::new_v4(),
+            name: info.name,
+            part_id: info.part_id,
+            position: info.position,
+            orientation: info.orientation,
+            joint_type: info.joint_type,
+            axis: info.axis,
+            limits: info.limits,
+        };
+        let jp_id = jp.id;
+        project.assembly.add_joint_point(jp);
+
+        if let Some(joint) = project.assembly.joints.get_mut(&info.joint_id) {
+            if info.is_parent {
+                joint.parent_joint_point = Some(jp_id);
+            } else {
+                joint.child_joint_point = Some(jp_id);
+            }
         }
     }
 }

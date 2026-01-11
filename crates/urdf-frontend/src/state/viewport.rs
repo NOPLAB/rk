@@ -186,9 +186,13 @@ impl ViewportState {
     }
 
     /// Update joint point markers for a part
-    pub fn update_markers_for_part(&mut self, part: &Part, selected_point: Option<usize>) {
-        let instances: Vec<MarkerInstance> = part
-            .joint_points
+    pub fn update_markers_for_part(
+        &mut self,
+        part: &Part,
+        joint_points: &[urdf_core::JointPoint],
+        selected_point: Option<usize>,
+    ) {
+        let instances: Vec<MarkerInstance> = joint_points
             .iter()
             .enumerate()
             .map(|(i, jp)| {
@@ -243,8 +247,13 @@ impl ViewportState {
     }
 
     /// Show gizmo for a joint point
-    pub fn show_gizmo_for_joint_point(&mut self, part: &Part, point_idx: usize) {
-        if let Some(jp) = part.joint_points.get(point_idx) {
+    pub fn show_gizmo_for_joint_point(
+        &mut self,
+        part: &Part,
+        joint_points: &[urdf_core::JointPoint],
+        point_idx: usize,
+    ) {
+        if let Some(jp) = joint_points.get(point_idx) {
             // Transform joint point position by part's origin transform
             let world_pos = part.origin_transform.transform_point3(jp.position);
 

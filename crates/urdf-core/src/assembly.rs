@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::geometry::GeometryType;
 use crate::inertia::InertiaMatrix;
-use crate::part::{JointLimits, JointType, Part};
+use crate::part::{JointLimits, JointPoint, JointType, Part};
 
 /// A link in the robot assembly
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,10 +20,10 @@ pub struct Link {
     /// Transform of this link in world space (computed)
     #[serde(skip)]
     pub world_transform: Mat4,
-    /// Visual properties
-    pub visual: VisualProperties,
-    /// Collision properties
-    pub collision: CollisionProperties,
+    /// Visual elements
+    pub visuals: Vec<VisualElement>,
+    /// Collision elements
+    pub collisions: Vec<CollisionElement>,
     /// Inertial properties
     pub inertial: InertialProperties,
 }
@@ -36,8 +36,8 @@ impl Link {
             name: name.into(),
             part_id: None,
             world_transform: Mat4::IDENTITY,
-            visual: VisualProperties::default(),
-            collision: CollisionProperties::default(),
+            visuals: Vec::new(),
+            collisions: Vec::new(),
             inertial: InertialProperties {
                 origin: Pose::default(),
                 mass: 0.0,
@@ -53,13 +53,14 @@ impl Link {
             name: part.name.clone(),
             part_id: Some(part.id),
             world_transform: Mat4::IDENTITY,
-            visual: VisualProperties {
+            visuals: vec![VisualElement {
+                name: None,
                 origin: Pose::default(),
                 color: part.color,
                 material_name: part.material_name.clone(),
-                elements: Vec::new(),
-            },
-            collision: CollisionProperties::default(),
+                geometry: GeometryType::Mesh { path: None },
+            }],
+            collisions: vec![CollisionElement::default()],
             inertial: InertialProperties {
                 origin: Pose::default(),
                 mass: part.mass,
@@ -77,8 +78,8 @@ pub struct VisualElement {
     pub origin: Pose,
     pub color: [f32; 4],
     pub material_name: Option<String>,
-    /// Geometry type (for primitive shapes)
-    pub geometry: Option<GeometryType>,
+    /// Geometry type
+    pub geometry: GeometryType,
 }
 
 impl Default for VisualElement {
@@ -88,79 +89,28 @@ impl Default for VisualElement {
             origin: Pose::default(),
             color: [0.5, 0.5, 0.5, 1.0],
             material_name: None,
-            geometry: None,
+            geometry: GeometryType::Mesh { path: None },
         }
     }
 }
 
 /// Single collision element for a link
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollisionElement {
     /// Optional name for this collision element
     pub name: Option<String>,
     pub origin: Pose,
-    /// Geometry type (for primitive shapes)
-    pub geometry: Option<GeometryType>,
+    /// Geometry type
+    pub geometry: GeometryType,
 }
 
-/// Visual properties for a link (supports multiple visual elements)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VisualProperties {
-    /// Primary visual element (for backward compatibility)
-    pub origin: Pose,
-    pub color: [f32; 4],
-    pub material_name: Option<String>,
-    /// Additional visual elements (if any)
-    #[serde(default)]
-    pub elements: Vec<VisualElement>,
-}
-
-impl Default for VisualProperties {
+impl Default for CollisionElement {
     fn default() -> Self {
         Self {
+            name: None,
             origin: Pose::default(),
-            color: [0.5, 0.5, 0.5, 1.0],
-            material_name: None,
-            elements: Vec::new(),
+            geometry: GeometryType::Mesh { path: None },
         }
-    }
-}
-
-impl VisualProperties {
-    /// Get all visual elements (including primary)
-    pub fn all_elements(&self) -> Vec<VisualElement> {
-        let mut result = vec![VisualElement {
-            name: None,
-            origin: self.origin,
-            color: self.color,
-            material_name: self.material_name.clone(),
-            geometry: None,
-        }];
-        result.extend(self.elements.clone());
-        result
-    }
-}
-
-/// Collision properties for a link (supports multiple collision elements)
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CollisionProperties {
-    /// Primary collision element (for backward compatibility)
-    pub origin: Pose,
-    /// Additional collision elements (if any)
-    #[serde(default)]
-    pub elements: Vec<CollisionElement>,
-}
-
-impl CollisionProperties {
-    /// Get all collision elements (including primary)
-    pub fn all_elements(&self) -> Vec<CollisionElement> {
-        let mut result = vec![CollisionElement {
-            name: None,
-            origin: self.origin,
-            geometry: None,
-        }];
-        result.extend(self.elements.clone());
-        result
     }
 }
 
@@ -252,38 +202,28 @@ pub struct Joint {
 /// Makes this joint follow another joint's position: value = multiplier * other_joint + offset
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JointMimic {
-    /// Name of the joint to mimic
-    pub joint: String,
+    /// ID of the joint to mimic
+    pub joint_id: Uuid,
     /// Multiplier applied to the mimicked joint's position (default: 1.0)
     pub multiplier: f32,
     /// Offset added after multiplication (default: 0.0)
     pub offset: f32,
 }
 
-impl Default for JointMimic {
-    fn default() -> Self {
-        Self {
-            joint: String::new(),
-            multiplier: 1.0,
-            offset: 0.0,
-        }
-    }
-}
-
 impl JointMimic {
     /// Create a new mimic configuration
-    pub fn new(joint: impl Into<String>) -> Self {
+    pub fn new(joint_id: Uuid) -> Self {
         Self {
-            joint: joint.into(),
+            joint_id,
             multiplier: 1.0,
             offset: 0.0,
         }
     }
 
     /// Create a new mimic configuration with multiplier and offset
-    pub fn with_params(joint: impl Into<String>, multiplier: f32, offset: f32) -> Self {
+    pub fn with_params(joint_id: Uuid, multiplier: f32, offset: f32) -> Self {
         Self {
-            joint: joint.into(),
+            joint_id,
             multiplier,
             offset,
         }
@@ -464,19 +404,14 @@ impl JointBuilder {
     }
 
     /// Set mimic configuration to follow another joint
-    pub fn mimic(mut self, joint_name: impl Into<String>) -> Self {
-        self.mimic = Some(JointMimic::new(joint_name));
+    pub fn mimic(mut self, joint_id: Uuid) -> Self {
+        self.mimic = Some(JointMimic::new(joint_id));
         self
     }
 
     /// Set mimic configuration with multiplier and offset
-    pub fn mimic_with_params(
-        mut self,
-        joint_name: impl Into<String>,
-        multiplier: f32,
-        offset: f32,
-    ) -> Self {
-        self.mimic = Some(JointMimic::with_params(joint_name, multiplier, offset));
+    pub fn mimic_with_params(mut self, joint_id: Uuid, multiplier: f32, offset: f32) -> Self {
+        self.mimic = Some(JointMimic::with_params(joint_id, multiplier, offset));
         self
     }
 
@@ -537,10 +472,18 @@ pub struct Assembly {
     pub links: HashMap<Uuid, Link>,
     /// All joints
     pub joints: HashMap<Uuid, Joint>,
+    /// All joint points (managed by assembly, not by parts)
+    pub joint_points: HashMap<Uuid, JointPoint>,
     /// Children mapping: parent_link -> [(joint_id, child_link)]
     pub children: HashMap<Uuid, Vec<(Uuid, Uuid)>>,
     /// Parent mapping: child_link -> (joint_id, parent_link)
     pub parent: HashMap<Uuid, (Uuid, Uuid)>,
+    /// Name to ID index for links (O(1) lookup)
+    #[serde(skip)]
+    link_name_index: HashMap<String, Uuid>,
+    /// Name to ID index for joints (O(1) lookup)
+    #[serde(skip)]
+    joint_name_index: HashMap<String, Uuid>,
 }
 
 impl Default for Assembly {
@@ -557,14 +500,30 @@ impl Assembly {
             root_link: None,
             links: HashMap::new(),
             joints: HashMap::new(),
+            joint_points: HashMap::new(),
             children: HashMap::new(),
             parent: HashMap::new(),
+            link_name_index: HashMap::new(),
+            joint_name_index: HashMap::new(),
+        }
+    }
+
+    /// Rebuild name indices (call after deserialization)
+    pub fn rebuild_indices(&mut self) {
+        self.link_name_index.clear();
+        self.joint_name_index.clear();
+        for (id, link) in &self.links {
+            self.link_name_index.insert(link.name.clone(), *id);
+        }
+        for (id, joint) in &self.joints {
+            self.joint_name_index.insert(joint.name.clone(), *id);
         }
     }
 
     /// Add a link to the assembly (does not automatically set as root)
     pub fn add_link(&mut self, link: Link) -> Uuid {
         let id = link.id;
+        self.link_name_index.insert(link.name.clone(), id);
         self.links.insert(id, link);
         id
     }
@@ -588,14 +547,28 @@ impl Assembly {
             i += 1;
         }
 
+        // Collect part IDs for joint point cleanup
+        let part_ids: Vec<Uuid> = to_remove
+            .iter()
+            .filter_map(|link_id| self.links.get(link_id).and_then(|l| l.part_id))
+            .collect();
+
         // Remove all collected links and their joints
         for link_id in &to_remove {
-            self.links.remove(link_id);
+            if let Some(link) = self.links.remove(link_id) {
+                self.link_name_index.remove(&link.name);
+            }
             self.children.remove(link_id);
-            if let Some((joint_id, _)) = self.parent.remove(link_id) {
-                self.joints.remove(&joint_id);
+            if let Some((joint_id, _)) = self.parent.remove(link_id)
+                && let Some(joint) = self.joints.remove(&joint_id)
+            {
+                self.joint_name_index.remove(&joint.name);
             }
         }
+
+        // Remove associated joint points
+        self.joint_points
+            .retain(|_, jp| !part_ids.contains(&jp.part_id));
 
         // Clean up children references
         for children in self.children.values_mut() {
@@ -637,7 +610,8 @@ impl Assembly {
 
         let joint_id = joint.id;
 
-        // Add joint
+        // Add joint and update name index
+        self.joint_name_index.insert(joint.name.clone(), joint_id);
         self.joints.insert(joint_id, joint);
 
         // Update mappings
@@ -667,11 +641,12 @@ impl Assembly {
             children.retain(|(_, cid)| *cid != child_id);
         }
 
-        // Remove joint
+        // Remove joint and update name index
         let joint = self
             .joints
             .remove(&joint_id)
             .ok_or(AssemblyError::JointNotFound(joint_id))?;
+        self.joint_name_index.remove(&joint.name);
 
         Ok(joint)
     }
@@ -900,14 +875,28 @@ impl Assembly {
         self.joints.get(&joint_id).map(|j| j.name.as_str())
     }
 
-    /// Find a link by name
+    /// Find a link by name (O(1) lookup)
     pub fn find_link_by_name(&self, name: &str) -> Option<&Link> {
-        self.links.values().find(|l| l.name == name)
+        self.link_name_index
+            .get(name)
+            .and_then(|id| self.links.get(id))
     }
 
-    /// Find a joint by name
+    /// Find a joint by name (O(1) lookup)
     pub fn find_joint_by_name(&self, name: &str) -> Option<&Joint> {
-        self.joints.values().find(|j| j.name == name)
+        self.joint_name_index
+            .get(name)
+            .and_then(|id| self.joints.get(id))
+    }
+
+    /// Find a link ID by name (O(1) lookup)
+    pub fn find_link_id_by_name(&self, name: &str) -> Option<Uuid> {
+        self.link_name_index.get(name).copied()
+    }
+
+    /// Find a joint ID by name (O(1) lookup)
+    pub fn find_joint_id_by_name(&self, name: &str) -> Option<Uuid> {
+        self.joint_name_index.get(name).copied()
     }
 
     /// Find a link by its associated part ID
@@ -1029,6 +1018,43 @@ impl Assembly {
     pub fn is_empty(&self) -> bool {
         self.links.is_empty()
     }
+
+    // ============== Joint Point Management ==============
+
+    /// Add a joint point to the assembly
+    pub fn add_joint_point(&mut self, joint_point: JointPoint) -> Uuid {
+        let id = joint_point.id;
+        self.joint_points.insert(id, joint_point);
+        id
+    }
+
+    /// Remove a joint point by ID
+    pub fn remove_joint_point(&mut self, id: Uuid) -> Option<JointPoint> {
+        self.joint_points.remove(&id)
+    }
+
+    /// Get a joint point by ID
+    pub fn get_joint_point(&self, id: Uuid) -> Option<&JointPoint> {
+        self.joint_points.get(&id)
+    }
+
+    /// Get a mutable joint point by ID
+    pub fn get_joint_point_mut(&mut self, id: Uuid) -> Option<&mut JointPoint> {
+        self.joint_points.get_mut(&id)
+    }
+
+    /// Get all joint points for a specific part
+    pub fn get_joint_points_for_part(&self, part_id: Uuid) -> Vec<&JointPoint> {
+        self.joint_points
+            .values()
+            .filter(|jp| jp.part_id == part_id)
+            .collect()
+    }
+
+    /// Count total number of joint points
+    pub fn joint_point_count(&self) -> usize {
+        self.joint_points.len()
+    }
 }
 
 /// Assembly-related errors
@@ -1038,6 +1064,10 @@ pub enum AssemblyError {
     LinkNotFound(Uuid),
     #[error("Joint not found: {0}")]
     JointNotFound(Uuid),
+    #[error("Joint point not found: {0}")]
+    JointPointNotFound(Uuid),
+    #[error("Part not found: {0}")]
+    PartNotFound(Uuid),
     #[error("Connection would create a cycle")]
     WouldCreateCycle,
     #[error("Link already has a parent: {0}")]

@@ -209,13 +209,22 @@ impl Panel for ViewportPanel {
                 GizmoTransform::Translation(delta) => {
                     if let Some(joint_idx) = selected_joint_point {
                         // Moving a joint point - update joint point position in local space
-                        if let Some(part) = app.get_part_mut(part_id)
-                            && let Some(jp) = part.joint_points.get_mut(joint_idx)
+                        // Get the joint point ID from the index
+                        let joint_points: Vec<_> = app
+                            .project
+                            .assembly
+                            .get_joint_points_for_part(part_id)
+                            .into_iter()
+                            .map(|jp| jp.id)
+                            .collect();
+                        if let Some(&jp_id) = joint_points.get(joint_idx)
+                            && let Some(part) = app.get_part(part_id)
                         {
-                            // Convert world delta to local delta using inverse transform
                             let inv_transform = part.origin_transform.inverse();
                             let local_delta = inv_transform.transform_vector3(delta);
-                            jp.position += local_delta;
+                            if let Some(jp) = app.project.assembly.get_joint_point_mut(jp_id) {
+                                jp.position += local_delta;
+                            }
                         }
                         drop(app);
                     } else {

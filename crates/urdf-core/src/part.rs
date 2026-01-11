@@ -6,9 +6,6 @@ use uuid::Uuid;
 
 use crate::inertia::InertiaMatrix;
 
-/// Maximum number of joint points per part
-pub const MAX_JOINT_POINTS: usize = 8;
-
 /// A part loaded from an STL file with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Part {
@@ -24,8 +21,6 @@ pub struct Part {
     pub indices: Vec<u32>,
     /// Transform applied to original mesh (origin adjustment)
     pub origin_transform: Mat4,
-    /// Joint connection points (max 8)
-    pub joint_points: Vec<JointPoint>,
     /// Mass in kg
     pub mass: f32,
     /// Inertia tensor
@@ -53,7 +48,6 @@ impl Part {
             normals: Vec::new(),
             indices: Vec::new(),
             origin_transform: Mat4::IDENTITY,
-            joint_points: Vec::new(),
             mass: 1.0,
             inertia: InertiaMatrix::default(),
             bbox_min: [0.0; 3],
@@ -103,64 +97,6 @@ impl Part {
             self.bbox_max[2] - self.bbox_min[2],
         )
     }
-
-    /// Add a joint point
-    pub fn add_joint_point(&mut self, point: JointPoint) -> Result<(), PartError> {
-        if self.joint_points.len() >= MAX_JOINT_POINTS {
-            return Err(PartError::MaxJointPointsReached);
-        }
-        self.joint_points.push(point);
-        Ok(())
-    }
-
-    /// Remove a joint point by ID
-    pub fn remove_joint_point(&mut self, id: Uuid) -> Option<JointPoint> {
-        if let Some(pos) = self.joint_points.iter().position(|p| p.id == id) {
-            Some(self.joint_points.remove(pos))
-        } else {
-            None
-        }
-    }
-
-    /// Get a joint point by ID
-    pub fn get_joint_point(&self, id: Uuid) -> Option<&JointPoint> {
-        self.joint_points.iter().find(|p| p.id == id)
-    }
-
-    /// Get a mutable joint point by ID
-    pub fn get_joint_point_mut(&mut self, id: Uuid) -> Option<&mut JointPoint> {
-        self.joint_points.iter_mut().find(|p| p.id == id)
-    }
-
-    /// Get read-only access to joint points slice
-    pub fn joint_points(&self) -> &[JointPoint] {
-        &self.joint_points
-    }
-
-    /// Get mutable access to joint points (for batch operations)
-    pub fn joint_points_mut(&mut self) -> &mut Vec<JointPoint> {
-        &mut self.joint_points
-    }
-
-    /// Number of joint points
-    pub fn joint_point_count(&self) -> usize {
-        self.joint_points.len()
-    }
-
-    /// Check if more joint points can be added
-    pub fn can_add_joint_point(&self) -> bool {
-        self.joint_points.len() < MAX_JOINT_POINTS
-    }
-
-    /// Find a joint point by name
-    pub fn find_joint_point_by_name(&self, name: &str) -> Option<&JointPoint> {
-        self.joint_points.iter().find(|p| p.name == name)
-    }
-
-    /// Find a mutable joint point by name
-    pub fn find_joint_point_by_name_mut(&mut self, name: &str) -> Option<&mut JointPoint> {
-        self.joint_points.iter_mut().find(|p| p.name == name)
-    }
 }
 
 /// Joint connection point on a part
@@ -168,6 +104,8 @@ impl Part {
 pub struct JointPoint {
     pub id: Uuid,
     pub name: String,
+    /// Reference to the part this joint point belongs to
+    pub part_id: Uuid,
     /// Position relative to part origin
     pub position: Vec3,
     /// Orientation relative to part
@@ -182,10 +120,11 @@ pub struct JointPoint {
 
 impl JointPoint {
     /// Create a new joint point at the given position
-    pub fn new(name: impl Into<String>, position: Vec3) -> Self {
+    pub fn new(name: impl Into<String>, part_id: Uuid, position: Vec3) -> Self {
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
+            part_id,
             position,
             orientation: Quat::IDENTITY,
             joint_type: JointType::Fixed,
@@ -195,10 +134,11 @@ impl JointPoint {
     }
 
     /// Create a revolute joint point
-    pub fn revolute(name: impl Into<String>, position: Vec3, axis: Vec3) -> Self {
+    pub fn revolute(name: impl Into<String>, part_id: Uuid, position: Vec3, axis: Vec3) -> Self {
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
+            part_id,
             position,
             orientation: Quat::IDENTITY,
             joint_type: JointType::Revolute,
@@ -337,13 +277,4 @@ pub struct MirrorPair {
 pub enum MirrorSide {
     Left,
     Right,
-}
-
-/// Part-related errors
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum PartError {
-    #[error("Maximum number of joint points ({}) reached", MAX_JOINT_POINTS)]
-    MaxJointPointsReached,
-    #[error("Joint point not found: {0}")]
-    JointPointNotFound(Uuid),
 }

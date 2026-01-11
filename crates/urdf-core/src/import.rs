@@ -9,8 +9,8 @@ use glam::Vec3;
 use uuid::Uuid;
 
 use crate::assembly::{
-    Assembly, CollisionElement, CollisionProperties, InertialProperties, Joint, JointDynamics,
-    JointMimic, Link, Pose, VisualElement, VisualProperties,
+    Assembly, CollisionElement, InertialProperties, Joint, JointDynamics, JointMimic, Link, Pose,
+    VisualElement,
 };
 use crate::geometry::GeometryType;
 use crate::inertia::InertiaMatrix;
@@ -208,7 +208,7 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
         link_name_to_id.insert(urdf_link.name.clone(), link_id);
 
         // Try to load mesh from visual geometry
-        let (part_opt, visual_props) = process_visual_geometry(
+        let (part_opt, visuals) = process_visual_geometry(
             &urdf_link.visual,
             &urdf_link.name,
             &base_dir,
@@ -225,7 +225,7 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
         };
 
         // Process collision properties (supports multiple collision elements)
-        let collision_props = process_collision_geometry(&urdf_link.collision);
+        let collisions = process_collision_geometry(&urdf_link.collision);
 
         // Create Part if we have mesh data
         let part_id = if let Some(mut part) = part_opt {
@@ -246,8 +246,8 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
             name: urdf_link.name.clone(),
             part_id,
             world_transform: glam::Mat4::IDENTITY,
-            visual: visual_props,
-            collision: collision_props,
+            visuals,
+            collisions,
             inertial: inertial_props,
         };
 
@@ -269,16 +269,16 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
     let root_link_id = root_link_name.and_then(|name| link_name_to_id.get(&name).copied());
 
     // Build Assembly
-    let mut assembly = Assembly {
-        name: robot.name.clone(),
-        root_link: root_link_id,
-        links,
-        joints: HashMap::new(),
-        children: HashMap::new(),
-        parent: HashMap::new(),
-    };
+    let mut assembly = Assembly::new(&robot.name);
+    assembly.root_link = root_link_id;
+    assembly.links = links;
+    // Rebuild name indices
+    assembly.rebuild_indices();
 
-    // Process joints
+    // Build joint name to ID mapping for mimic resolution
+    let mut joint_name_to_id: HashMap<String, Uuid> = HashMap::new();
+
+    // First pass: create joints without mimic
     for urdf_joint in &robot.joints {
         let parent_link_id = link_name_to_id
             .get(&urdf_joint.parent.link)
@@ -310,16 +310,13 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
                 damping: d.damping as f32,
                 friction: d.friction as f32,
             }),
-            mimic: urdf_joint.mimic.as_ref().map(|m| JointMimic {
-                joint: m.joint.clone(),
-                multiplier: m.multiplier.unwrap_or(1.0) as f32,
-                offset: m.offset.unwrap_or(0.0) as f32,
-            }),
+            mimic: None, // Will be resolved in second pass
             parent_joint_point: None,
             child_joint_point: None,
         };
 
         let joint_id = joint.id;
+        joint_name_to_id.insert(urdf_joint.name.clone(), joint_id);
         assembly.joints.insert(joint_id, joint);
 
         // Update parent-child relationships
@@ -333,73 +330,115 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
             .insert(*child_link_id, (joint_id, *parent_link_id));
     }
 
-    // Create joint points on parts from joint information
-    for joint in assembly.joints.values_mut() {
-        // Get parent and child link info
-        let parent_part_id = assembly
-            .links
-            .get(&joint.parent_link)
-            .and_then(|l| l.part_id);
-        let child_part_id = assembly
-            .links
-            .get(&joint.child_link)
-            .and_then(|l| l.part_id);
-        let child_link_name = assembly
-            .links
-            .get(&joint.child_link)
-            .map(|l| l.name.clone())
-            .unwrap_or_default();
-        let parent_link_name = assembly
-            .links
-            .get(&joint.parent_link)
-            .map(|l| l.name.clone())
-            .unwrap_or_default();
+    // Second pass: resolve mimic references
+    for urdf_joint in &robot.joints {
+        if let Some(ref mimic) = urdf_joint.mimic
+            && let Some(&mimic_joint_id) = joint_name_to_id.get(&mimic.joint)
+            && let Some(&joint_id) = joint_name_to_id.get(&urdf_joint.name)
+            && let Some(joint) = assembly.joints.get_mut(&joint_id)
+        {
+            joint.mimic = Some(JointMimic {
+                joint_id: mimic_joint_id,
+                multiplier: mimic.multiplier.unwrap_or(1.0) as f32,
+                offset: mimic.offset.unwrap_or(0.0) as f32,
+            });
+        }
+    }
+
+    // Create joint points in assembly from joint information
+    let joint_ids: Vec<Uuid> = assembly.joints.keys().copied().collect();
+    for joint_id in joint_ids {
+        let (
+            parent_part_id,
+            child_part_id,
+            child_link_name,
+            parent_link_name,
+            joint_origin,
+            joint_type,
+            axis,
+            limits,
+        ) = {
+            let joint = assembly.joints.get(&joint_id).unwrap();
+            let parent_part_id = assembly
+                .links
+                .get(&joint.parent_link)
+                .and_then(|l| l.part_id);
+            let child_part_id = assembly
+                .links
+                .get(&joint.child_link)
+                .and_then(|l| l.part_id);
+            let child_link_name = assembly
+                .links
+                .get(&joint.child_link)
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            let parent_link_name = assembly
+                .links
+                .get(&joint.parent_link)
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            (
+                parent_part_id,
+                child_part_id,
+                child_link_name,
+                parent_link_name,
+                joint.origin,
+                joint.joint_type,
+                joint.axis,
+                joint.limits,
+            )
+        };
 
         // Create joint point on parent part (at origin, since joint origin is relative to parent)
-        if let Some(part_id) = parent_part_id
-            && let Some(part) = parts.iter_mut().find(|p| p.id == part_id)
-        {
+        if let Some(part_id) = parent_part_id {
             let jp = crate::part::JointPoint {
                 id: Uuid::new_v4(),
                 name: format!("joint_to_{}", child_link_name),
+                part_id,
                 position: Vec3::new(
-                    joint.origin.xyz[0],
-                    joint.origin.xyz[1],
-                    joint.origin.xyz[2],
+                    joint_origin.xyz[0],
+                    joint_origin.xyz[1],
+                    joint_origin.xyz[2],
                 ),
                 orientation: glam::Quat::from_euler(
                     glam::EulerRot::XYZ,
-                    joint.origin.rpy[0],
-                    joint.origin.rpy[1],
-                    joint.origin.rpy[2],
+                    joint_origin.rpy[0],
+                    joint_origin.rpy[1],
+                    joint_origin.rpy[2],
                 ),
-                joint_type: joint.joint_type,
-                axis: joint.axis,
-                limits: joint.limits,
+                joint_type,
+                axis,
+                limits,
             };
             let jp_id = jp.id;
-            part.joint_points.push(jp);
-            joint.parent_joint_point = Some(jp_id);
+            assembly.joint_points.insert(jp_id, jp);
+            if let Some(joint) = assembly.joints.get_mut(&joint_id) {
+                joint.parent_joint_point = Some(jp_id);
+            }
         }
 
         // Create joint point on child part (at origin of child)
-        if let Some(part_id) = child_part_id
-            && let Some(part) = parts.iter_mut().find(|p| p.id == part_id)
-        {
+        if let Some(part_id) = child_part_id {
             let jp = crate::part::JointPoint {
                 id: Uuid::new_v4(),
                 name: format!("joint_from_{}", parent_link_name),
+                part_id,
                 position: Vec3::ZERO, // Child's joint point is at its own origin
                 orientation: glam::Quat::IDENTITY,
-                joint_type: joint.joint_type,
-                axis: joint.axis,
-                limits: joint.limits,
+                joint_type,
+                axis,
+                limits,
             };
             let jp_id = jp.id;
-            part.joint_points.push(jp);
-            joint.child_joint_point = Some(jp_id);
+            assembly.joint_points.insert(jp_id, jp);
+            if let Some(joint) = assembly.joints.get_mut(&joint_id) {
+                joint.child_joint_point = Some(jp_id);
+            }
         }
     }
+
+    // Rebuild indices after all joints are added
+    assembly.rebuild_indices();
 
     // Update world transforms
     assembly.update_world_transforms();
@@ -436,12 +475,12 @@ fn process_visual_geometry(
     options: &ImportOptions,
     material_colors: &HashMap<String, [f32; 4]>,
     package_paths: &HashMap<String, PathBuf>,
-) -> Result<(Option<Part>, VisualProperties), ImportError> {
+) -> Result<(Option<Part>, Vec<VisualElement>), ImportError> {
     if visuals.is_empty() {
-        return Ok((None, VisualProperties::default()));
+        return Ok((None, Vec::new()));
     }
 
-    // Process first visual element (primary)
+    // Process first visual element (primary) - used to create Part
     let first_visual = &visuals[0];
     let (color, material_name) = extract_material_info(first_visual, material_colors, options);
     let origin = Pose::from(&first_visual.origin);
@@ -462,18 +501,18 @@ fn process_visual_geometry(
         p.origin_transform = origin.to_mat4();
     }
 
-    // Process additional visual elements (if any)
-    let mut additional_elements = Vec::new();
-    for (i, visual) in visuals.iter().skip(1).enumerate() {
+    // Process all visual elements
+    let mut visual_elements = Vec::new();
+    for (i, visual) in visuals.iter().enumerate() {
         let (elem_color, elem_material) = extract_material_info(visual, material_colors, options);
         let elem_origin = Pose::from(&visual.origin);
-        let elem_geometry = Some(GeometryType::from(&visual.geometry));
+        let elem_geometry = GeometryType::from(&visual.geometry);
 
-        additional_elements.push(VisualElement {
+        visual_elements.push(VisualElement {
             name: visual
                 .name
                 .clone()
-                .or_else(|| Some(format!("visual_{}", i + 1))),
+                .or_else(|| Some(format!("visual_{}", i))),
             origin: elem_origin,
             color: elem_color,
             material_name: elem_material,
@@ -481,14 +520,7 @@ fn process_visual_geometry(
         });
     }
 
-    let visual_props = VisualProperties {
-        origin,
-        color,
-        material_name,
-        elements: additional_elements,
-    };
-
-    Ok((part, visual_props))
+    Ok((part, visual_elements))
 }
 
 /// Extract material color and name from a visual element
@@ -612,35 +644,19 @@ fn process_geometry(
 }
 
 /// Process collision geometry elements
-fn process_collision_geometry(collisions: &[urdf_rs::Collision]) -> CollisionProperties {
-    if collisions.is_empty() {
-        return CollisionProperties::default();
-    }
-
-    // First collision element (primary)
-    let first_collision = &collisions[0];
-    let origin = Pose::from(&first_collision.origin);
-
-    // Additional collision elements
-    let mut additional_elements = Vec::new();
-    for (i, collision) in collisions.iter().skip(1).enumerate() {
-        let elem_origin = Pose::from(&collision.origin);
-        let elem_geometry = Some(GeometryType::from(&collision.geometry));
-
-        additional_elements.push(CollisionElement {
+fn process_collision_geometry(collisions: &[urdf_rs::Collision]) -> Vec<CollisionElement> {
+    collisions
+        .iter()
+        .enumerate()
+        .map(|(i, collision)| CollisionElement {
             name: collision
                 .name
                 .clone()
-                .or_else(|| Some(format!("collision_{}", i + 1))),
-            origin: elem_origin,
-            geometry: elem_geometry,
-        });
-    }
-
-    CollisionProperties {
-        origin,
-        elements: additional_elements,
-    }
+                .or_else(|| Some(format!("collision_{}", i))),
+            origin: Pose::from(&collision.origin),
+            geometry: GeometryType::from(&collision.geometry),
+        })
+        .collect()
 }
 
 /// Create a Part from mesh data
