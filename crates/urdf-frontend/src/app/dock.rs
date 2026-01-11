@@ -2,13 +2,14 @@
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
-use crate::panels::{Panel, PartListPanel, PropertiesPanel, ViewportPanel};
+use crate::panels::{JointListPanel, Panel, PartListPanel, PropertiesPanel, ViewportPanel};
 use crate::state::{SharedAppState, SharedViewportState};
 
 /// Panel types for the dock system
 pub enum PanelType {
     Viewport(ViewportPanel),
     PartList(PartListPanel),
+    JointList(JointListPanel),
     Properties(PropertiesPanel),
 }
 
@@ -17,6 +18,7 @@ impl PanelType {
         match self {
             PanelType::Viewport(p) => p.name(),
             PanelType::PartList(p) => p.name(),
+            PanelType::JointList(p) => p.name(),
             PanelType::Properties(p) => p.name(),
         }
     }
@@ -48,6 +50,7 @@ impl TabViewer for UrdfTabViewer<'_> {
                 }
             }
             PanelType::PartList(panel) => panel.ui(ui, self.app_state),
+            PanelType::JointList(panel) => panel.ui(ui, self.app_state),
             PanelType::Properties(panel) => {
                 if let (Some(render_state), Some(viewport_state)) =
                     (self.render_state, self.viewport_state)
@@ -76,10 +79,17 @@ pub fn create_dock_layout() -> DockState<PanelType> {
     );
 
     // Split left for parts list (now includes hierarchy via tree structure)
-    let [_left, _viewport] = surface.split_left(
+    let [left, _viewport] = surface.split_left(
         NodeIndex::root(),
         0.2,
         vec![PanelType::PartList(PartListPanel::new())],
+    );
+
+    // Split left panel vertically to add joints below parts
+    let [_parts, _joints] = surface.split_below(
+        left,
+        0.6, // Parts gets 60%, Joints gets 40%
+        vec![PanelType::JointList(JointListPanel::new())],
     );
 
     dock_state

@@ -53,7 +53,12 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Self {
         let depth_format = wgpu::TextureFormat::Depth32Float;
 
         let camera = Camera::new(width as f32 / height as f32);
@@ -252,7 +257,11 @@ impl Renderer {
 
     fn update_camera(&self, queue: &wgpu::Queue) {
         let camera_uniform = self.camera.uniform();
-        queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));
+        queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_uniform]),
+        );
     }
 
     /// Add a part to the renderer.
@@ -285,18 +294,18 @@ impl Renderer {
     /// Set selected part.
     pub fn set_selected_part(&mut self, queue: &wgpu::Queue, part_id: Option<Uuid>) {
         // Deselect previous
-        if let Some(prev_id) = self.selected_part {
-            if let Some(entry) = self.meshes.get_mut(&prev_id) {
-                entry.data.set_selected(queue, false);
-            }
+        if let Some(prev_id) = self.selected_part
+            && let Some(entry) = self.meshes.get_mut(&prev_id)
+        {
+            entry.data.set_selected(queue, false);
         }
 
         // Select new
         self.selected_part = part_id;
-        if let Some(id) = part_id {
-            if let Some(entry) = self.meshes.get_mut(&id) {
-                entry.data.set_selected(queue, true);
-            }
+        if let Some(id) = part_id
+            && let Some(entry) = self.meshes.get_mut(&id)
+        {
+            entry.data.set_selected(queue, true);
         }
     }
 
@@ -355,12 +364,19 @@ impl Renderer {
     }
 
     /// Hit test gizmo
-    pub fn gizmo_hit_test(&self, ray_origin: glam::Vec3, ray_dir: glam::Vec3, gizmo_pos: glam::Vec3, scale: f32) -> GizmoAxis {
+    pub fn gizmo_hit_test(
+        &self,
+        ray_origin: glam::Vec3,
+        ray_dir: glam::Vec3,
+        gizmo_pos: glam::Vec3,
+        scale: f32,
+    ) -> GizmoAxis {
         // Calculate distance-based scale to match shader behavior
         let camera_distance = (self.camera.position - gizmo_pos).length();
         let distance_scale = camera_distance * 0.15;
         let adjusted_scale = scale * distance_scale;
-        self.gizmo_renderer.hit_test(ray_origin, ray_dir, gizmo_pos, adjusted_scale)
+        self.gizmo_renderer
+            .hit_test(ray_origin, ray_dir, gizmo_pos, adjusted_scale)
     }
 
     /// Set gizmo mode

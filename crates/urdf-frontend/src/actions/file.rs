@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use urdf_core::{import_urdf, load_stl_with_unit, ImportOptions, Project};
+use urdf_core::{ImportOptions, Project, import_urdf, load_stl_with_unit};
 
 use crate::state::AppAction;
 
@@ -227,61 +227,55 @@ fn sync_joint_points_from_assembly(project: &mut Project) {
             .and_then(|l| l.part_id);
 
         // Create joint point on parent part if not exists
-        if joint.parent_joint_point.is_none() {
-            if let Some(part_id) = parent_part_id {
-                if let Some(part) = project.parts.iter_mut().find(|p| p.id == part_id) {
-                    let jp = JointPoint {
-                        id: uuid::Uuid::new_v4(),
-                        name: format!("joint_to_{}", child_link_name),
-                        position: Vec3::new(
-                            joint.origin.xyz[0],
-                            joint.origin.xyz[1],
-                            joint.origin.xyz[2],
-                        ),
-                        orientation: glam::Quat::from_euler(
-                            glam::EulerRot::XYZ,
-                            joint.origin.rpy[0],
-                            joint.origin.rpy[1],
-                            joint.origin.rpy[2],
-                        ),
-                        joint_type: joint.joint_type,
-                        axis: joint.axis,
-                        limits: joint.limits,
-                    };
-                    let jp_id = jp.id;
-                    part.joint_points.push(jp);
-                    joint.parent_joint_point = Some(jp_id);
-                }
-            }
+        if joint.parent_joint_point.is_none()
+            && let Some(part_id) = parent_part_id
+            && let Some(part) = project.parts.iter_mut().find(|p| p.id == part_id)
+        {
+            let jp = JointPoint {
+                id: uuid::Uuid::new_v4(),
+                name: format!("joint_to_{}", child_link_name),
+                position: Vec3::new(
+                    joint.origin.xyz[0],
+                    joint.origin.xyz[1],
+                    joint.origin.xyz[2],
+                ),
+                orientation: glam::Quat::from_euler(
+                    glam::EulerRot::XYZ,
+                    joint.origin.rpy[0],
+                    joint.origin.rpy[1],
+                    joint.origin.rpy[2],
+                ),
+                joint_type: joint.joint_type,
+                axis: joint.axis,
+                limits: joint.limits,
+            };
+            let jp_id = jp.id;
+            part.joint_points.push(jp);
+            joint.parent_joint_point = Some(jp_id);
         }
 
         // Create joint point on child part if not exists
-        if joint.child_joint_point.is_none() {
-            if let Some(part_id) = child_part_id {
-                if let Some(part) = project.parts.iter_mut().find(|p| p.id == part_id) {
-                    let jp = JointPoint {
-                        id: uuid::Uuid::new_v4(),
-                        name: format!("joint_from_{}", parent_link_name),
-                        position: Vec3::ZERO,
-                        orientation: glam::Quat::IDENTITY,
-                        joint_type: joint.joint_type,
-                        axis: joint.axis,
-                        limits: joint.limits,
-                    };
-                    let jp_id = jp.id;
-                    part.joint_points.push(jp);
-                    joint.child_joint_point = Some(jp_id);
-                }
-            }
+        if joint.child_joint_point.is_none()
+            && let Some(part_id) = child_part_id
+            && let Some(part) = project.parts.iter_mut().find(|p| p.id == part_id)
+        {
+            let jp = JointPoint {
+                id: uuid::Uuid::new_v4(),
+                name: format!("joint_from_{}", parent_link_name),
+                position: Vec3::ZERO,
+                orientation: glam::Quat::IDENTITY,
+                joint_type: joint.joint_type,
+                axis: joint.axis,
+                limits: joint.limits,
+            };
+            let jp_id = jp.id;
+            part.joint_points.push(jp);
+            joint.child_joint_point = Some(jp_id);
         }
     }
 }
 
-fn handle_export_urdf(
-    path: std::path::PathBuf,
-    robot_name: String,
-    ctx: &ActionContext,
-) {
+fn handle_export_urdf(path: std::path::PathBuf, robot_name: String, ctx: &ActionContext) {
     let state = ctx.app_state.lock();
     let options = urdf_core::ExportOptions {
         output_dir: path,

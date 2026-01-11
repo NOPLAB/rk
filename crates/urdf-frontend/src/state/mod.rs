@@ -57,6 +57,22 @@ pub enum AppAction {
     ConnectParts { parent: Uuid, child: Uuid },
     /// Disconnect a part from its parent
     DisconnectPart { child: Uuid },
+
+    // Joint position actions
+    /// Update a joint position (value in radians for revolute, meters for prismatic)
+    UpdateJointPosition { joint_id: Uuid, position: f32 },
+    /// Reset a joint position to 0
+    ResetJointPosition { joint_id: Uuid },
+    /// Reset all joint positions to 0
+    ResetAllJointPositions,
+}
+
+/// Angle display mode for joint sliders
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AngleDisplayMode {
+    #[default]
+    Degrees,
+    Radians,
 }
 
 /// Application state
@@ -87,6 +103,10 @@ pub struct AppState {
     pub show_joint_markers: bool,
     /// Global unit setting for STL import and other operations
     pub stl_import_unit: StlUnit,
+    /// Current joint positions (joint_id -> position in radians or meters)
+    pub joint_positions: HashMap<Uuid, f32>,
+    /// Angle display mode for joint sliders
+    pub angle_display_mode: AngleDisplayMode,
 }
 
 impl Default for AppState {
@@ -105,6 +125,42 @@ impl Default for AppState {
             show_part_axes: true,
             show_joint_markers: true,
             stl_import_unit: StlUnit::Millimeters,
+            joint_positions: HashMap::new(),
+            angle_display_mode: AngleDisplayMode::default(),
+        }
+    }
+}
+
+impl AngleDisplayMode {
+    /// Toggle between degrees and radians
+    pub fn toggle(&mut self) {
+        *self = match self {
+            AngleDisplayMode::Degrees => AngleDisplayMode::Radians,
+            AngleDisplayMode::Radians => AngleDisplayMode::Degrees,
+        };
+    }
+
+    /// Convert radians to display value
+    pub fn from_radians(&self, radians: f32) -> f32 {
+        match self {
+            AngleDisplayMode::Degrees => radians.to_degrees(),
+            AngleDisplayMode::Radians => radians,
+        }
+    }
+
+    /// Convert display value to radians
+    pub fn to_radians(&self, value: f32) -> f32 {
+        match self {
+            AngleDisplayMode::Degrees => value.to_radians(),
+            AngleDisplayMode::Radians => value,
+        }
+    }
+
+    /// Get the suffix for display
+    pub fn suffix(&self) -> &'static str {
+        match self {
+            AngleDisplayMode::Degrees => "\u{00b0}",
+            AngleDisplayMode::Radians => " rad",
         }
     }
 }
@@ -171,6 +227,7 @@ impl AppState {
         self.selected_joint_point = None;
         self.project_path = None;
         self.modified = false;
+        self.joint_positions.clear();
     }
 
     /// Load a project
@@ -184,6 +241,27 @@ impl AppState {
         self.selected_part = None;
         self.selected_joint_point = None;
         self.modified = false;
+        self.joint_positions.clear();
+    }
+
+    /// Set a joint position (in radians for revolute, meters for prismatic)
+    pub fn set_joint_position(&mut self, joint_id: Uuid, position: f32) {
+        self.joint_positions.insert(joint_id, position);
+    }
+
+    /// Get a joint position (defaults to 0.0)
+    pub fn get_joint_position(&self, joint_id: Uuid) -> f32 {
+        self.joint_positions.get(&joint_id).copied().unwrap_or(0.0)
+    }
+
+    /// Reset a joint position to 0
+    pub fn reset_joint_position(&mut self, joint_id: Uuid) {
+        self.joint_positions.remove(&joint_id);
+    }
+
+    /// Reset all joint positions to 0
+    pub fn reset_all_joint_positions(&mut self) {
+        self.joint_positions.clear();
     }
 }
 

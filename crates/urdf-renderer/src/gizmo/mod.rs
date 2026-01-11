@@ -225,12 +225,11 @@ impl GizmoRenderer {
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
-        let translate_index_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Gizmo Translate Index Buffer"),
-                contents: bytemuck::cast_slice(&translate_indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+        let translate_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Gizmo Translate Index Buffer"),
+            contents: bytemuck::cast_slice(&translate_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
 
         // Rotation gizmo geometry
         let (rotate_vertices, rotate_indices) = generate_rotation_gizmo();
@@ -383,11 +382,10 @@ impl GizmoRenderer {
                 axis_start,
                 axis_end,
                 handle_radius,
-            ) {
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_axis = axis;
-                }
+            ) && dist < closest_dist
+            {
+                closest_dist = dist;
+                closest_axis = axis;
             }
         }
 
@@ -419,11 +417,10 @@ impl GizmoRenderer {
                 normal,
                 ring_radius,
                 hit_thickness,
-            ) {
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_axis = axis;
-                }
+            ) && dist < closest_dist
+            {
+                closest_dist = dist;
+                closest_axis = axis;
             }
         }
 

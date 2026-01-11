@@ -10,7 +10,7 @@ use crate::panels::Panel;
 use crate::state::{AppAction, SharedAppState};
 
 use toolbar::{render_unit_selector, show_tree_context_menu};
-use tree::{build_tree_structure, can_connect, TreeAction};
+use tree::{TreeAction, build_tree_structure, can_connect};
 
 /// Part list panel with drag-and-drop hierarchy
 pub struct PartListPanel {
@@ -67,11 +67,8 @@ impl PartListPanel {
 
         // Draw selection background
         if is_selected {
-            ui.painter().rect_filled(
-                response.rect,
-                2.0,
-                ui.visuals().selection.bg_fill,
-            );
+            ui.painter()
+                .rect_filled(response.rect, 2.0, ui.visuals().selection.bg_fill);
         }
 
         // Context menu
@@ -92,10 +89,11 @@ impl PartListPanel {
         }
 
         // Handle as drop target when something else is being dragged
-        if let Some(dragging) = self.dragging_part {
-            if dragging != part_id && response.hovered() {
-                self.drop_target = Some(part_id);
-            }
+        if let Some(dragging) = self.dragging_part
+            && dragging != part_id
+            && response.hovered()
+        {
+            self.drop_target = Some(part_id);
         }
 
         // Selection on click
@@ -105,6 +103,7 @@ impl PartListPanel {
     }
 
     /// Render a part in the tree with its children
+    #[allow(clippy::too_many_arguments)]
     fn render_part_tree(
         &mut self,
         ui: &mut egui::Ui,
@@ -236,7 +235,6 @@ impl PartListPanel {
             }
         });
     }
-
 }
 
 impl Default for PartListPanel {

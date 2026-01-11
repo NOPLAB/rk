@@ -21,6 +21,7 @@ pub enum TreeAction {
 /// - children_map: Map of part_id -> child part_ids
 /// - parts_with_parent: Set of parts that have a parent
 /// - orphaned_parts: Parts not connected to root_link hierarchy
+#[allow(clippy::type_complexity)]
 pub fn build_tree_structure(
     state: &AppState,
 ) -> (
@@ -108,7 +109,13 @@ pub fn build_tree_structure(
         .copied()
         .collect();
 
-    (root_link_part_id, root_parts, children_map, parts_with_parent, orphaned_parts)
+    (
+        root_link_part_id,
+        root_parts,
+        children_map,
+        parts_with_parent,
+        orphaned_parts,
+    )
 }
 
 /// Check if connecting parent to child would be valid (no cycle)

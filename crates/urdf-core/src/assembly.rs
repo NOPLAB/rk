@@ -93,23 +93,13 @@ impl Default for VisualElement {
 }
 
 /// Single collision element for a link
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CollisionElement {
     /// Optional name for this collision element
     pub name: Option<String>,
     pub origin: Pose,
     /// Geometry type (for primitive shapes)
     pub geometry: Option<GeometryType>,
-}
-
-impl Default for CollisionElement {
-    fn default() -> Self {
-        Self {
-            name: None,
-            origin: Pose::default(),
-            geometry: None,
-        }
-    }
 }
 
 /// Geometry type for visual/collision elements
@@ -161,22 +151,13 @@ impl VisualProperties {
 }
 
 /// Collision properties for a link (supports multiple collision elements)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CollisionProperties {
     /// Primary collision element (for backward compatibility)
     pub origin: Pose,
     /// Additional collision elements (if any)
     #[serde(default)]
     pub elements: Vec<CollisionElement>,
-}
-
-impl Default for CollisionProperties {
-    fn default() -> Self {
-        Self {
-            origin: Pose::default(),
-            elements: Vec::new(),
-        }
-    }
 }
 
 impl CollisionProperties {
@@ -218,12 +199,7 @@ impl Pose {
 
     pub fn to_mat4(&self) -> Mat4 {
         let translation = Vec3::from(self.xyz);
-        let rotation = Quat::from_euler(
-            glam::EulerRot::XYZ,
-            self.rpy[0],
-            self.rpy[1],
-            self.rpy[2],
-        );
+        let rotation = Quat::from_euler(glam::EulerRot::XYZ, self.rpy[0], self.rpy[1], self.rpy[2]);
         Mat4::from_rotation_translation(rotation, translation)
     }
 }
@@ -538,10 +514,10 @@ impl Assembly {
 
         // Apply transforms from root to link
         for id in chain.into_iter().rev() {
-            if let Some((joint_id, _)) = self.parent.get(&id) {
-                if let Some(joint) = self.joints.get(joint_id) {
-                    transform = transform * joint.origin.to_mat4();
-                }
+            if let Some((joint_id, _)) = self.parent.get(&id)
+                && let Some(joint) = self.joints.get(joint_id)
+            {
+                transform *= joint.origin.to_mat4();
             }
         }
 
@@ -582,6 +558,82 @@ impl Assembly {
         }
     }
 
+    /// Update all world transforms with joint positions applied
+    pub fn update_world_transforms_with_positions(&mut self, joint_positions: &HashMap<Uuid, f32>) {
+        if let Some(root_id) = self.root_link {
+            self.update_transform_recursive_with_positions(
+                root_id,
+                Mat4::IDENTITY,
+                joint_positions,
+            );
+        }
+    }
+
+    fn update_transform_recursive_with_positions(
+        &mut self,
+        link_id: Uuid,
+        parent_transform: Mat4,
+        joint_positions: &HashMap<Uuid, f32>,
+    ) {
+        let transform = if let Some((joint_id, _)) = self.parent.get(&link_id) {
+            if let Some(joint) = self.joints.get(joint_id) {
+                // Get joint position (defaults to 0)
+                let position = joint_positions.get(joint_id).copied().unwrap_or(0.0);
+                // Compute joint transform with position
+                let joint_transform = Self::compute_joint_transform(joint, position);
+                parent_transform * joint.origin.to_mat4() * joint_transform
+            } else {
+                parent_transform
+            }
+        } else {
+            parent_transform
+        };
+
+        if let Some(link) = self.links.get_mut(&link_id) {
+            link.world_transform = transform;
+        }
+
+        // Get children IDs first to avoid borrow issues
+        let children: Vec<Uuid> = self
+            .children
+            .get(&link_id)
+            .map(|c| c.iter().map(|(_, child_id)| *child_id).collect())
+            .unwrap_or_default();
+
+        for child_id in children {
+            self.update_transform_recursive_with_positions(child_id, transform, joint_positions);
+        }
+    }
+
+    /// Compute the transform for a joint at a given position
+    fn compute_joint_transform(joint: &Joint, position: f32) -> Mat4 {
+        Self::compute_joint_transform_static(&joint.joint_type, joint.axis, position)
+    }
+
+    /// Compute the transform for a joint at a given position (static version)
+    pub fn compute_joint_transform_static(
+        joint_type: &JointType,
+        axis: Vec3,
+        position: f32,
+    ) -> Mat4 {
+        match joint_type {
+            JointType::Revolute | JointType::Continuous => {
+                // Rotation around the joint axis
+                let rotation = Quat::from_axis_angle(axis, position);
+                Mat4::from_quat(rotation)
+            }
+            JointType::Prismatic => {
+                // Translation along the joint axis
+                let translation = axis * position;
+                Mat4::from_translation(translation)
+            }
+            JointType::Fixed | JointType::Floating | JointType::Planar => {
+                // No transform for fixed joints, floating/planar would need more DOFs
+                Mat4::IDENTITY
+            }
+        }
+    }
+
     /// Validate the assembly
     pub fn validate(&self) -> Result<(), Vec<AssemblyError>> {
         let mut errors = Vec::new();
@@ -606,10 +658,16 @@ impl Assembly {
         // Check joint references
         for joint in self.joints.values() {
             if !self.links.contains_key(&joint.parent_link) {
-                errors.push(AssemblyError::InvalidJointReference(joint.id, joint.parent_link));
+                errors.push(AssemblyError::InvalidJointReference(
+                    joint.id,
+                    joint.parent_link,
+                ));
             }
             if !self.links.contains_key(&joint.child_link) {
-                errors.push(AssemblyError::InvalidJointReference(joint.id, joint.child_link));
+                errors.push(AssemblyError::InvalidJointReference(
+                    joint.id,
+                    joint.child_link,
+                ));
             }
         }
 

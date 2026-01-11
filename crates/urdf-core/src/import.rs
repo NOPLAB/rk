@@ -13,10 +13,10 @@ use crate::assembly::{
     JointDynamics, JointMimic, Link, Pose, VisualElement, VisualProperties,
 };
 use crate::inertia::InertiaMatrix;
+use crate::mesh::{MeshFormat, load_mesh};
 use crate::part::{JointLimits, JointType, Part};
 use crate::primitive::{generate_box_mesh, generate_cylinder_mesh, generate_sphere_mesh};
 use crate::project::{MaterialDef, Project};
-use crate::mesh::{load_mesh, MeshFormat};
 use crate::stl::StlUnit;
 
 /// Import options for URDF loading
@@ -47,9 +47,10 @@ impl Default for ImportOptions {
 impl ImportOptions {
     /// Create import options with package paths auto-discovered from ROS environment
     pub fn with_ros_packages() -> Self {
-        let mut options = Self::default();
-        options.package_paths = discover_ros_packages();
-        options
+        Self {
+            package_paths: discover_ros_packages(),
+            ..Self::default()
+        }
     }
 
     /// Add a package path mapping
@@ -103,10 +104,10 @@ fn discover_packages_in_dir(dir: &Path, packages: &mut HashMap<String, PathBuf>)
             if path.is_dir() {
                 // Check if this directory contains a package.xml
                 let package_xml = path.join("package.xml");
-                if package_xml.exists() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        packages.insert(name.to_string(), path);
-                    }
+                if package_xml.exists()
+                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                {
+                    packages.insert(name.to_string(), path);
                 }
             }
         }
@@ -154,7 +155,7 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
     let robot = urdf_rs::read_file(urdf_path).map_err(|e| ImportError::UrdfParse(e.to_string()))?;
 
     // Set base_dir to URDF file's parent directory if not specified
-    let base_dir = if options.base_dir == PathBuf::from(".") {
+    let base_dir = if options.base_dir.as_os_str() == "." {
         urdf_path
             .parent()
             .map(|p| p.to_path_buf())
@@ -334,8 +335,14 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
     // Create joint points on parts from joint information
     for joint in assembly.joints.values_mut() {
         // Get parent and child link info
-        let parent_part_id = assembly.links.get(&joint.parent_link).and_then(|l| l.part_id);
-        let child_part_id = assembly.links.get(&joint.child_link).and_then(|l| l.part_id);
+        let parent_part_id = assembly
+            .links
+            .get(&joint.parent_link)
+            .and_then(|l| l.part_id);
+        let child_part_id = assembly
+            .links
+            .get(&joint.child_link)
+            .and_then(|l| l.part_id);
         let child_link_name = assembly
             .links
             .get(&joint.child_link)
@@ -348,44 +355,48 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
             .unwrap_or_default();
 
         // Create joint point on parent part (at origin, since joint origin is relative to parent)
-        if let Some(part_id) = parent_part_id {
-            if let Some(part) = parts.iter_mut().find(|p| p.id == part_id) {
-                let jp = crate::part::JointPoint {
-                    id: Uuid::new_v4(),
-                    name: format!("joint_to_{}", child_link_name),
-                    position: Vec3::new(joint.origin.xyz[0], joint.origin.xyz[1], joint.origin.xyz[2]),
-                    orientation: glam::Quat::from_euler(
-                        glam::EulerRot::XYZ,
-                        joint.origin.rpy[0],
-                        joint.origin.rpy[1],
-                        joint.origin.rpy[2],
-                    ),
-                    joint_type: joint.joint_type,
-                    axis: joint.axis,
-                    limits: joint.limits,
-                };
-                let jp_id = jp.id;
-                part.joint_points.push(jp);
-                joint.parent_joint_point = Some(jp_id);
-            }
+        if let Some(part_id) = parent_part_id
+            && let Some(part) = parts.iter_mut().find(|p| p.id == part_id)
+        {
+            let jp = crate::part::JointPoint {
+                id: Uuid::new_v4(),
+                name: format!("joint_to_{}", child_link_name),
+                position: Vec3::new(
+                    joint.origin.xyz[0],
+                    joint.origin.xyz[1],
+                    joint.origin.xyz[2],
+                ),
+                orientation: glam::Quat::from_euler(
+                    glam::EulerRot::XYZ,
+                    joint.origin.rpy[0],
+                    joint.origin.rpy[1],
+                    joint.origin.rpy[2],
+                ),
+                joint_type: joint.joint_type,
+                axis: joint.axis,
+                limits: joint.limits,
+            };
+            let jp_id = jp.id;
+            part.joint_points.push(jp);
+            joint.parent_joint_point = Some(jp_id);
         }
 
         // Create joint point on child part (at origin of child)
-        if let Some(part_id) = child_part_id {
-            if let Some(part) = parts.iter_mut().find(|p| p.id == part_id) {
-                let jp = crate::part::JointPoint {
-                    id: Uuid::new_v4(),
-                    name: format!("joint_from_{}", parent_link_name),
-                    position: Vec3::ZERO, // Child's joint point is at its own origin
-                    orientation: glam::Quat::IDENTITY,
-                    joint_type: joint.joint_type,
-                    axis: joint.axis,
-                    limits: joint.limits,
-                };
-                let jp_id = jp.id;
-                part.joint_points.push(jp);
-                joint.child_joint_point = Some(jp_id);
-            }
+        if let Some(part_id) = child_part_id
+            && let Some(part) = parts.iter_mut().find(|p| p.id == part_id)
+        {
+            let jp = crate::part::JointPoint {
+                id: Uuid::new_v4(),
+                name: format!("joint_from_{}", parent_link_name),
+                position: Vec3::ZERO, // Child's joint point is at its own origin
+                orientation: glam::Quat::IDENTITY,
+                joint_type: joint.joint_type,
+                axis: joint.axis,
+                limits: joint.limits,
+            };
+            let jp_id = jp.id;
+            part.joint_points.push(jp);
+            joint.child_joint_point = Some(jp_id);
         }
     }
 
@@ -395,12 +406,12 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
     // Apply link world transforms to parts
     // Final transform = link.world_transform * visual_origin
     for link in assembly.links.values() {
-        if let Some(part_id) = link.part_id {
-            if let Some(part) = parts.iter_mut().find(|p| p.id == part_id) {
-                // part.origin_transform already contains visual origin
-                // Prepend link's world transform
-                part.origin_transform = link.world_transform * part.origin_transform;
-            }
+        if let Some(part_id) = link.part_id
+            && let Some(part) = parts.iter_mut().find(|p| p.id == part_id)
+        {
+            // part.origin_transform already contains visual origin
+            // Prepend link's world transform
+            part.origin_transform = link.world_transform * part.origin_transform;
         }
     }
 
@@ -426,10 +437,7 @@ fn process_visual_geometry(
     package_paths: &HashMap<String, PathBuf>,
 ) -> Result<(Option<Part>, VisualProperties), ImportError> {
     if visuals.is_empty() {
-        return Ok((
-            None,
-            VisualProperties::default(),
-        ));
+        return Ok((None, VisualProperties::default()));
     }
 
     // Process first visual element (primary)
@@ -461,7 +469,10 @@ fn process_visual_geometry(
         let elem_geometry = convert_geometry_type(&visual.geometry);
 
         additional_elements.push(VisualElement {
-            name: visual.name.clone().or_else(|| Some(format!("visual_{}", i + 1))),
+            name: visual
+                .name
+                .clone()
+                .or_else(|| Some(format!("visual_{}", i + 1))),
             origin: elem_origin,
             color: elem_color,
             material_name: elem_material,
@@ -637,7 +648,10 @@ fn process_collision_geometry(collisions: &[urdf_rs::Collision]) -> CollisionPro
         let elem_geometry = convert_geometry_type(&collision.geometry);
 
         additional_elements.push(CollisionElement {
-            name: collision.name.clone().or_else(|| Some(format!("collision_{}", i + 1))),
+            name: collision
+                .name
+                .clone()
+                .or_else(|| Some(format!("collision_{}", i + 1))),
             origin: elem_origin,
             geometry: elem_geometry,
         });
@@ -667,8 +681,7 @@ fn create_part_from_mesh(
     part.calculate_bounding_box();
 
     // Calculate inertia from bounding box
-    part.inertia =
-        InertiaMatrix::from_bounding_box(part.mass, part.bbox_min, part.bbox_max);
+    part.inertia = InertiaMatrix::from_bounding_box(part.mass, part.bbox_min, part.bbox_max);
 
     part
 }
@@ -765,10 +778,10 @@ fn resolve_package_uri(
     ];
 
     for path in &fallback_paths {
-        if let Ok(canonical) = path.canonicalize() {
-            if canonical.exists() {
-                return Ok(canonical);
-            }
+        if let Ok(canonical) = path.canonicalize()
+            && canonical.exists()
+        {
+            return Ok(canonical);
         }
     }
 
@@ -864,7 +877,8 @@ mod tests {
     #[test]
     fn test_resolve_mesh_path_package_uri() {
         let packages = HashMap::new();
-        let result = resolve_mesh_path("package://robot/meshes/link.stl", Path::new("."), &packages);
+        let result =
+            resolve_mesh_path("package://robot/meshes/link.stl", Path::new("."), &packages);
         assert!(matches!(result, Err(ImportError::PackageNotFound { .. })));
     }
 
@@ -882,11 +896,8 @@ mod tests {
         let mut packages = HashMap::new();
         packages.insert("robot".to_string(), temp.path().to_path_buf());
 
-        let result = resolve_mesh_path(
-            "package://robot/meshes/link.stl",
-            Path::new("."),
-            &packages,
-        );
+        let result =
+            resolve_mesh_path("package://robot/meshes/link.stl", Path::new("."), &packages);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), stl_path);
     }

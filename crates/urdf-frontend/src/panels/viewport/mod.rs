@@ -196,84 +196,83 @@ impl Panel for ViewportPanel {
         }
 
         // Apply gizmo transform to part
-        if let Some(transform) = gizmo_delta {
-            if let Some(part_id) = vp_state.gizmo.part_id {
-                let selected_joint_point = vp_state.gizmo.selected_joint_point;
-                let queue = vp_state.queue.clone();
-                drop(vp_state);
+        if let Some(transform) = gizmo_delta
+            && let Some(part_id) = vp_state.gizmo.part_id
+        {
+            let selected_joint_point = vp_state.gizmo.selected_joint_point;
+            let queue = vp_state.queue.clone();
+            drop(vp_state);
 
-                let mut app = app_state.lock();
+            let mut app = app_state.lock();
 
-                match transform {
-                    GizmoTransform::Translation(delta) => {
-                        if let Some(joint_idx) = selected_joint_point {
-                            // Moving a joint point - update joint point position in local space
-                            if let Some(part) = app.get_part_mut(part_id) {
-                                if let Some(jp) = part.joint_points.get_mut(joint_idx) {
-                                    // Convert world delta to local delta using inverse transform
-                                    let inv_transform = part.origin_transform.inverse();
-                                    let local_delta = inv_transform.transform_vector3(delta);
-                                    jp.position += local_delta;
-                                }
-                            }
-                            drop(app);
-                        } else {
-                            // Moving the whole part - update part transform
-                            let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                                let translation =
-                                    part.origin_transform.to_scale_rotation_translation().2;
-                                let new_translation = translation + delta;
-                                part.origin_transform =
-                                    glam::Mat4::from_translation(new_translation);
-                                Some(part.origin_transform)
-                            } else {
-                                None
-                            };
-                            drop(app);
-
-                            // Update mesh renderer transform
-                            if let Some(transform) = new_transform {
-                                let mut vp = viewport_state.lock();
-                                vp.renderer
-                                    .update_part_transform(&queue, part_id, transform);
-                                drop(vp);
-                            }
+            match transform {
+                GizmoTransform::Translation(delta) => {
+                    if let Some(joint_idx) = selected_joint_point {
+                        // Moving a joint point - update joint point position in local space
+                        if let Some(part) = app.get_part_mut(part_id)
+                            && let Some(jp) = part.joint_points.get_mut(joint_idx)
+                        {
+                            // Convert world delta to local delta using inverse transform
+                            let inv_transform = part.origin_transform.inverse();
+                            let local_delta = inv_transform.transform_vector3(delta);
+                            jp.position += local_delta;
                         }
-                    }
-                    GizmoTransform::Rotation(rotation) => {
-                        // Rotating the whole part
-                        if selected_joint_point.is_none() {
-                            let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                                let (scale, old_rotation, translation) =
-                                    part.origin_transform.to_scale_rotation_translation();
-                                let new_rotation = rotation * old_rotation;
-                                part.origin_transform = glam::Mat4::from_scale_rotation_translation(
-                                    scale,
-                                    new_rotation,
-                                    translation,
-                                );
-                                Some(part.origin_transform)
-                            } else {
-                                None
-                            };
-                            drop(app);
-
-                            // Update mesh renderer transform
-                            if let Some(transform) = new_transform {
-                                let mut vp = viewport_state.lock();
-                                vp.renderer
-                                    .update_part_transform(&queue, part_id, transform);
-                                drop(vp);
-                            }
+                        drop(app);
+                    } else {
+                        // Moving the whole part - update part transform
+                        let new_transform = if let Some(part) = app.get_part_mut(part_id) {
+                            let translation =
+                                part.origin_transform.to_scale_rotation_translation().2;
+                            let new_translation = translation + delta;
+                            part.origin_transform = glam::Mat4::from_translation(new_translation);
+                            Some(part.origin_transform)
                         } else {
-                            drop(app);
+                            None
+                        };
+                        drop(app);
+
+                        // Update mesh renderer transform
+                        if let Some(transform) = new_transform {
+                            let mut vp = viewport_state.lock();
+                            vp.renderer
+                                .update_part_transform(&queue, part_id, transform);
+                            drop(vp);
                         }
                     }
                 }
+                GizmoTransform::Rotation(rotation) => {
+                    // Rotating the whole part
+                    if selected_joint_point.is_none() {
+                        let new_transform = if let Some(part) = app.get_part_mut(part_id) {
+                            let (scale, old_rotation, translation) =
+                                part.origin_transform.to_scale_rotation_translation();
+                            let new_rotation = rotation * old_rotation;
+                            part.origin_transform = glam::Mat4::from_scale_rotation_translation(
+                                scale,
+                                new_rotation,
+                                translation,
+                            );
+                            Some(part.origin_transform)
+                        } else {
+                            None
+                        };
+                        drop(app);
 
-                // Re-lock viewport state for rest of handling
-                vp_state = viewport_state.lock();
+                        // Update mesh renderer transform
+                        if let Some(transform) = new_transform {
+                            let mut vp = viewport_state.lock();
+                            vp.renderer
+                                .update_part_transform(&queue, part_id, transform);
+                            drop(vp);
+                        }
+                    } else {
+                        drop(app);
+                    }
+                }
             }
+
+            // Re-lock viewport state for rest of handling
+            vp_state = viewport_state.lock();
         }
 
         // Middle mouse button for orbit/pan (only if not dragging gizmo)

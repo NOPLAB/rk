@@ -1,9 +1,11 @@
 //! UI panels
 
+mod joint_list;
 mod part_list;
 mod properties;
 mod viewport;
 
+pub use joint_list::JointListPanel;
 pub use part_list::PartListPanel;
 pub use properties::PropertiesPanel;
 pub use viewport::ViewportPanel;
