@@ -140,7 +140,7 @@ fn write_link_recursive(
         // Write link with mesh
         write_link(urdf, link, Some(part), Some(mesh_uri));
     } else {
-        // Write empty link (like base_link)
+        // Write empty link (no geometry)
         write_link(urdf, link, None, None);
     }
 
@@ -214,7 +214,7 @@ fn write_link(urdf: &mut String, link: &Link, part: Option<&Part>, mesh_uri: Opt
             );
         }
     }
-    // Empty links (like base_link) have no visual/collision/inertial
+    // Empty links have no visual/collision/inertial
 
     urdf.push_str("  </link>\n\n");
 }

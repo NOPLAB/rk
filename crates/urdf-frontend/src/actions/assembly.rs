@@ -13,7 +13,6 @@ pub fn handle_assembly_action(action: AppAction, ctx: &ActionContext) {
     match action {
         AppAction::ConnectParts { parent, child } => handle_connect_parts(parent, child, ctx),
         AppAction::DisconnectPart { child } => handle_disconnect_part(child, ctx),
-        AppAction::ConnectToBaseLink(part_id) => handle_connect_to_base_link(part_id, ctx),
         AppAction::AddJointPoint { part_id, position } => {
             handle_add_joint_point(part_id, position, ctx)
         }
@@ -148,82 +147,6 @@ fn handle_disconnect_part(child: Uuid, ctx: &ActionContext) {
             }
             Err(e) => {
                 tracing::error!("Failed to disconnect part: {}", e);
-            }
-        }
-    }
-}
-
-fn handle_connect_to_base_link(part_id: Uuid, ctx: &ActionContext) {
-    let mut state = ctx.app_state.lock();
-
-    // Get base_link id
-    let base_link_id = state.project.assembly.root_link;
-
-    if let Some(base_link_id) = base_link_id {
-        // Find or create link for this part
-        let child_link_id = state
-            .project
-            .assembly
-            .links
-            .iter()
-            .find(|(_, l)| l.part_id == Some(part_id))
-            .map(|(id, _)| *id);
-
-        let child_link_id = if let Some(id) = child_link_id {
-            // Disconnect from existing parent if any
-            if state.project.assembly.parent.contains_key(&id) {
-                let _ = state.project.assembly.disconnect(id);
-            }
-            id
-        } else {
-            // Create new link for this part
-            if let Some(part) = state.parts.get(&part_id) {
-                let link = Link::from_part(part);
-                state.project.assembly.add_link(link)
-            } else {
-                return;
-            }
-        };
-
-        // Get names for joint
-        let base_name = state
-            .project
-            .assembly
-            .links
-            .get(&base_link_id)
-            .map(|l| l.name.clone())
-            .unwrap_or_else(|| "base_link".to_string());
-        let child_name = state
-            .project
-            .assembly
-            .links
-            .get(&child_link_id)
-            .map(|l| l.name.clone())
-            .unwrap_or_default();
-
-        // Create fixed joint
-        let joint = Joint::fixed(
-            format!("{}_to_{}", base_name, child_name),
-            base_link_id,
-            child_link_id,
-            Pose::default(),
-        );
-
-        match state
-            .project
-            .assembly
-            .connect(base_link_id, child_link_id, joint)
-        {
-            Ok(joint_id) => {
-                tracing::info!(
-                    "Connected {} to base_link via joint {}",
-                    child_name,
-                    joint_id
-                );
-                state.modified = true;
-            }
-            Err(e) => {
-                tracing::error!("Failed to connect to base_link: {}", e);
             }
         }
     }

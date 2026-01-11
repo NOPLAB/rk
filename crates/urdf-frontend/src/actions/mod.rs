@@ -57,8 +57,7 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
         AppAction::AddJointPoint { .. }
         | AppAction::RemoveJointPoint { .. }
         | AppAction::ConnectParts { .. }
-        | AppAction::DisconnectPart { .. }
-        | AppAction::ConnectToBaseLink(_) => {
+        | AppAction::DisconnectPart { .. } => {
             handle_assembly_action(action, ctx);
         }
     }

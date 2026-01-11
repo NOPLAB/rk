@@ -57,8 +57,6 @@ pub enum AppAction {
     ConnectParts { parent: Uuid, child: Uuid },
     /// Disconnect a part from its parent
     DisconnectPart { child: Uuid },
-    /// Connect a part to base_link
-    ConnectToBaseLink(Uuid),
 }
 
 /// Application state

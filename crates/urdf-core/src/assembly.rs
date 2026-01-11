@@ -14,7 +14,7 @@ use crate::part::{JointLimits, JointType, Part};
 pub struct Link {
     pub id: Uuid,
     pub name: String,
-    /// Reference to the part this link uses (None for empty links like base_link)
+    /// Reference to the part this link uses (None for empty links)
     pub part_id: Option<Uuid>,
     /// Transform of this link in world space (computed)
     #[serde(skip)]
@@ -28,7 +28,7 @@ pub struct Link {
 }
 
 impl Link {
-    /// Create a new empty link (e.g., for base_link)
+    /// Create a new empty link (no geometry)
     pub fn empty(name: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -366,7 +366,7 @@ impl Default for JointDynamics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Assembly {
     pub name: String,
-    /// Root link ID (base_link)
+    /// Root link ID
     pub root_link: Option<Uuid>,
     /// All links
     pub links: HashMap<Uuid, Link>,
@@ -385,31 +385,16 @@ impl Default for Assembly {
 }
 
 impl Assembly {
-    /// Create a new empty assembly with base_link
+    /// Create a new empty assembly
     pub fn new(name: impl Into<String>) -> Self {
-        let base_link = Link::empty("base_link");
-        let base_link_id = base_link.id;
-        let mut links = HashMap::new();
-        links.insert(base_link_id, base_link);
-
         Self {
             name: name.into(),
-            root_link: Some(base_link_id),
-            links,
+            root_link: None,
+            links: HashMap::new(),
             joints: HashMap::new(),
             children: HashMap::new(),
             parent: HashMap::new(),
         }
-    }
-
-    /// Get the base_link (root link)
-    pub fn base_link(&self) -> Option<&Link> {
-        self.root_link.and_then(|id| self.links.get(&id))
-    }
-
-    /// Get the base_link mutably
-    pub fn base_link_mut(&mut self) -> Option<&mut Link> {
-        self.root_link.and_then(|id| self.links.get_mut(&id))
     }
 
     /// Add a link to the assembly (does not automatically set as root)

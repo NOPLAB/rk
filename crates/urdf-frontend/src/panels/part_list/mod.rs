@@ -18,16 +18,10 @@ pub struct PartListPanel {
     dragging_part: Option<Uuid>,
     /// Current drop target (part_id)
     drop_target: Option<Uuid>,
-    /// Drop target is base_link
-    drop_target_base_link: bool,
     /// Editing project name
     editing_project_name: bool,
     /// Temporary buffer for editing project name
     project_name_buffer: String,
-    /// Editing base_link name
-    editing_base_link_name: bool,
-    /// Temporary buffer for editing base_link name
-    base_link_name_buffer: String,
 }
 
 impl PartListPanel {
@@ -35,11 +29,8 @@ impl PartListPanel {
         Self {
             dragging_part: None,
             drop_target: None,
-            drop_target_base_link: false,
             editing_project_name: false,
             project_name_buffer: String::new(),
-            editing_base_link_name: false,
-            base_link_name_buffer: String::new(),
         }
     }
 
@@ -246,85 +237,6 @@ impl PartListPanel {
         });
     }
 
-    /// Render the base_link node (renameable, drop target for parts)
-    fn render_base_link(
-        &mut self,
-        ui: &mut egui::Ui,
-        base_link_name: &str,
-        app_state: &SharedAppState,
-    ) {
-        ui.push_id("base_link", |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-
-                if self.editing_base_link_name {
-                    // Editing mode - show text input
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.base_link_name_buffer)
-                            .desired_width(120.0),
-                    );
-
-                    // Auto-focus
-                    response.request_focus();
-
-                    // Confirm on Enter or when focus is lost
-                    if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        if !self.base_link_name_buffer.trim().is_empty() {
-                            let mut state = app_state.lock();
-                            if let Some(base_link) = state.project.assembly.base_link_mut() {
-                                base_link.name = self.base_link_name_buffer.trim().to_string();
-                            }
-                            state.modified = true;
-                        }
-                        self.editing_base_link_name = false;
-                    }
-
-                    // Cancel on Escape
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        self.editing_base_link_name = false;
-                    }
-                } else {
-                    // Display mode - can be a drop target
-                    let is_drop_target = self.drop_target_base_link;
-
-                    let text = if is_drop_target {
-                        egui::RichText::new(format!("🔗 {}", base_link_name))
-                            .strong()
-                            .color(egui::Color32::GREEN)
-                    } else {
-                        egui::RichText::new(format!("🔗 {}", base_link_name))
-                            .color(egui::Color32::LIGHT_BLUE)
-                    };
-
-                    let response = ui.add(
-                        egui::Label::new(text)
-                            .selectable(false)
-                            .sense(egui::Sense::click()),
-                    );
-
-                    // Context menu for renaming
-                    response.context_menu(|ui| {
-                        if ui.button("Rename").clicked() {
-                            self.base_link_name_buffer = base_link_name.to_string();
-                            self.editing_base_link_name = true;
-                            ui.close_menu();
-                        }
-                    });
-
-                    // Double-click to rename
-                    if response.double_clicked() {
-                        self.base_link_name_buffer = base_link_name.to_string();
-                        self.editing_base_link_name = true;
-                    }
-
-                    // Handle as drop target when dragging
-                    if self.dragging_part.is_some() && response.hovered() {
-                        self.drop_target_base_link = true;
-                    }
-                }
-            });
-        });
-    }
 }
 
 impl Default for PartListPanel {
@@ -348,12 +260,6 @@ impl Panel for PartListPanel {
         let state = app_state.lock();
         let selected_id = state.selected_part;
         let project_name = state.project.name.clone();
-        let base_link_name = state
-            .project
-            .assembly
-            .base_link()
-            .map(|l| l.name.clone())
-            .unwrap_or_else(|| "base_link".to_string());
 
         // Build tree structure from Assembly
         let (root_link_part, root_parts, children_map, parts_with_parent, orphaned_parts) =
@@ -371,7 +277,6 @@ impl Panel for PartListPanel {
 
         // Reset drop targets each frame
         self.drop_target = None;
-        self.drop_target_base_link = false;
 
         // Collect actions during rendering
         let mut actions: Vec<TreeAction> = Vec::new();
@@ -381,9 +286,6 @@ impl Panel for PartListPanel {
             self.render_project_root(ui, &project_name, app_state);
 
             ui.add_space(4.0);
-
-            // Render base_link node (renameable, drop target)
-            self.render_base_link(ui, &base_link_name, app_state);
 
             // Render root link's own part (if it has one, e.g., when importing URDF)
             // This will also render all its children via children_map
@@ -395,7 +297,7 @@ impl Panel for PartListPanel {
                     &children_map,
                     &parts_with_parent,
                     selected_id,
-                    2,
+                    1,
                     &mut actions,
                 );
             } else {
@@ -409,13 +311,13 @@ impl Panel for PartListPanel {
                         &children_map,
                         &parts_with_parent,
                         selected_id,
-                        2, // Start at depth 2 (under base_link)
+                        1,
                         &mut actions,
                     );
                 }
             }
 
-            // Render orphaned parts (not connected to base_link)
+            // Render orphaned parts (not connected to any hierarchy)
             if !orphaned_parts.is_empty() {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -454,10 +356,7 @@ impl Panel for PartListPanel {
         // Handle drop on release
         if ui.input(|i| i.pointer.any_released()) {
             if let Some(dragged_id) = self.dragging_part {
-                if self.drop_target_base_link {
-                    // Dropped on base_link - connect to base_link
-                    actions.push(TreeAction::ConnectToBaseLink(dragged_id));
-                } else if let Some(target_id) = self.drop_target {
+                if let Some(target_id) = self.drop_target {
                     // Dropped on another part - connect
                     if dragged_id != target_id {
                         let state = app_state.lock();
@@ -492,7 +391,6 @@ impl Panel for PartListPanel {
             // Clear drag state
             self.dragging_part = None;
             self.drop_target = None;
-            self.drop_target_base_link = false;
         }
 
         // Process collected actions
@@ -519,11 +417,6 @@ impl Panel for PartListPanel {
                     app_state
                         .lock()
                         .queue_action(AppAction::ConnectParts { parent, child });
-                }
-                TreeAction::ConnectToBaseLink(part_id) => {
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::ConnectToBaseLink(part_id));
                 }
             }
         }

@@ -11,7 +11,6 @@ pub enum TreeAction {
     Delete(Uuid),
     Disconnect(Uuid),
     Connect { parent: Uuid, child: Uuid },
-    ConnectToBaseLink(Uuid),
 }
 
 /// Build tree structure from Assembly state
@@ -48,7 +47,7 @@ pub fn build_tree_structure(
         .collect();
 
     // Build children map (part_id -> [child_part_ids])
-    // For base_link (which has no part_id), we track its children separately
+    // For links without part_id, we track their children separately
     let mut children_map: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
     for (parent_link_id, children) in &assembly.children {
         if let Some(&parent_part_id) = link_to_part.get(parent_link_id) {
@@ -69,10 +68,10 @@ pub fn build_tree_structure(
         .filter_map(|link_id| link_to_part.get(link_id).copied())
         .collect();
 
-    // Find parts that are direct children of base_link (root_link)
+    // Find parts that are direct children of root_link
     let mut root_parts: Vec<Uuid> = Vec::new();
     if let Some(root_link_id) = assembly.root_link {
-        // Get children of base_link
+        // Get children of root_link
         if let Some(children) = assembly.children.get(&root_link_id) {
             for (_, child_link_id) in children {
                 if let Some(&part_id) = link_to_part.get(child_link_id) {
@@ -82,7 +81,7 @@ pub fn build_tree_structure(
         }
     }
 
-    // Find orphaned parts (not connected to base_link hierarchy)
+    // Find orphaned parts (not connected to root_link hierarchy)
     // Note: root_link itself is not orphaned even though it has no parent
     let root_link_part_id: Option<Uuid> = assembly
         .root_link
