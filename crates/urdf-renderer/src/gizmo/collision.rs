@@ -187,7 +187,8 @@ mod tests {
         let cylinder_end = Vec3::new(1.0, 0.0, 0.0);
         let radius = 0.1;
 
-        let result = ray_cylinder_intersection(ray_origin, ray_dir, cylinder_start, cylinder_end, radius);
+        let result =
+            ray_cylinder_intersection(ray_origin, ray_dir, cylinder_start, cylinder_end, radius);
         assert!(result.is_some());
     }
 
@@ -200,7 +201,8 @@ mod tests {
         let cylinder_end = Vec3::new(1.0, 0.0, 0.0);
         let radius = 0.1;
 
-        let result = ray_cylinder_intersection(ray_origin, ray_dir, cylinder_start, cylinder_end, radius);
+        let result =
+            ray_cylinder_intersection(ray_origin, ray_dir, cylinder_start, cylinder_end, radius);
         assert!(result.is_none());
     }
 
@@ -213,7 +215,8 @@ mod tests {
         let cylinder_end = Vec3::new(1.0, 0.0, 0.0);
         let radius = 0.1;
 
-        let result = ray_cylinder_intersection(ray_origin, ray_dir, cylinder_start, cylinder_end, radius);
+        let result =
+            ray_cylinder_intersection(ray_origin, ray_dir, cylinder_start, cylinder_end, radius);
         assert!(result.is_none());
     }
 }

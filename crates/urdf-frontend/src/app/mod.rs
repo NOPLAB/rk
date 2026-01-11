@@ -9,11 +9,11 @@ use std::sync::Arc;
 use egui_dock::{DockArea, DockState, Style};
 use parking_lot::Mutex;
 
-use crate::actions::{dispatch_action, ActionContext};
-use crate::state::{create_shared_state, SharedAppState, SharedViewportState, ViewportState};
+use crate::actions::{ActionContext, dispatch_action};
+use crate::state::{SharedAppState, SharedViewportState, ViewportState, create_shared_state};
 
-pub use dock::{create_dock_layout, PanelType, UrdfTabViewer};
-pub use menu::{render_menu_bar, MenuAction};
+pub use dock::{PanelType, UrdfTabViewer, create_dock_layout};
+pub use menu::{MenuAction, render_menu_bar};
 pub use overlays::update_overlays;
 
 /// Main application

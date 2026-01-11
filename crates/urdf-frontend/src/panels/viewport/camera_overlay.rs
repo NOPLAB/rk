@@ -15,7 +15,10 @@ pub fn render_camera_settings(
     let panel_margin = 10.0;
 
     // Toggle button at top-right
-    let toggle_pos = egui::pos2(rect.right() - panel_margin - 28.0, rect.top() + panel_margin);
+    let toggle_pos = egui::pos2(
+        rect.right() - panel_margin - 28.0,
+        rect.top() + panel_margin,
+    );
 
     egui::Area::new(egui::Id::new("camera_toggle"))
         .fixed_pos(toggle_pos)
@@ -30,11 +33,7 @@ pub fn render_camera_settings(
                     let button = egui::Button::new("📷")
                         .selected(*show_camera_settings)
                         .min_size(egui::vec2(24.0, 24.0));
-                    if ui
-                        .add(button)
-                        .on_hover_text("Camera Settings")
-                        .clicked()
-                    {
+                    if ui.add(button).on_hover_text("Camera Settings").clicked() {
                         *show_camera_settings = !*show_camera_settings;
                     }
                 });

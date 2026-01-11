@@ -156,19 +156,31 @@ impl MeshData {
     /// Update instance transform
     pub fn update_transform(&mut self, queue: &wgpu::Queue, transform: Mat4) {
         self.instance.model = transform.to_cols_array_2d();
-        queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&[self.instance]));
+        queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&[self.instance]),
+        );
     }
 
     /// Update instance color
     pub fn update_color(&mut self, queue: &wgpu::Queue, color: [f32; 4]) {
         self.instance.color = color;
-        queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&[self.instance]));
+        queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&[self.instance]),
+        );
     }
 
     /// Set selected state
     pub fn set_selected(&mut self, queue: &wgpu::Queue, selected: bool) {
         self.instance.selected = if selected { 1 } else { 0 };
-        queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&[self.instance]));
+        queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&[self.instance]),
+        );
     }
 }
 
@@ -261,7 +273,11 @@ impl MeshRenderer {
     }
 
     /// Create bind group for a mesh instance
-    pub fn create_instance_bind_group(&self, device: &wgpu::Device, mesh: &MeshData) -> wgpu::BindGroup {
+    pub fn create_instance_bind_group(
+        &self,
+        device: &wgpu::Device,
+        mesh: &MeshData,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Mesh Instance Bind Group"),
             layout: &self.instance_bind_group_layout,

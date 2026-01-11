@@ -193,7 +193,10 @@ pub enum JointType {
 impl JointType {
     /// Check if this joint type has an axis
     pub fn has_axis(&self) -> bool {
-        matches!(self, JointType::Revolute | JointType::Continuous | JointType::Prismatic)
+        matches!(
+            self,
+            JointType::Revolute | JointType::Continuous | JointType::Prismatic
+        )
     }
 
     /// Check if this joint type has limits
@@ -274,4 +277,3 @@ pub enum PartError {
     #[error("Joint point not found: {0}")]
     JointPointNotFound(Uuid),
 }
-

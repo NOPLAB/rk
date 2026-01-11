@@ -7,8 +7,7 @@ mod helpers;
 pub use component::{PropertyComponent, PropertyContext};
 
 use components::{
-    GeometryComponent, JointPointsComponent, PhysicalComponent, TransformComponent,
-    VisualComponent,
+    GeometryComponent, JointPointsComponent, PhysicalComponent, TransformComponent, VisualComponent,
 };
 
 use crate::panels::Panel;

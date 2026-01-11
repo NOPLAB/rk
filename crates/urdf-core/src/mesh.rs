@@ -173,8 +173,9 @@ pub fn load_mesh(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part, MeshErro
     let format = MeshFormat::from_path(path);
 
     match format {
-        MeshFormat::Stl => crate::stl::load_stl_with_unit(path, unit)
-            .map_err(|e| MeshError::Parse(e.to_string())),
+        MeshFormat::Stl => {
+            crate::stl::load_stl_with_unit(path, unit).map_err(|e| MeshError::Parse(e.to_string()))
+        }
         MeshFormat::Obj => load_obj_with_unit(path, unit),
         MeshFormat::Dae => Err(MeshError::UnsupportedFormat(
             "DAE (COLLADA) format is not yet supported".to_string(),

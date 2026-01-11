@@ -6,22 +6,22 @@
 //! - Assembly: Scene graph for robot structure
 //! - Project: Serializable project file
 
-pub mod part;
 pub mod assembly;
-pub mod inertia;
-pub mod project;
 pub mod export;
 pub mod import;
-pub mod primitive;
-pub mod stl;
+pub mod inertia;
 pub mod mesh;
+pub mod part;
+pub mod primitive;
+pub mod project;
+pub mod stl;
 
-pub use part::*;
 pub use assembly::*;
-pub use inertia::*;
-pub use project::*;
 pub use export::*;
 pub use import::*;
-pub use primitive::*;
-pub use stl::*;
+pub use inertia::*;
 pub use mesh::*;
+pub use part::*;
+pub use primitive::*;
+pub use project::*;
+pub use stl::*;

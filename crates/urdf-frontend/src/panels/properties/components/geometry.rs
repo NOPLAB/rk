@@ -44,7 +44,10 @@ impl PropertyComponent for GeometryComponent {
         ));
 
         let size = part.size();
-        ui.label(format!("Size: {:.3} x {:.3} x {:.3}", size.x, size.y, size.z));
+        ui.label(format!(
+            "Size: {:.3} x {:.3} x {:.3}",
+            size.x, size.y, size.z
+        ));
 
         if let Some(ref path) = part.stl_path {
             ui.label(format!("STL: {}", path));

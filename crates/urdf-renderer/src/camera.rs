@@ -64,7 +64,8 @@ impl Camera {
     /// Orbit the camera around the target
     pub fn orbit(&mut self, delta_yaw: f32, delta_pitch: f32) {
         self.yaw += delta_yaw;
-        self.pitch = (self.pitch + delta_pitch).clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
+        self.pitch =
+            (self.pitch + delta_pitch).clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
         self.update_position_from_orbit();
     }
 
@@ -165,7 +166,13 @@ impl Camera {
     }
 
     /// Convert screen coordinates to world ray
-    pub fn screen_to_ray(&self, screen_x: f32, screen_y: f32, screen_width: f32, screen_height: f32) -> (Vec3, Vec3) {
+    pub fn screen_to_ray(
+        &self,
+        screen_x: f32,
+        screen_y: f32,
+        screen_width: f32,
+        screen_height: f32,
+    ) -> (Vec3, Vec3) {
         // Convert to normalized device coordinates
         let ndc_x = (2.0 * screen_x / screen_width) - 1.0;
         let ndc_y = 1.0 - (2.0 * screen_y / screen_height);

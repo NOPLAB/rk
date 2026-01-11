@@ -3,7 +3,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::constants::grid as constants;
-use crate::pipeline::{create_camera_bind_group, PipelineConfig};
+use crate::pipeline::{PipelineConfig, create_camera_bind_group};
 use crate::vertex::PositionColorVertex;
 
 /// Grid renderer
@@ -22,7 +22,8 @@ impl GridRenderer {
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         camera_buffer: &wgpu::Buffer,
     ) -> Self {
-        let bind_group = create_camera_bind_group(device, camera_bind_group_layout, camera_buffer, "Grid");
+        let bind_group =
+            create_camera_bind_group(device, camera_bind_group_layout, camera_buffer, "Grid");
 
         let pipeline = PipelineConfig::new(
             "Grid",

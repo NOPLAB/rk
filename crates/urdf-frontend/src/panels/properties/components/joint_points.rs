@@ -58,10 +58,8 @@ impl PropertyComponent for JointPointsComponent {
         ui.add_enabled_ui(can_add, |ui| {
             if ui.button("Add Joint Point").clicked() {
                 let center = ctx.part.center();
-                let point = JointPoint::new(
-                    format!("point_{}", ctx.part.joint_points.len() + 1),
-                    center,
-                );
+                let point =
+                    JointPoint::new(format!("point_{}", ctx.part.joint_points.len() + 1), center);
                 let _ = ctx.part.add_joint_point(point);
                 changed = true;
             }
@@ -121,22 +119,25 @@ impl PropertyComponent for JointPointsComponent {
                                 // Joint type
                                 ui.horizontal(|ui| {
                                     ui.label("Type:");
-                                    egui::ComboBox::from_id_salt(format!("joint_type_{}", point.id))
-                                        .selected_text(point.joint_type.display_name())
-                                        .show_ui(ui, |ui| {
-                                            for jt in JointType::all() {
-                                                if ui
-                                                    .selectable_value(
-                                                        &mut point.joint_type,
-                                                        *jt,
-                                                        jt.display_name(),
-                                                    )
-                                                    .changed()
-                                                {
-                                                    changed = true;
-                                                }
+                                    egui::ComboBox::from_id_salt(format!(
+                                        "joint_type_{}",
+                                        point.id
+                                    ))
+                                    .selected_text(point.joint_type.display_name())
+                                    .show_ui(ui, |ui| {
+                                        for jt in JointType::all() {
+                                            if ui
+                                                .selectable_value(
+                                                    &mut point.joint_type,
+                                                    *jt,
+                                                    jt.display_name(),
+                                                )
+                                                .changed()
+                                            {
+                                                changed = true;
                                             }
-                                        });
+                                        }
+                                    });
                                 });
 
                                 // Axis (for revolute/continuous/prismatic)
@@ -195,7 +196,9 @@ impl PropertyComponent for JointPointsComponent {
                                         ui.horizontal(|ui| {
                                             ui.label("Velocity:");
                                             if ui
-                                                .add(DragValue::new(&mut limits.velocity).speed(0.1))
+                                                .add(
+                                                    DragValue::new(&mut limits.velocity).speed(0.1),
+                                                )
                                                 .changed()
                                             {
                                                 changed = true;

@@ -79,17 +79,17 @@ pub fn load_stl_with_unit(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part,
     part.calculate_bounding_box();
 
     // Calculate default inertia from bounding box
-    part.inertia = crate::inertia::InertiaMatrix::from_bounding_box(
-        part.mass,
-        part.bbox_min,
-        part.bbox_max,
-    );
+    part.inertia =
+        crate::inertia::InertiaMatrix::from_bounding_box(part.mass, part.bbox_min, part.bbox_max);
 
     Ok(part)
 }
 
 /// Convert triangle soup to indexed mesh with scale factor
-fn index_mesh_with_scale(mesh: &stl_io::IndexedMesh, scale: f32) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
+fn index_mesh_with_scale(
+    mesh: &stl_io::IndexedMesh,
+    scale: f32,
+) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
     let mut unique_vertices: Vec<[f32; 3]> = Vec::new();
     let mut vertex_map: HashMap<[i32; 3], u32> = HashMap::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -160,7 +160,9 @@ pub fn save_stl(part: &Part, path: impl AsRef<Path>) -> Result<(), StlError> {
             let n = part.normals[i];
             // Transform normal
             let normal_mat = part.origin_transform.inverse().transpose();
-            let transformed = normal_mat.transform_vector3(glam::Vec3::from(n)).normalize();
+            let transformed = normal_mat
+                .transform_vector3(glam::Vec3::from(n))
+                .normalize();
             [transformed.x, transformed.y, transformed.z]
         } else {
             // Calculate normal from vertices

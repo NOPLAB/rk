@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use urdf_core::Part;
-use urdf_renderer::{axis::AxisInstance, marker::MarkerInstance, GizmoAxis, GizmoMode, Renderer};
+use urdf_renderer::{GizmoAxis, GizmoMode, Renderer, axis::AxisInstance, marker::MarkerInstance};
 
 /// Render texture for viewport
 struct RenderTexture {
@@ -197,11 +197,11 @@ impl ViewportState {
                     [1.0, 0.8, 0.2, 1.0] // Gold for selected
                 } else {
                     match jp.joint_type {
-                        urdf_core::JointType::Fixed => [0.5, 0.5, 1.0, 1.0],      // Blue
-                        urdf_core::JointType::Revolute => [0.2, 1.0, 0.2, 1.0],   // Green
+                        urdf_core::JointType::Fixed => [0.5, 0.5, 1.0, 1.0], // Blue
+                        urdf_core::JointType::Revolute => [0.2, 1.0, 0.2, 1.0], // Green
                         urdf_core::JointType::Continuous => [0.2, 0.8, 1.0, 1.0], // Cyan
-                        urdf_core::JointType::Prismatic => [1.0, 0.5, 0.2, 1.0],  // Orange
-                        _ => [0.8, 0.8, 0.8, 1.0],                                // Gray
+                        urdf_core::JointType::Prismatic => [1.0, 0.5, 0.2, 1.0], // Orange
+                        _ => [0.8, 0.8, 0.8, 1.0],                           // Gray
                     }
                 };
                 MarkerInstance::new(world_pos, 0.02, color)
@@ -398,8 +398,11 @@ impl ViewportState {
             self.gizmo.drag_start_pos = current_point;
 
             // Update gizmo visual
-            self.renderer
-                .show_gizmo(&self.queue, self.gizmo.gizmo_position, self.gizmo.gizmo_scale);
+            self.renderer.show_gizmo(
+                &self.queue,
+                self.gizmo.gizmo_position,
+                self.gizmo.gizmo_scale,
+            );
 
             return Some(GizmoTransform::Translation(projected_delta));
         }
@@ -420,9 +423,12 @@ impl ViewportState {
             .screen_to_ray(screen_x, screen_y, width, height);
         let rotation_axis = self.gizmo.drag_axis.direction();
 
-        if let Some(current_point) =
-            ray_plane_intersection(ray_origin, ray_dir, self.gizmo.gizmo_position, rotation_axis)
-        {
+        if let Some(current_point) = ray_plane_intersection(
+            ray_origin,
+            ray_dir,
+            self.gizmo.gizmo_position,
+            rotation_axis,
+        ) {
             let offset = current_point - self.gizmo.gizmo_position;
             let current_angle = self.angle_on_plane(offset, self.gizmo.drag_axis);
             let angle_delta = current_angle - self.gizmo.drag_start_angle;
@@ -453,7 +459,8 @@ impl ViewportState {
     pub fn end_gizmo_drag(&mut self) {
         self.gizmo.dragging = false;
         self.gizmo.drag_axis = GizmoAxis::None;
-        self.renderer.set_gizmo_highlight(&self.queue, GizmoAxis::None);
+        self.renderer
+            .set_gizmo_highlight(&self.queue, GizmoAxis::None);
     }
 
     /// Get the plane normal for dragging on an axis

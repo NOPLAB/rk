@@ -32,7 +32,11 @@ impl PropertyComponent for PhysicalComponent {
         ui.horizontal(|ui| {
             ui.label("Mass (kg):");
             changed |= ui
-                .add(DragValue::new(&mut part.mass).speed(0.01).range(0.001..=1000.0))
+                .add(
+                    DragValue::new(&mut part.mass)
+                        .speed(0.01)
+                        .range(0.001..=1000.0),
+                )
                 .changed();
         });
 

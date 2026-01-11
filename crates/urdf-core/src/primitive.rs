@@ -40,12 +40,7 @@ pub fn generate_box_mesh(size: [f32; 3]) -> MeshData {
 
     // +X face
     add_face(
-        [
-            [hx, -hy, -hz],
-            [hx, hy, -hz],
-            [hx, hy, hz],
-            [hx, -hy, hz],
-        ],
+        [[hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz], [hx, -hy, hz]],
         [1.0, 0.0, 0.0],
     );
 
@@ -62,12 +57,7 @@ pub fn generate_box_mesh(size: [f32; 3]) -> MeshData {
 
     // +Y face
     add_face(
-        [
-            [hx, hy, -hz],
-            [-hx, hy, -hz],
-            [-hx, hy, hz],
-            [hx, hy, hz],
-        ],
+        [[hx, hy, -hz], [-hx, hy, -hz], [-hx, hy, hz], [hx, hy, hz]],
         [0.0, 1.0, 0.0],
     );
 
@@ -84,12 +74,7 @@ pub fn generate_box_mesh(size: [f32; 3]) -> MeshData {
 
     // +Z face (top)
     add_face(
-        [
-            [-hx, -hy, hz],
-            [hx, -hy, hz],
-            [hx, hy, hz],
-            [-hx, hy, hz],
-        ],
+        [[-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz]],
         [0.0, 0.0, 1.0],
     );
 

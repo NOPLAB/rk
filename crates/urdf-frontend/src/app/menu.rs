@@ -3,10 +3,7 @@
 use crate::state::{AppAction, SharedAppState};
 
 /// Render the menu bar and return any triggered action
-pub fn render_menu_bar(
-    ctx: &egui::Context,
-    app_state: &SharedAppState,
-) -> Option<MenuAction> {
+pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Option<MenuAction> {
     let mut menu_action = None;
 
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -34,7 +31,9 @@ pub fn render_menu_bar(
                         .add_filter("URDF Project", &["ron"])
                         .save_file()
                     {
-                        app_state.lock().queue_action(AppAction::SaveProject(Some(path)));
+                        app_state
+                            .lock()
+                            .queue_action(AppAction::SaveProject(Some(path)));
                     }
                     ui.close_menu();
                 }

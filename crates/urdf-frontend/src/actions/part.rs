@@ -3,7 +3,7 @@
 use glam::Mat4;
 use uuid::Uuid;
 
-use urdf_core::{generate_box_mesh, generate_cylinder_mesh, generate_sphere_mesh, Part};
+use urdf_core::{Part, generate_box_mesh, generate_cylinder_mesh, generate_sphere_mesh};
 
 use crate::state::{AppAction, PrimitiveType};
 
@@ -33,7 +33,8 @@ fn handle_create_primitive(
 ) {
     // Generate unique name
     let existing_count = ctx.app_state.lock().parts.len();
-    let part_name = name.unwrap_or_else(|| format!("{}_{}", primitive_type.name(), existing_count + 1));
+    let part_name =
+        name.unwrap_or_else(|| format!("{}_{}", primitive_type.name(), existing_count + 1));
 
     // Generate mesh based on primitive type (default size: 0.1m)
     let (vertices, normals, indices) = match primitive_type {
@@ -114,6 +115,8 @@ fn handle_update_part_transform(part_id: Uuid, transform: Mat4, ctx: &ActionCont
         part.origin_transform = transform;
     }
     if let Some(viewport_state) = ctx.viewport_state {
-        viewport_state.lock().update_part_transform(part_id, transform);
+        viewport_state
+            .lock()
+            .update_part_transform(part_id, transform);
     }
 }

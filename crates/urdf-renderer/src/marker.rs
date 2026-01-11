@@ -6,7 +6,7 @@ use wgpu::util::DeviceExt;
 
 use crate::constants::{instances, marker as constants};
 use crate::instanced::InstanceBuffer;
-use crate::pipeline::{create_camera_bind_group, PipelineConfig};
+use crate::pipeline::{PipelineConfig, create_camera_bind_group};
 use crate::vertex::PositionVertex;
 
 /// Marker instance data - passed as vertex instance
