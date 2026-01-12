@@ -111,7 +111,7 @@ impl GizmoRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Gizmo Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/gizmo.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/gizmo.wgsl").into()),
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

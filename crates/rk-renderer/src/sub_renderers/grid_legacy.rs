@@ -27,7 +27,7 @@ impl GridRenderer {
 
         let pipeline = PipelineConfig::new(
             "Grid",
-            include_str!("shaders/grid.wgsl"),
+            include_str!("../shaders/grid.wgsl"),
             format,
             depth_format,
             &[camera_bind_group_layout],

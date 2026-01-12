@@ -68,7 +68,7 @@ impl AxisRenderer {
 
         let pipeline = PipelineConfig::new(
             "Axis",
-            include_str!("shaders/axis.wgsl"),
+            include_str!("../shaders/axis.wgsl"),
             format,
             depth_format,
             &[camera_bind_group_layout],

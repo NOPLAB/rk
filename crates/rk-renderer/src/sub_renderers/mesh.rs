@@ -202,7 +202,7 @@ impl MeshRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Mesh Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/mesh.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/mesh.wgsl").into()),
         });
 
         let camera_bind_group =

@@ -20,16 +20,15 @@ use wgpu::util::DeviceExt;
 
 use rk_core::Part;
 
-use crate::axis::{AxisInstance, AxisRenderer};
 use crate::camera::Camera;
 use crate::constants::viewport::{CLEAR_COLOR, SAMPLE_COUNT};
-use crate::gizmo::{GizmoAxis, GizmoMode, GizmoRenderer};
-use crate::grid::GridRenderer;
-use crate::marker::{MarkerInstance, MarkerRenderer};
-use crate::mesh::{MeshData, MeshRenderer};
 use crate::plugin::RendererRegistry;
 use crate::resources::MeshManager;
 use crate::scene::Scene;
+use crate::sub_renderers::{
+    AxisInstance, AxisRenderer, GizmoAxis, GizmoMode, GizmoRenderer, GridRenderer, MarkerInstance,
+    MarkerRenderer, MeshData, MeshRenderer,
+};
 
 /// Mesh entry with bind group
 pub struct MeshEntry {

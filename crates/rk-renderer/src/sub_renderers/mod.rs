@@ -1,17 +1,41 @@
-//! Built-in sub-renderers implementing the SubRenderer trait.
+//! Built-in sub-renderers for the URDF editor.
 //!
-//! These renderers provide the core visual elements for the URDF editor:
-//! - Grid: Ground reference plane
-//! - Mesh: 3D geometry rendering
-//! - Axis: Coordinate frame indicators
-//! - Marker: Joint point visualization
-//! - Gizmo: Transform manipulation tool
+//! This module contains all rendering components organized by functionality:
+//!
+//! ## New Architecture (SubRenderer trait)
+//! - [`GridSubRenderer`]: Grid sub-renderer implementing the new trait
+//!
+//! ## Legacy Renderers (being migrated)
+//! - [`grid_legacy::GridRenderer`]: Legacy grid implementation
+//! - [`mesh::MeshRenderer`]: 3D geometry rendering
+//! - [`axis::AxisRenderer`]: Coordinate frame indicators
+//! - [`marker::MarkerRenderer`]: Joint point visualization
+//! - [`gizmo::GizmoRenderer`]: Transform manipulation tool
 
+// New trait-based implementations
 mod grid;
 
+// Legacy implementations (to be migrated to SubRenderer trait)
+pub mod axis;
+pub mod gizmo;
+pub mod grid_legacy;
+pub mod marker;
+pub mod mesh;
+
+// Re-exports for new architecture
 pub use grid::GridSubRenderer;
 
-// Re-export priorities for reference
+// Re-exports for legacy code
+pub use axis::{AxisInstance, AxisRenderer};
+pub use gizmo::{GizmoAxis, GizmoMode, GizmoRenderer};
+pub use grid_legacy::GridRenderer;
+pub use marker::{MarkerInstance, MarkerRenderer};
+pub use mesh::{MeshData, MeshRenderer, MeshVertex};
+
+/// Render priorities for sub-renderers.
+///
+/// Lower values are rendered first (background), higher values are rendered
+/// on top. Use these constants when implementing custom sub-renderers.
 pub mod priorities {
     /// Grid is rendered first (background)
     pub const GRID: i32 = 0;

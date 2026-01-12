@@ -100,7 +100,7 @@ impl MarkerRenderer {
 
         let pipeline = PipelineConfig::new(
             "Marker",
-            include_str!("shaders/marker.wgsl"),
+            include_str!("../shaders/marker.wgsl"),
             format,
             depth_format,
             &[camera_bind_group_layout],
@@ -112,7 +112,7 @@ impl MarkerRenderer {
         // Pipeline for selected markers - always on top (no depth test)
         let selected_pipeline = PipelineConfig::new(
             "Selected Marker",
-            include_str!("shaders/marker.wgsl"),
+            include_str!("../shaders/marker.wgsl"),
             format,
             depth_format,
             &[camera_bind_group_layout],
