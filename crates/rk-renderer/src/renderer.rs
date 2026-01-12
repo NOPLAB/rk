@@ -1,4 +1,16 @@
 //! Main renderer combining all sub-renderers
+//!
+//! This module provides the main [`Renderer`] struct that orchestrates all
+//! rendering operations. It uses a plugin-based architecture where sub-renderers
+//! can be registered via [`RendererRegistry`].
+//!
+//! # Architecture
+//!
+//! The renderer uses the following components:
+//! - [`RenderContext`]: Encapsulates GPU resources
+//! - [`Scene`]: Manages renderable objects
+//! - [`MeshManager`]: Handles GPU mesh resources
+//! - [`RendererRegistry`]: Manages sub-renderer plugins
 
 use std::collections::HashMap;
 
@@ -15,6 +27,9 @@ use crate::gizmo::{GizmoAxis, GizmoMode, GizmoRenderer};
 use crate::grid::GridRenderer;
 use crate::marker::{MarkerInstance, MarkerRenderer};
 use crate::mesh::{MeshData, MeshRenderer};
+use crate::plugin::RendererRegistry;
+use crate::resources::MeshManager;
+use crate::scene::Scene;
 
 /// Mesh entry with bind group
 pub struct MeshEntry {
@@ -22,8 +37,31 @@ pub struct MeshEntry {
     pub bind_group: wgpu::BindGroup,
 }
 
-/// Main renderer
+/// Main renderer combining all sub-renderers.
+///
+/// The renderer provides both a legacy API for backward compatibility
+/// and access to new architectural components for advanced use cases.
+///
+/// # Legacy API
+///
+/// Methods like [`add_part`], [`update_part_transform`], etc. work the same
+/// as before for existing code.
+///
+/// # New Architecture
+///
+/// For advanced use cases, access the new components:
+/// - [`registry`]/[`registry_mut`]: Access the plugin system
+/// - [`scene`]/[`scene_mut`]: Access the scene graph
+/// - [`mesh_manager`]/[`mesh_manager_mut`]: Access mesh resources
+/// - [`context`]: Access the render context
 pub struct Renderer {
+    // New architectural components (optional during migration)
+    // These will be fully integrated in future versions
+    scene: Scene,
+    mesh_manager: MeshManager,
+    registry: RendererRegistry,
+
+    // Legacy components (kept for backward compatibility)
     camera: Camera,
     camera_buffer: wgpu::Buffer,
     camera_bind_group_layout: wgpu::BindGroupLayout,
@@ -33,7 +71,7 @@ pub struct Renderer {
     msaa_texture: Option<wgpu::Texture>,
     msaa_view: Option<wgpu::TextureView>,
 
-    // Sub-renderers
+    // Sub-renderers (legacy - will migrate to registry)
     grid_renderer: GridRenderer,
     mesh_renderer: MeshRenderer,
     axis_renderer: AxisRenderer,
@@ -135,7 +173,18 @@ impl Renderer {
             &camera_buffer,
         );
 
+        // Initialize new architectural components
+        let scene = Scene::new();
+        let mesh_manager = MeshManager::new();
+        let registry = RendererRegistry::new();
+
         Self {
+            // New components
+            scene,
+            mesh_manager,
+            registry,
+
+            // Legacy components
             camera,
             camera_buffer,
             camera_bind_group_layout,
@@ -520,5 +569,46 @@ impl Renderer {
     /// Get camera bind group layout for external use
     pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.camera_bind_group_layout
+    }
+
+    // ========== New Architecture Accessors ==========
+
+    /// Get a reference to the scene.
+    ///
+    /// The scene manages all renderable objects. Use this for advanced
+    /// scene manipulation beyond the convenience methods.
+    pub fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    /// Get a mutable reference to the scene.
+    pub fn scene_mut(&mut self) -> &mut Scene {
+        &mut self.scene
+    }
+
+    /// Get a reference to the mesh manager.
+    ///
+    /// The mesh manager handles GPU mesh resources. Use this for
+    /// advanced mesh manipulation or to share meshes between objects.
+    pub fn mesh_manager(&self) -> &MeshManager {
+        &self.mesh_manager
+    }
+
+    /// Get a mutable reference to the mesh manager.
+    pub fn mesh_manager_mut(&mut self) -> &mut MeshManager {
+        &mut self.mesh_manager
+    }
+
+    /// Get a reference to the renderer registry.
+    ///
+    /// The registry manages sub-renderer plugins. Use this to
+    /// register custom renderers or modify rendering behavior.
+    pub fn registry(&self) -> &RendererRegistry {
+        &self.registry
+    }
+
+    /// Get a mutable reference to the renderer registry.
+    pub fn registry_mut(&mut self) -> &mut RendererRegistry {
+        &mut self.registry
     }
 }

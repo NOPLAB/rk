@@ -13,6 +13,18 @@ pub struct CameraUniform {
     pub eye: [f32; 4],
 }
 
+impl Default for CameraUniform {
+    fn default() -> Self {
+        let identity = glam::Mat4::IDENTITY.to_cols_array_2d();
+        Self {
+            view_proj: identity,
+            view: identity,
+            proj: identity,
+            eye: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+}
+
 /// Orbit camera
 pub struct Camera {
     pub position: Vec3,
