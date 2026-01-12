@@ -1,4 +1,4 @@
-//! STL mesh renderer
+//! STL mesh renderer with shadow mapping support
 
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
@@ -185,11 +185,13 @@ impl MeshData {
     }
 }
 
-/// Mesh renderer
+/// Mesh renderer with shadow mapping support
 pub struct MeshRenderer {
     pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
     camera_bind_group: wgpu::BindGroup,
     instance_bind_group_layout: wgpu::BindGroupLayout,
+    light_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl MeshRenderer {
@@ -203,6 +205,11 @@ impl MeshRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Mesh Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/mesh.wgsl").into()),
+        });
+
+        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Shadow Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/shadow.wgsl").into()),
         });
 
         let camera_bind_group =
@@ -224,9 +231,51 @@ impl MeshRenderer {
                 }],
             });
 
+        // Light + shadow bind group layout (group 2)
+        let light_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Light Bind Group Layout"),
+                entries: &[
+                    // Light uniform buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Shadow map texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Shadow sampler (comparison)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
+
+        // Main pipeline layout with 3 bind groups: camera, instance, light+shadow
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Mesh Pipeline Layout"),
-            bind_group_layouts: &[camera_bind_group_layout, &instance_bind_group_layout],
+            bind_group_layouts: &[
+                camera_bind_group_layout,
+                &instance_bind_group_layout,
+                &light_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -270,11 +319,83 @@ impl MeshRenderer {
             cache: None,
         });
 
+        // Shadow pipeline - uses light uniform at group 0, instance at group 1
+        // (different from main pipeline which has camera at group 0)
+        let shadow_light_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Shadow Light Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let shadow_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Shadow Pipeline Layout"),
+                bind_group_layouts: &[&shadow_light_bind_group_layout, &instance_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Shadow Pipeline"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[MeshVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_shader,
+                entry_point: Some("fs_main"),
+                targets: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back), // Cull back faces for shadow pass
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(), // No MSAA for shadow map
+            multiview: None,
+            cache: None,
+        });
+
         Self {
             pipeline,
+            shadow_pipeline,
             camera_bind_group,
             instance_bind_group_layout,
+            light_bind_group_layout,
         }
+    }
+
+    /// Get the light bind group layout
+    pub fn light_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.light_bind_group_layout
+    }
+
+    /// Get the instance bind group layout
+    pub fn instance_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.instance_bind_group_layout
     }
 
     /// Create bind group for a mesh instance
@@ -293,15 +414,34 @@ impl MeshRenderer {
         })
     }
 
+    /// Render mesh to shadow map (depth-only pass)
+    pub fn render_shadow<'a>(
+        &'a self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        mesh: &'a MeshData,
+        instance_bind_group: &'a wgpu::BindGroup,
+        light_bind_group: &'a wgpu::BindGroup,
+    ) {
+        render_pass.set_pipeline(&self.shadow_pipeline);
+        render_pass.set_bind_group(0, light_bind_group, &[]);
+        render_pass.set_bind_group(1, instance_bind_group, &[]);
+        render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+    }
+
+    /// Render mesh with lighting and shadows
     pub fn render<'a>(
         &'a self,
         render_pass: &mut wgpu::RenderPass<'a>,
         mesh: &'a MeshData,
         instance_bind_group: &'a wgpu::BindGroup,
+        light_bind_group: &'a wgpu::BindGroup,
     ) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
         render_pass.set_bind_group(1, instance_bind_group, &[]);
+        render_pass.set_bind_group(2, light_bind_group, &[]);
         render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);

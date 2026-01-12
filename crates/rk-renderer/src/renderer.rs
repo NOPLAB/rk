@@ -14,14 +14,16 @@
 
 use std::collections::HashMap;
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
 use rk_core::Part;
 
 use crate::camera::Camera;
+use crate::constants::shadow::{SHADOW_MAP_FORMAT, SHADOW_MAP_SIZE};
 use crate::constants::viewport::{CLEAR_COLOR, SAMPLE_COUNT};
+use crate::light::DirectionalLight;
 use crate::plugin::RendererRegistry;
 use crate::resources::MeshManager;
 use crate::scene::Scene;
@@ -69,6 +71,19 @@ pub struct Renderer {
     // MSAA color texture (for multisampling)
     msaa_texture: Option<wgpu::Texture>,
     msaa_view: Option<wgpu::TextureView>,
+
+    // Lighting and shadow resources
+    light: DirectionalLight,
+    light_buffer: wgpu::Buffer,
+    #[allow(dead_code)] // Held for GPU resource lifetime
+    shadow_texture: wgpu::Texture,
+    shadow_view: wgpu::TextureView,
+    #[allow(dead_code)] // Held for GPU resource lifetime
+    shadow_sampler: wgpu::Sampler,
+    /// Bind group for main pass (light uniform + shadow map + sampler)
+    light_bind_group: wgpu::BindGroup,
+    /// Bind group for shadow pass (light uniform only)
+    shadow_light_bind_group: wgpu::BindGroup,
 
     // Sub-renderers (legacy - will migrate to registry)
     grid_renderer: GridRenderer,
@@ -132,6 +147,19 @@ impl Renderer {
             None => (None, None),
         };
 
+        // Initialize lighting
+        let light = DirectionalLight::new();
+        let light_uniform = light.uniform(Vec3::ZERO);
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Light Buffer"),
+            contents: bytemuck::cast_slice(&[light_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create shadow map texture
+        let (shadow_texture, shadow_view) = Self::create_shadow_texture(device);
+        let shadow_sampler = Self::create_shadow_sampler(device);
+
         let grid_renderer = GridRenderer::new(
             device,
             format,
@@ -147,6 +175,40 @@ impl Renderer {
             &camera_bind_group_layout,
             &camera_buffer,
         );
+
+        // Create light bind groups after mesh_renderer is created
+        let light_bind_group = Self::create_light_bind_group(
+            device,
+            mesh_renderer.light_bind_group_layout(),
+            &light_buffer,
+            &shadow_view,
+            &shadow_sampler,
+        );
+
+        // Shadow pass bind group (light uniform only, for shadow.wgsl group 0)
+        let shadow_light_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Shadow Light Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let shadow_light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Shadow Light Bind Group"),
+            layout: &shadow_light_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
+        });
 
         let axis_renderer = AxisRenderer::new(
             device,
@@ -191,6 +253,16 @@ impl Renderer {
             depth_view,
             msaa_texture,
             msaa_view,
+
+            // Lighting
+            light,
+            light_buffer,
+            shadow_texture,
+            shadow_view,
+            shadow_sampler,
+            light_bind_group,
+            shadow_light_bind_group,
+
             grid_renderer,
             mesh_renderer,
             axis_renderer,
@@ -218,6 +290,45 @@ impl Renderer {
     /// Get a mutable reference to the camera.
     pub fn camera_mut(&mut self) -> &mut Camera {
         &mut self.camera
+    }
+
+    // ========== Light accessors ==========
+
+    /// Get a reference to the directional light.
+    pub fn light(&self) -> &DirectionalLight {
+        &self.light
+    }
+
+    /// Get a mutable reference to the directional light.
+    pub fn light_mut(&mut self) -> &mut DirectionalLight {
+        &mut self.light
+    }
+
+    /// Set light direction (convenience method).
+    pub fn set_light_direction(&mut self, direction: Vec3) {
+        self.light.set_direction(direction);
+    }
+
+    /// Set light color and intensity (convenience method).
+    pub fn set_light_color(&mut self, color: Vec3, intensity: f32) {
+        self.light.color = color;
+        self.light.intensity = intensity;
+    }
+
+    /// Set ambient lighting (convenience method).
+    pub fn set_ambient(&mut self, color: Vec3, strength: f32) {
+        self.light.ambient_color = color;
+        self.light.ambient_strength = strength;
+    }
+
+    /// Enable or disable shadows.
+    pub fn set_shadows_enabled(&mut self, enabled: bool) {
+        self.light.shadows_enabled = enabled;
+    }
+
+    /// Check if shadows are enabled.
+    pub fn shadows_enabled(&self) -> bool {
+        self.light.shadows_enabled
     }
 
     // ========== Display option accessors ==========
@@ -324,6 +435,66 @@ impl Renderer {
         Some((texture, view))
     }
 
+    fn create_shadow_texture(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Shadow Map Texture"),
+            size: wgpu::Extent3d {
+                width: SHADOW_MAP_SIZE,
+                height: SHADOW_MAP_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1, // No MSAA for shadow map
+            dimension: wgpu::TextureDimension::D2,
+            format: SHADOW_MAP_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    }
+
+    fn create_shadow_sampler(device: &wgpu::Device) -> wgpu::Sampler {
+        device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Shadow Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        })
+    }
+
+    fn create_light_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        light_buffer: &wgpu::Buffer,
+        shadow_view: &wgpu::TextureView,
+        shadow_sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Light Bind Group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: light_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(shadow_sampler),
+                },
+            ],
+        })
+    }
+
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -355,6 +526,17 @@ impl Renderer {
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[camera_uniform]),
+        );
+    }
+
+    fn update_light(&self, queue: &wgpu::Queue) {
+        // Use camera target as scene center for shadow projection
+        let scene_center = self.camera.target;
+        let light_uniform = self.light.uniform(scene_center);
+        queue.write_buffer(
+            &self.light_buffer,
+            0,
+            bytemuck::cast_slice(&[light_uniform]),
         );
     }
 
@@ -497,7 +679,46 @@ impl Renderer {
         queue: &wgpu::Queue,
     ) {
         self.update_camera(queue);
+        self.update_light(queue);
 
+        // === SHADOW PASS ===
+        // Render scene from light's perspective to generate shadow map
+        if self.light.shadows_enabled && !self.meshes.is_empty() {
+            let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Shadow Pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            shadow_pass.set_viewport(
+                0.0,
+                0.0,
+                SHADOW_MAP_SIZE as f32,
+                SHADOW_MAP_SIZE as f32,
+                0.0,
+                1.0,
+            );
+
+            for entry in self.meshes.values() {
+                self.mesh_renderer.render_shadow(
+                    &mut shadow_pass,
+                    &entry.data,
+                    &entry.bind_group,
+                    &self.shadow_light_bind_group,
+                );
+            }
+        }
+
+        // === MAIN PASS ===
         // Set up color attachment with MSAA if enabled
         let color_attachment = if let Some(msaa_view) = &self.msaa_view {
             // MSAA enabled: render to multisample texture, resolve to output
@@ -543,10 +764,14 @@ impl Renderer {
             self.grid_renderer.render(&mut render_pass);
         }
 
-        // Render meshes (iteration order doesn't matter for rendering)
+        // Render meshes with lighting and shadows
         for entry in self.meshes.values() {
-            self.mesh_renderer
-                .render(&mut render_pass, &entry.data, &entry.bind_group);
+            self.mesh_renderer.render(
+                &mut render_pass,
+                &entry.data,
+                &entry.bind_group,
+                &self.light_bind_group,
+            );
         }
 
         // Render axes

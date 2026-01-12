@@ -38,6 +38,7 @@ pub mod traits;
 pub mod camera;
 pub mod constants;
 pub mod instanced;
+pub mod light;
 pub mod pipeline;
 pub mod renderer;
 pub mod sub_renderers;
@@ -68,6 +69,7 @@ pub mod mesh {
 // Re-exports for convenience
 pub use camera::*;
 pub use context::RenderContext;
+pub use light::{DirectionalLight, LightUniform};
 pub use plugin::{RendererPlugin, RendererRegistry};
 pub use renderer::*;
 pub use resources::MeshData as ResourceMeshData;

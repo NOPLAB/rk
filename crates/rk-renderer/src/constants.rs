@@ -122,3 +122,15 @@ pub mod viewport {
     /// MSAA sample count for anti-aliasing (1 = disabled, 4 = 4x MSAA)
     pub const SAMPLE_COUNT: u32 = 4;
 }
+
+/// Shadow mapping constants
+pub mod shadow {
+    /// Shadow map resolution (width and height in pixels)
+    pub const SHADOW_MAP_SIZE: u32 = 2048;
+    /// Shadow map depth texture format
+    pub const SHADOW_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    /// Default shadow depth bias to prevent shadow acne
+    pub const DEFAULT_BIAS: f32 = 0.005;
+    /// Default normal-based shadow bias for grazing angles
+    pub const DEFAULT_NORMAL_BIAS: f32 = 0.01;
+}
