@@ -6,7 +6,9 @@ use glam::Vec3;
 use rk_renderer::{GizmoAxis, GizmoMode};
 
 use crate::panels::Panel;
-use crate::state::{GizmoTransform, SharedAppState, SharedViewportState};
+use crate::state::{
+    AppAction, GizmoTransform, PickablePartData, SharedAppState, SharedViewportState, pick_object,
+};
 
 use camera_overlay::{render_axes_indicator, render_camera_settings, render_gizmo_toggle};
 
@@ -175,6 +177,45 @@ impl Panel for ViewportPanel {
             // End drag
             if response.drag_stopped_by(egui::PointerButton::Primary) {
                 vp_state.end_gizmo_drag();
+            }
+
+            // Object picking on click (only if not interacting with gizmo)
+            if response.clicked_by(egui::PointerButton::Primary)
+                && self.hovered_axis == GizmoAxis::None
+            {
+                // Gather pickable part data from app_state
+                let pickable_parts: Vec<PickablePartData> = {
+                    let app = app_state.lock();
+                    app.project
+                        .parts()
+                        .values()
+                        .map(|part| PickablePartData {
+                            id: part.id,
+                            vertices: part.vertices.clone(),
+                            indices: part.indices.clone(),
+                            transform: part.origin_transform,
+                            bbox_min: part.bbox_min,
+                            bbox_max: part.bbox_max,
+                        })
+                        .collect()
+                };
+
+                // Perform picking
+                let camera = vp_state.renderer.camera();
+                let hit = pick_object(
+                    camera,
+                    pos.x,
+                    pos.y,
+                    available_size.x,
+                    available_size.y,
+                    &pickable_parts,
+                );
+
+                // Queue selection action
+                let selected_id = hit.map(|(id, _)| id);
+                app_state
+                    .lock()
+                    .queue_action(AppAction::SelectPart(selected_id));
             }
         }
 

@@ -4,7 +4,10 @@ mod editor;
 mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
-pub use viewport::{GizmoInteraction, GizmoTransform, SharedViewportState, ViewportState};
+pub use viewport::{
+    GizmoInteraction, GizmoTransform, PickablePartData, SharedViewportState, ViewportState,
+    pick_object,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;
