@@ -7,7 +7,6 @@ pub enum EditorTool {
     Select,
     Move,
     Rotate,
-    AddJointPoint,
 }
 
 impl EditorTool {
@@ -16,7 +15,6 @@ impl EditorTool {
             EditorTool::Select => "Select",
             EditorTool::Move => "Move",
             EditorTool::Rotate => "Rotate",
-            EditorTool::AddJointPoint => "Add Joint Point",
         }
     }
 }

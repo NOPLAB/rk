@@ -1,17 +1,18 @@
-//! Mesh file loading (OBJ, DAE formats)
+//! Mesh file loading (STL, OBJ, DAE formats)
 
 mod dae;
 mod normals;
 mod obj;
+mod stl;
 
 use std::path::Path;
 
 use crate::part::Part;
-use crate::stl::StlUnit;
 
 pub use dae::{load_dae, load_dae_with_unit};
 pub use normals::{calculate_face_normals, calculate_triangle_normal};
 pub use obj::{load_obj, load_obj_with_unit};
+pub use stl::{StlError, StlUnit, load_stl, load_stl_from_bytes, load_stl_with_unit, save_stl};
 
 /// Detect mesh format from file extension
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +62,7 @@ pub fn load_mesh(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part, MeshErro
 
     match format {
         MeshFormat::Stl => {
-            crate::stl::load_stl_with_unit(path, unit).map_err(|e| MeshError::Parse(e.to_string()))
+            stl::load_stl_with_unit(path, unit).map_err(|e| MeshError::Parse(e.to_string()))
         }
         MeshFormat::Obj => load_obj_with_unit(path, unit),
         MeshFormat::Dae => load_dae_with_unit(path, unit),

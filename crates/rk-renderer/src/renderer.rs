@@ -108,6 +108,7 @@ pub struct Renderer {
 
     // Configurable rendering settings
     clear_color: wgpu::Color,
+    shadow_map_size: u32,
 
     format: wgpu::TextureFormat,
     width: u32,
@@ -164,7 +165,7 @@ impl Renderer {
         });
 
         // Create shadow map texture
-        let (shadow_texture, shadow_view) = Self::create_shadow_texture(device);
+        let (shadow_texture, shadow_view) = Self::create_shadow_texture(device, SHADOW_MAP_SIZE);
         let shadow_sampler = Self::create_shadow_sampler(device);
 
         let grid_renderer = GridRenderer::new(
@@ -282,6 +283,7 @@ impl Renderer {
             show_markers: true,
             show_gizmo: true,
             clear_color: CLEAR_COLOR,
+            shadow_map_size: SHADOW_MAP_SIZE,
             format,
             width,
             height,
@@ -443,12 +445,16 @@ impl Renderer {
         Some((texture, view))
     }
 
-    fn create_shadow_texture(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
+    fn create_shadow_texture(
+        device: &wgpu::Device,
+        size: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let size = size.clamp(256, 8192);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Shadow Map Texture"),
             size: wgpu::Extent3d {
-                width: SHADOW_MAP_SIZE,
-                height: SHADOW_MAP_SIZE,
+                width: size,
+                height: size,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -710,8 +716,8 @@ impl Renderer {
             shadow_pass.set_viewport(
                 0.0,
                 0.0,
-                SHADOW_MAP_SIZE as f32,
-                SHADOW_MAP_SIZE as f32,
+                self.shadow_map_size as f32,
+                self.shadow_map_size as f32,
                 0.0,
                 1.0,
             );
@@ -850,13 +856,18 @@ impl Renderer {
     ///
     /// This updates all renderer settings from the provided config.
     /// Note: Some settings like MSAA require a restart to take effect.
-    pub fn apply_config(&mut self, config: &RendererConfig, device: &wgpu::Device) {
+    pub fn apply_config(
+        &mut self,
+        config: &RendererConfig,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
         self.apply_grid_config(&config.grid, device);
         self.apply_viewport_config(&config.viewport);
-        self.apply_shadow_config(&config.shadow);
+        self.apply_shadow_config(&config.shadow, device);
         self.apply_lighting_config(&config.lighting);
         self.apply_camera_config(&config.camera);
-        self.apply_gizmo_config(&config.gizmo);
+        self.apply_gizmo_config(&config.gizmo, queue);
     }
 
     /// Apply grid configuration.
@@ -874,12 +885,36 @@ impl Renderer {
     }
 
     /// Apply shadow configuration.
-    pub fn apply_shadow_config(&mut self, config: &ShadowConfig) {
+    pub fn apply_shadow_config(&mut self, config: &ShadowConfig, device: &wgpu::Device) {
         self.light.shadows_enabled = config.enabled;
         self.light.shadow_bias = config.bias;
         self.light.shadow_normal_bias = config.normal_bias;
         self.light.shadow_softness = config.softness;
-        // Note: shadow.map_size changes require shadow texture recreation
+
+        // Resize shadow map if size changed
+        if config.map_size != self.shadow_map_size {
+            self.resize_shadow_map(device, config.map_size);
+        }
+    }
+
+    /// Resize shadow map texture.
+    fn resize_shadow_map(&mut self, device: &wgpu::Device, size: u32) {
+        let size = size.clamp(256, 8192);
+        self.shadow_map_size = size;
+
+        // Recreate shadow texture
+        let (shadow_texture, shadow_view) = Self::create_shadow_texture(device, size);
+        self.shadow_texture = shadow_texture;
+        self.shadow_view = shadow_view;
+
+        // Recreate light bind group with new shadow view
+        self.light_bind_group = Self::create_light_bind_group(
+            device,
+            self.mesh_renderer.light_bind_group_layout(),
+            &self.light_buffer,
+            &self.shadow_view,
+            &self.shadow_sampler,
+        );
     }
 
     /// Apply lighting configuration.
@@ -900,9 +935,16 @@ impl Renderer {
     }
 
     /// Apply gizmo configuration.
-    pub fn apply_gizmo_config(&mut self, config: &GizmoConfig) {
+    pub fn apply_gizmo_config(&mut self, config: &GizmoConfig, queue: &wgpu::Queue) {
         self.show_gizmo = config.enabled;
-        // Note: gizmo scale and colors are currently set per-instance
+        // Apply axis colors from config
+        self.gizmo_renderer.set_axis_colors(
+            queue,
+            config.x_axis_color,
+            config.y_axis_color,
+            config.z_axis_color,
+        );
+        // Note: gizmo scale is applied per-instance when showing the gizmo
     }
 
     /// Apply viewport configuration.

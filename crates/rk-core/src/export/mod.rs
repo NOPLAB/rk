@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::assembly::Assembly;
+use crate::mesh::save_stl;
 use crate::part::Part;
-use crate::stl::save_stl;
 
 pub use options::ExportOptions;
 pub use xml::{sanitize_filename, xml_escape};

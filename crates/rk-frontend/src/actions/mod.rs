@@ -93,9 +93,7 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
         }
 
         // Assembly actions
-        AppAction::AddJointPoint { .. }
-        | AppAction::RemoveJointPoint { .. }
-        | AppAction::ConnectParts { .. }
+        AppAction::ConnectParts { .. }
         | AppAction::DisconnectPart { .. }
         | AppAction::UpdateJointPosition { .. }
         | AppAction::ResetJointPosition { .. }

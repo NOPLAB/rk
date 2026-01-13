@@ -164,11 +164,8 @@ fn handle_save_project(path: Option<std::path::PathBuf>, ctx: &ActionContext) {
 
 fn handle_load_project(path: std::path::PathBuf, ctx: &ActionContext) {
     match Project::load(&path) {
-        Ok(mut project) => {
+        Ok(project) => {
             tracing::info!("Loaded project: {}", project.name);
-
-            // Ensure joint_points are synced from assembly (for older project files)
-            sync_joint_points_from_assembly(&mut project);
 
             // Clear viewport
             if let Some(viewport_state) = ctx.viewport_state {
@@ -188,123 +185,6 @@ fn handle_load_project(path: std::path::PathBuf, ctx: &ActionContext) {
         }
         Err(e) => {
             tracing::error!("Failed to load project: {}", e);
-        }
-    }
-}
-
-/// Sync joint_points from assembly joints to parts
-/// This handles older project files that may not have joint_points saved
-fn sync_joint_points_from_assembly(project: &mut Project) {
-    use glam::Vec3;
-    use rk_core::JointPoint;
-
-    // Collect information about joints that need joint points
-    struct JointPointInfo {
-        joint_id: uuid::Uuid,
-        is_parent: bool,
-        part_id: uuid::Uuid,
-        name: String,
-        position: Vec3,
-        orientation: glam::Quat,
-        joint_type: rk_core::JointType,
-        axis: Vec3,
-        limits: Option<rk_core::JointLimits>,
-    }
-
-    let mut to_create: Vec<JointPointInfo> = Vec::new();
-
-    for (joint_id, joint) in &project.assembly.joints {
-        // Get link names for naming joint points
-        let parent_link_name = project
-            .assembly
-            .links
-            .get(&joint.parent_link)
-            .map(|l| l.name.clone())
-            .unwrap_or_default();
-        let child_link_name = project
-            .assembly
-            .links
-            .get(&joint.child_link)
-            .map(|l| l.name.clone())
-            .unwrap_or_default();
-
-        // Get part IDs from links
-        let parent_part_id = project
-            .assembly
-            .links
-            .get(&joint.parent_link)
-            .and_then(|l| l.part_id);
-        let child_part_id = project
-            .assembly
-            .links
-            .get(&joint.child_link)
-            .and_then(|l| l.part_id);
-
-        // Create joint point on parent part if not exists
-        if joint.parent_joint_point.is_none()
-            && let Some(part_id) = parent_part_id
-        {
-            to_create.push(JointPointInfo {
-                joint_id: *joint_id,
-                is_parent: true,
-                part_id,
-                name: format!("joint_to_{}", child_link_name),
-                position: Vec3::new(
-                    joint.origin.xyz[0],
-                    joint.origin.xyz[1],
-                    joint.origin.xyz[2],
-                ),
-                orientation: glam::Quat::from_euler(
-                    glam::EulerRot::XYZ,
-                    joint.origin.rpy[0],
-                    joint.origin.rpy[1],
-                    joint.origin.rpy[2],
-                ),
-                joint_type: joint.joint_type,
-                axis: joint.axis,
-                limits: joint.limits,
-            });
-        }
-
-        // Create joint point on child part if not exists
-        if joint.child_joint_point.is_none()
-            && let Some(part_id) = child_part_id
-        {
-            to_create.push(JointPointInfo {
-                joint_id: *joint_id,
-                is_parent: false,
-                part_id,
-                name: format!("joint_from_{}", parent_link_name),
-                position: Vec3::ZERO,
-                orientation: glam::Quat::IDENTITY,
-                joint_type: joint.joint_type,
-                axis: joint.axis,
-                limits: joint.limits,
-            });
-        }
-    }
-
-    // Now apply the changes
-    for info in to_create {
-        let jp = JointPoint {
-            id: uuid::Uuid::new_v4(),
-            name: info.name,
-            part_id: info.part_id,
-            position: info.position,
-            orientation: info.orientation,
-            joint_type: info.joint_type,
-            axis: info.axis,
-            limits: info.limits,
-        };
-        let jp_id = jp.id;
-        project.assembly.add_joint_point(jp);
-
-        if let Some(joint) = project.assembly.joints.get_mut(&info.joint_id) {
-            if info.is_parent {
-                joint.parent_joint_point = Some(jp_id);
-            } else {
-                joint.child_joint_point = Some(jp_id);
-            }
         }
     }
 }

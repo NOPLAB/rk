@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::stl::StlUnit;
+use crate::mesh::StlUnit;
 
 /// Import options for URDF loading
 #[derive(Debug, Clone)]

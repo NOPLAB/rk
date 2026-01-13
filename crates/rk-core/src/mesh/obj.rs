@@ -3,10 +3,10 @@
 use std::path::Path;
 
 use crate::part::Part;
-use crate::stl::StlUnit;
 
 use super::MeshError;
 use super::normals::calculate_face_normals;
+use super::stl::StlUnit;
 
 /// Load an OBJ file and create a Part
 pub fn load_obj(path: impl AsRef<Path>) -> Result<Part, MeshError> {

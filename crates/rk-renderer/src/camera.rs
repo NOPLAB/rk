@@ -83,11 +83,16 @@ impl Camera {
 
     /// Pan the camera (move target)
     pub fn pan(&mut self, delta_x: f32, delta_y: f32) {
+        self.pan_with_sensitivity(delta_x, delta_y, 0.002);
+    }
+
+    /// Pan the camera with configurable sensitivity
+    pub fn pan_with_sensitivity(&mut self, delta_x: f32, delta_y: f32, sensitivity: f32) {
         let forward = (self.target - self.position).normalize();
         let right = forward.cross(self.up).normalize();
         let up = right.cross(forward).normalize();
 
-        let scale = self.distance * 0.002;
+        let scale = self.distance * sensitivity;
         self.target += right * (-delta_x * scale) + up * (delta_y * scale);
         self.update_position_from_orbit();
     }

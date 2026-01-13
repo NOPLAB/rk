@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use rk_core::Part;
-use rk_renderer::{GizmoAxis, GizmoMode, Renderer, axis::AxisInstance, marker::MarkerInstance};
+use rk_renderer::{GizmoAxis, GizmoMode, Renderer, axis::AxisInstance};
 
 /// Render texture for viewport
 struct RenderTexture {
@@ -35,7 +35,6 @@ pub struct GizmoInteraction {
     pub drag_start_angle: f32,
     pub part_start_transform: Mat4,
     pub part_id: Option<Uuid>,
-    pub selected_joint_point: Option<usize>,
     pub gizmo_position: Vec3,
     pub gizmo_scale: f32,
 }
@@ -186,44 +185,6 @@ impl ViewportState {
         self.renderer.update_axes(&self.queue, &[instance]);
     }
 
-    /// Update joint point markers for a part
-    pub fn update_markers_for_part(
-        &mut self,
-        part: &Part,
-        joint_points: &[rk_core::JointPoint],
-        selected_point: Option<usize>,
-    ) {
-        let mut normal_instances: Vec<MarkerInstance> = Vec::new();
-        let mut selected_instances: Vec<MarkerInstance> = Vec::new();
-
-        for (i, jp) in joint_points.iter().enumerate() {
-            let world_pos = part.origin_transform.transform_point3(jp.position);
-            let is_selected = Some(i) == selected_point;
-            let color = if is_selected {
-                [1.0, 0.8, 0.2, 1.0] // Gold for selected
-            } else {
-                match jp.joint_type {
-                    rk_core::JointType::Fixed => [0.5, 0.5, 1.0, 1.0], // Blue
-                    rk_core::JointType::Revolute => [0.2, 1.0, 0.2, 1.0], // Green
-                    rk_core::JointType::Continuous => [0.2, 0.8, 1.0, 1.0], // Cyan
-                    rk_core::JointType::Prismatic => [1.0, 0.5, 0.2, 1.0], // Orange
-                    _ => [0.8, 0.8, 0.8, 1.0],                         // Gray
-                }
-            };
-            let instance = MarkerInstance::new(world_pos, 0.02, color);
-
-            if is_selected {
-                selected_instances.push(instance);
-            } else {
-                normal_instances.push(instance);
-            }
-        }
-
-        self.renderer.update_markers(&self.queue, &normal_instances);
-        self.renderer
-            .update_selected_markers(&self.queue, &selected_instances);
-    }
-
     /// Clear axes and markers
     pub fn clear_overlays(&mut self) {
         self.renderer.update_axes(&self.queue, &[]);
@@ -250,35 +211,9 @@ impl ViewportState {
         self.gizmo.gizmo_position = world_center;
         self.gizmo.gizmo_scale = scale;
         self.gizmo.part_id = Some(part.id);
-        self.gizmo.selected_joint_point = None; // Not a joint point
         self.gizmo.part_start_transform = part.origin_transform;
 
         self.renderer.show_gizmo(&self.queue, world_center, scale);
-    }
-
-    /// Show gizmo for a joint point
-    pub fn show_gizmo_for_joint_point(
-        &mut self,
-        part: &Part,
-        joint_points: &[rk_core::JointPoint],
-        point_idx: usize,
-    ) {
-        if let Some(jp) = joint_points.get(point_idx) {
-            // Transform joint point position by part's origin transform
-            let world_pos = part.origin_transform.transform_point3(jp.position);
-
-            // Use fixed scale - shader handles distance-based scaling for constant screen size
-            let scale = 1.0;
-
-            // Store gizmo state
-            self.gizmo.gizmo_position = world_pos;
-            self.gizmo.gizmo_scale = scale;
-            self.gizmo.part_id = Some(part.id);
-            self.gizmo.selected_joint_point = Some(point_idx); // Track which joint point
-            self.gizmo.part_start_transform = part.origin_transform;
-
-            self.renderer.show_gizmo(&self.queue, world_pos, scale);
-        }
     }
 
     /// Hide gizmo

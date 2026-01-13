@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 
-use rk_core::{Joint, JointPoint, Link, Pose};
+use rk_core::{Joint, Link, Pose};
 
 use crate::state::{AppAction, AppState};
 
@@ -13,12 +13,6 @@ pub fn handle_assembly_action(action: AppAction, ctx: &ActionContext) {
     match action {
         AppAction::ConnectParts { parent, child } => handle_connect_parts(parent, child, ctx),
         AppAction::DisconnectPart { child } => handle_disconnect_part(child, ctx),
-        AppAction::AddJointPoint { part_id, position } => {
-            handle_add_joint_point(part_id, position, ctx)
-        }
-        AppAction::RemoveJointPoint { part_id, point_id } => {
-            handle_remove_joint_point(part_id, point_id, ctx)
-        }
         AppAction::UpdateJointPosition { joint_id, position } => {
             handle_update_joint_position(joint_id, position, ctx)
         }
@@ -43,46 +37,6 @@ fn handle_connect_parts(parent: Uuid, child: Uuid, ctx: &ActionContext) {
             tracing::warn!("Failed to disconnect existing parent: {}", e);
         }
 
-        // Get names first to avoid borrow issues
-        let child_name_for_jp = state
-            .get_part(child)
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "child".to_string());
-        let parent_name_for_jp = state
-            .get_part(parent)
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "parent".to_string());
-
-        // Create joint point on parent part (at center)
-        let parent_jp_id = if let Some(part) = state.get_part(parent) {
-            let center = glam::Vec3::new(
-                (part.bbox_min[0] + part.bbox_max[0]) / 2.0,
-                (part.bbox_min[1] + part.bbox_max[1]) / 2.0,
-                (part.bbox_min[2] + part.bbox_max[2]) / 2.0,
-            );
-            let jp = JointPoint::new(format!("joint_to_{}", child_name_for_jp), parent, center);
-            let jp_id = jp.id;
-            state.project.assembly.add_joint_point(jp);
-            Some(jp_id)
-        } else {
-            None
-        };
-
-        // Create joint point on child part (at center)
-        let child_jp_id = if let Some(part) = state.get_part(child) {
-            let center = glam::Vec3::new(
-                (part.bbox_min[0] + part.bbox_max[0]) / 2.0,
-                (part.bbox_min[1] + part.bbox_max[1]) / 2.0,
-                (part.bbox_min[2] + part.bbox_max[2]) / 2.0,
-            );
-            let jp = JointPoint::new(format!("joint_from_{}", parent_name_for_jp), child, center);
-            let jp_id = jp.id;
-            state.project.assembly.add_joint_point(jp);
-            Some(jp_id)
-        } else {
-            None
-        };
-
         // Get names for joint
         let parent_name = state
             .project
@@ -100,14 +54,12 @@ fn handle_connect_parts(parent: Uuid, child: Uuid, ctx: &ActionContext) {
             .unwrap_or_default();
 
         // Create fixed joint
-        let mut joint = Joint::fixed(
+        let joint = Joint::fixed(
             format!("{}_to_{}", parent_name, child_name),
             parent_link_id,
             child_link_id,
             Pose::default(),
         );
-        joint.parent_joint_point = parent_jp_id;
-        joint.child_joint_point = child_jp_id;
 
         match state
             .project
@@ -170,32 +122,6 @@ fn handle_disconnect_part(child: Uuid, ctx: &ActionContext) {
                 tracing::error!("Failed to disconnect part: {}", e);
             }
         }
-    }
-}
-
-fn handle_add_joint_point(part_id: Uuid, position: glam::Vec3, ctx: &ActionContext) {
-    let mut state = ctx.app_state.lock();
-    let jp_count = state
-        .project
-        .assembly
-        .get_joint_points_for_part(part_id)
-        .len();
-    let jp = JointPoint::new(format!("joint_point_{}", jp_count), part_id, position);
-    state.project.assembly.add_joint_point(jp);
-    state.modified = true;
-    tracing::info!("Added joint point to part {}", part_id);
-}
-
-fn handle_remove_joint_point(_part_id: Uuid, point_id: Uuid, ctx: &ActionContext) {
-    let mut state = ctx.app_state.lock();
-    if state
-        .project
-        .assembly
-        .remove_joint_point(point_id)
-        .is_some()
-    {
-        state.modified = true;
-        tracing::info!("Removed joint point {}", point_id);
     }
 }
 

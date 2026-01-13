@@ -12,6 +12,7 @@ pub use preferences::PreferencesPanel;
 pub use properties::PropertiesPanel;
 pub use viewport::ViewportPanel;
 
+use crate::config::SharedConfig;
 use crate::state::{SharedAppState, SharedViewportState};
 
 /// Panel trait for dockable UI panels
@@ -29,9 +30,10 @@ pub trait Panel {
         app_state: &SharedAppState,
         render_state: &egui_wgpu::RenderState,
         viewport_state: &SharedViewportState,
+        config: &SharedConfig,
     ) {
         // Default: just call ui()
-        let _ = (render_state, viewport_state);
+        let _ = (render_state, viewport_state, config);
         self.ui(ui, app_state);
     }
 

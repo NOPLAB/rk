@@ -5,10 +5,10 @@ use std::path::Path;
 use dae_parser::{Document, Geometry, Primitive, Semantic, Source};
 
 use crate::part::Part;
-use crate::stl::StlUnit;
 
 use super::MeshError;
 use super::normals::{calculate_face_normals, calculate_triangle_normal};
+use super::stl::StlUnit;
 
 /// Load a DAE (COLLADA) file and create a Part
 pub fn load_dae(path: impl AsRef<Path>) -> Result<Part, MeshError> {

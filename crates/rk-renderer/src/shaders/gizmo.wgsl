@@ -7,8 +7,19 @@ struct CameraUniform {
     eye: vec4<f32>,
 };
 
+struct GizmoConfig {
+    x_axis_color: vec4<f32>,
+    y_axis_color: vec4<f32>,
+    z_axis_color: vec4<f32>,
+    use_config_colors: f32, // 1.0 = use config colors, 0.0 = use vertex colors
+    _pad: vec3<f32>,
+};
+
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
+
+@group(1) @binding(0)
+var<uniform> gizmo_config: GizmoConfig;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -60,8 +71,19 @@ fn vs_main(
 
     out.clip_position = camera.view_proj * world_pos;
 
-    // Brighten if this axis is highlighted
+    // Get color from config or vertex based on flag
     var color = in.color;
+    if (gizmo_config.use_config_colors > 0.5) {
+        if (in.axis_id == 0u) {
+            color = gizmo_config.x_axis_color;
+        } else if (in.axis_id == 1u) {
+            color = gizmo_config.y_axis_color;
+        } else {
+            color = gizmo_config.z_axis_color;
+        }
+    }
+
+    // Brighten if this axis is highlighted
     if (highlighted_axis == i32(in.axis_id)) {
         color = vec4<f32>(1.0, 1.0, 0.5, 1.0); // Yellow highlight
     }

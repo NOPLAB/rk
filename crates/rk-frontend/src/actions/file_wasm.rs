@@ -79,7 +79,6 @@ fn handle_load_project_bytes(_name: &str, data: &[u8], ctx: &ActionContext) {
             state.project = project;
             state.project_path = None;
             state.selected_part = None;
-            state.selected_joint_point = None;
             state.modified = false;
         }
         Err(e) => {

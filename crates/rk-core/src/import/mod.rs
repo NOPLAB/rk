@@ -203,8 +203,6 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
                 friction: d.friction as f32,
             }),
             mimic: None, // Will be resolved in second pass
-            parent_joint_point: None,
-            child_joint_point: None,
         };
 
         let joint_id = joint.id;
@@ -234,98 +232,6 @@ pub fn import_urdf(urdf_path: &Path, options: &ImportOptions) -> Result<Project,
                 multiplier: mimic.multiplier.unwrap_or(1.0) as f32,
                 offset: mimic.offset.unwrap_or(0.0) as f32,
             });
-        }
-    }
-
-    // Create joint points in assembly from joint information
-    let joint_ids: Vec<Uuid> = assembly.joints.keys().copied().collect();
-    for joint_id in joint_ids {
-        let (
-            parent_part_id,
-            child_part_id,
-            child_link_name,
-            parent_link_name,
-            joint_origin,
-            joint_type,
-            axis,
-            limits,
-        ) = {
-            let joint = assembly.joints.get(&joint_id).unwrap();
-            let parent_part_id = assembly
-                .links
-                .get(&joint.parent_link)
-                .and_then(|l| l.part_id);
-            let child_part_id = assembly
-                .links
-                .get(&joint.child_link)
-                .and_then(|l| l.part_id);
-            let child_link_name = assembly
-                .links
-                .get(&joint.child_link)
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
-            let parent_link_name = assembly
-                .links
-                .get(&joint.parent_link)
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
-            (
-                parent_part_id,
-                child_part_id,
-                child_link_name,
-                parent_link_name,
-                joint.origin,
-                joint.joint_type,
-                joint.axis,
-                joint.limits,
-            )
-        };
-
-        // Create joint point on parent part (at origin, since joint origin is relative to parent)
-        if let Some(part_id) = parent_part_id {
-            let jp = crate::part::JointPoint {
-                id: Uuid::new_v4(),
-                name: format!("joint_to_{}", child_link_name),
-                part_id,
-                position: Vec3::new(
-                    joint_origin.xyz[0],
-                    joint_origin.xyz[1],
-                    joint_origin.xyz[2],
-                ),
-                orientation: glam::Quat::from_euler(
-                    glam::EulerRot::XYZ,
-                    joint_origin.rpy[0],
-                    joint_origin.rpy[1],
-                    joint_origin.rpy[2],
-                ),
-                joint_type,
-                axis,
-                limits,
-            };
-            let jp_id = jp.id;
-            assembly.joint_points.insert(jp_id, jp);
-            if let Some(joint) = assembly.joints.get_mut(&joint_id) {
-                joint.parent_joint_point = Some(jp_id);
-            }
-        }
-
-        // Create joint point on child part (at origin of child)
-        if let Some(part_id) = child_part_id {
-            let jp = crate::part::JointPoint {
-                id: Uuid::new_v4(),
-                name: format!("joint_from_{}", parent_link_name),
-                part_id,
-                position: Vec3::ZERO, // Child's joint point is at its own origin
-                orientation: glam::Quat::IDENTITY,
-                joint_type,
-                axis,
-                limits,
-            };
-            let jp_id = jp.id;
-            assembly.joint_points.insert(jp_id, jp);
-            if let Some(joint) = assembly.joints.get_mut(&joint_id) {
-                joint.child_joint_point = Some(jp_id);
-            }
         }
     }
 

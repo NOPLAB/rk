@@ -4,12 +4,11 @@ mod component;
 mod components;
 mod helpers;
 
-pub use component::{JointPointAction, PropertyComponent, PropertyContext};
+pub use component::{PropertyComponent, PropertyContext};
 
-use components::{
-    GeometryComponent, JointPointsComponent, PhysicalComponent, TransformComponent, VisualComponent,
-};
+use components::{GeometryComponent, PhysicalComponent, TransformComponent, VisualComponent};
 
+use crate::config::SharedConfig;
 use crate::panels::Panel;
 use crate::state::{SharedAppState, SharedViewportState};
 
@@ -19,7 +18,6 @@ pub struct PropertiesPanel {
     physical: PhysicalComponent,
     visual: VisualComponent,
     geometry: GeometryComponent,
-    joint_points: JointPointsComponent,
 }
 
 impl PropertiesPanel {
@@ -29,7 +27,6 @@ impl PropertiesPanel {
             physical: PhysicalComponent::new(),
             visual: VisualComponent::new(),
             geometry: GeometryComponent::new(),
-            joint_points: JointPointsComponent::new(),
         }
     }
 }
@@ -60,6 +57,7 @@ impl Panel for PropertiesPanel {
         app_state: &SharedAppState,
         _render_state: &egui_wgpu::RenderState,
         viewport_state: &SharedViewportState,
+        _config: &SharedConfig,
     ) {
         let mut state = app_state.lock();
 
@@ -67,9 +65,6 @@ impl Panel for PropertiesPanel {
             ui.weak("No part selected");
             return;
         };
-
-        // Extract selection state before mutable borrow
-        let selected_point = state.selected_joint_point.map(|(_, idx)| idx);
 
         // Find parent's world transform if this part is in assembly
         let parent_world_transform = state
@@ -83,15 +78,6 @@ impl Panel for PropertiesPanel {
                     .get_parent_link(link.id)
                     .map(|parent| parent.world_transform)
             });
-
-        // Get joint points for this part from assembly
-        let joint_points: Vec<_> = state
-            .project
-            .assembly
-            .get_joint_points_for_part(selected_id)
-            .into_iter()
-            .cloned()
-            .collect();
 
         let Some(part) = state.get_part_mut(selected_id) else {
             ui.weak("Selected part not found");
@@ -112,11 +98,7 @@ impl Panel for PropertiesPanel {
         // Create context for components
         let mut ctx = PropertyContext {
             part,
-            part_id: selected_id,
-            selected_joint_point: selected_point,
             parent_world_transform,
-            joint_points,
-            joint_point_actions: Vec::new(),
         };
 
         // Render each component with collapsible header
@@ -125,7 +107,6 @@ impl Panel for PropertiesPanel {
         render_component(ui, &mut self.physical, &mut ctx);
         render_component(ui, &mut self.visual, &mut ctx);
         render_component(ui, &mut self.geometry, &mut ctx);
-        render_component(ui, &mut self.joint_points, &mut ctx);
 
         // If transform changed, update the renderer
         let new_transform = if transform_changed {
@@ -134,32 +115,6 @@ impl Panel for PropertiesPanel {
             None
         };
 
-        let is_empty = ctx.joint_points.is_empty();
-        let jp_actions = std::mem::take(&mut ctx.joint_point_actions);
-
-        // Handle joint point selection (needs state access after component rendering)
-        let pending_select = self.joint_points.take_pending_select();
-
-        // Apply joint point actions
-        for action in jp_actions {
-            match action {
-                JointPointAction::Add(jp) => {
-                    state.project.assembly.add_joint_point(jp);
-                    state.modified = true;
-                }
-                JointPointAction::Remove(id) => {
-                    state.project.assembly.remove_joint_point(id);
-                    state.modified = true;
-                }
-                JointPointAction::Update(jp) => {
-                    if let Some(existing) = state.project.assembly.get_joint_point_mut(jp.id) {
-                        *existing = jp;
-                        state.modified = true;
-                    }
-                }
-            }
-        }
-
         drop(state);
 
         // Update renderer with new transform
@@ -167,14 +122,6 @@ impl Panel for PropertiesPanel {
             viewport_state
                 .lock()
                 .update_part_transform(selected_id, transform);
-        }
-
-        if let Some(idx) = pending_select {
-            app_state.lock().select_joint_point(selected_id, idx);
-        }
-
-        if is_empty {
-            // Already shown in component
         }
     }
 }

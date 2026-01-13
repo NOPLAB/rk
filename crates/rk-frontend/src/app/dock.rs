@@ -2,6 +2,7 @@
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
+use crate::config::SharedConfig;
 use crate::panels::{JointListPanel, Panel, PartListPanel, PropertiesPanel, ViewportPanel};
 use crate::state::{SharedAppState, SharedViewportState};
 
@@ -29,6 +30,7 @@ pub struct UrdfTabViewer<'a> {
     pub app_state: &'a SharedAppState,
     pub render_state: Option<&'a egui_wgpu::RenderState>,
     pub viewport_state: &'a Option<SharedViewportState>,
+    pub config: &'a SharedConfig,
 }
 
 impl TabViewer for UrdfTabViewer<'_> {
@@ -44,7 +46,13 @@ impl TabViewer for UrdfTabViewer<'_> {
                 if let (Some(render_state), Some(viewport_state)) =
                     (self.render_state, self.viewport_state)
                 {
-                    panel.ui_with_render_context(ui, self.app_state, render_state, viewport_state);
+                    panel.ui_with_render_context(
+                        ui,
+                        self.app_state,
+                        render_state,
+                        viewport_state,
+                        self.config,
+                    );
                 } else {
                     panel.ui(ui, self.app_state);
                 }
@@ -55,7 +63,13 @@ impl TabViewer for UrdfTabViewer<'_> {
                 if let (Some(render_state), Some(viewport_state)) =
                     (self.render_state, self.viewport_state)
                 {
-                    panel.ui_with_render_context(ui, self.app_state, render_state, viewport_state);
+                    panel.ui_with_render_context(
+                        ui,
+                        self.app_state,
+                        render_state,
+                        viewport_state,
+                        self.config,
+                    );
                 } else {
                     panel.ui(ui, self.app_state);
                 }

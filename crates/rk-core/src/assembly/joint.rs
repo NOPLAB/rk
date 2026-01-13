@@ -28,10 +28,6 @@ pub struct Joint {
     pub dynamics: Option<JointDynamics>,
     /// Joint mimic configuration (follows another joint)
     pub mimic: Option<JointMimic>,
-    /// Which joint point on parent was used
-    pub parent_joint_point: Option<Uuid>,
-    /// Which joint point on child was used
-    pub child_joint_point: Option<Uuid>,
 }
 
 /// Joint mimic configuration
@@ -85,8 +81,6 @@ impl Joint {
             limits: None,
             dynamics: None,
             mimic: None,
-            parent_joint_point: None,
-            child_joint_point: None,
         }
     }
 
@@ -110,8 +104,6 @@ impl Joint {
             limits: Some(limits),
             dynamics: None,
             mimic: None,
-            parent_joint_point: None,
-            child_joint_point: None,
         }
     }
 
@@ -133,8 +125,6 @@ pub struct JointBuilder {
     limits: Option<JointLimits>,
     dynamics: Option<JointDynamics>,
     mimic: Option<JointMimic>,
-    parent_joint_point: Option<Uuid>,
-    child_joint_point: Option<Uuid>,
 }
 
 impl JointBuilder {
@@ -150,8 +140,6 @@ impl JointBuilder {
             limits: None,
             dynamics: None,
             mimic: None,
-            parent_joint_point: None,
-            child_joint_point: None,
         }
     }
 
@@ -251,18 +239,6 @@ impl JointBuilder {
         self
     }
 
-    /// Set the parent joint point reference
-    pub fn parent_joint_point(mut self, point_id: Uuid) -> Self {
-        self.parent_joint_point = Some(point_id);
-        self
-    }
-
-    /// Set the child joint point reference
-    pub fn child_joint_point(mut self, point_id: Uuid) -> Self {
-        self.child_joint_point = Some(point_id);
-        self
-    }
-
     /// Build the joint
     pub fn build(self) -> Joint {
         Joint {
@@ -276,8 +252,6 @@ impl JointBuilder {
             limits: self.limits,
             dynamics: self.dynamics,
             mimic: self.mimic,
-            parent_joint_point: self.parent_joint_point,
-            child_joint_point: self.child_joint_point,
         }
     }
 }

@@ -56,6 +56,29 @@ impl GizmoAxis {
     }
 }
 
+/// Gizmo config uniform data
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct GizmoConfigUniform {
+    pub x_axis_color: [f32; 4],
+    pub y_axis_color: [f32; 4],
+    pub z_axis_color: [f32; 4],
+    pub use_config_colors: f32,
+    pub _pad: [f32; 3],
+}
+
+impl Default for GizmoConfigUniform {
+    fn default() -> Self {
+        Self {
+            x_axis_color: [1.0, 0.2, 0.2, 1.0],
+            y_axis_color: [0.2, 1.0, 0.2, 1.0],
+            z_axis_color: [0.2, 0.2, 1.0, 1.0],
+            use_config_colors: 0.0, // Default: use vertex colors
+            _pad: [0.0; 3],
+        }
+    }
+}
+
 /// Gizmo instance data
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -95,6 +118,10 @@ pub struct GizmoRenderer {
     // Shared buffers
     instance_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    // Config uniform
+    config_buffer: wgpu::Buffer,
+    config_bind_group: wgpu::BindGroup,
+    config_uniform: GizmoConfigUniform,
     pub visible: bool,
     pub mode: GizmoMode,
     pub highlighted_axis: GizmoAxis,
@@ -123,9 +150,41 @@ impl GizmoRenderer {
             }],
         });
 
+        // Create config uniform buffer and bind group
+        let config_uniform = GizmoConfigUniform::default();
+        let config_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Gizmo Config Buffer"),
+            contents: bytemuck::cast_slice(&[config_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let config_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Gizmo Config Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let config_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Gizmo Config Bind Group"),
+            layout: &config_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: config_buffer.as_entire_binding(),
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Gizmo Pipeline Layout"),
-            bind_group_layouts: &[camera_bind_group_layout],
+            bind_group_layouts: &[camera_bind_group_layout, &config_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -292,6 +351,9 @@ impl GizmoRenderer {
             scale_index_count,
             instance_buffer,
             bind_group,
+            config_buffer,
+            config_bind_group,
+            config_uniform,
             visible: false,
             mode: GizmoMode::Translate,
             highlighted_axis: GizmoAxis::None,
@@ -337,6 +399,29 @@ impl GizmoRenderer {
         self.mode = mode;
     }
 
+    /// Set gizmo axis colors from config
+    pub fn set_axis_colors(
+        &mut self,
+        queue: &wgpu::Queue,
+        x_color: [f32; 4],
+        y_color: [f32; 4],
+        z_color: [f32; 4],
+    ) {
+        self.config_uniform.x_axis_color = x_color;
+        self.config_uniform.y_axis_color = y_color;
+        self.config_uniform.z_axis_color = z_color;
+        self.config_uniform.use_config_colors = 1.0;
+        self.update_config_buffer(queue);
+    }
+
+    fn update_config_buffer(&self, queue: &wgpu::Queue) {
+        queue.write_buffer(
+            &self.config_buffer,
+            0,
+            bytemuck::cast_slice(&[self.config_uniform]),
+        );
+    }
+
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         if !self.visible {
             return;
@@ -344,6 +429,7 @@ impl GizmoRenderer {
 
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
+        render_pass.set_bind_group(1, &self.config_bind_group, &[]);
 
         // Select buffers based on mode
         match self.mode {

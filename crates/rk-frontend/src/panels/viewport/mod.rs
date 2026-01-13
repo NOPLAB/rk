@@ -5,6 +5,7 @@ mod camera_overlay;
 use glam::Vec3;
 use rk_renderer::{GizmoAxis, GizmoMode};
 
+use crate::config::SharedConfig;
 use crate::panels::Panel;
 use crate::state::{
     AppAction, GizmoTransform, PickablePartData, SharedAppState, SharedViewportState, pick_object,
@@ -68,6 +69,7 @@ impl Panel for ViewportPanel {
         app_state: &SharedAppState,
         render_state: &egui_wgpu::RenderState,
         viewport_state: &SharedViewportState,
+        config: &SharedConfig,
     ) {
         // Toolbar
         ui.horizontal(|ui| {
@@ -223,7 +225,6 @@ impl Panel for ViewportPanel {
         if let Some(transform) = gizmo_delta
             && let Some(part_id) = vp_state.gizmo.part_id
         {
-            let selected_joint_point = vp_state.gizmo.selected_joint_point;
             let queue = vp_state.queue.clone();
             drop(vp_state);
 
@@ -231,104 +232,73 @@ impl Panel for ViewportPanel {
 
             match transform {
                 GizmoTransform::Translation(delta) => {
-                    if let Some(joint_idx) = selected_joint_point {
-                        // Moving a joint point - update joint point position in local space
-                        // Get the joint point ID from the index
-                        let joint_points: Vec<_> = app
-                            .project
-                            .assembly
-                            .get_joint_points_for_part(part_id)
-                            .into_iter()
-                            .map(|jp| jp.id)
-                            .collect();
-                        if let Some(&jp_id) = joint_points.get(joint_idx)
-                            && let Some(part) = app.get_part(part_id)
-                        {
-                            let inv_transform = part.origin_transform.inverse();
-                            let local_delta = inv_transform.transform_vector3(delta);
-                            if let Some(jp) = app.project.assembly.get_joint_point_mut(jp_id) {
-                                jp.position += local_delta;
-                            }
-                        }
-                        drop(app);
+                    // Moving the whole part - update part transform
+                    let new_transform = if let Some(part) = app.get_part_mut(part_id) {
+                        let translation = part.origin_transform.to_scale_rotation_translation().2;
+                        let new_translation = translation + delta;
+                        part.origin_transform = glam::Mat4::from_translation(new_translation);
+                        Some(part.origin_transform)
                     } else {
-                        // Moving the whole part - update part transform
-                        let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                            let translation =
-                                part.origin_transform.to_scale_rotation_translation().2;
-                            let new_translation = translation + delta;
-                            part.origin_transform = glam::Mat4::from_translation(new_translation);
-                            Some(part.origin_transform)
-                        } else {
-                            None
-                        };
-                        drop(app);
+                        None
+                    };
+                    drop(app);
 
-                        // Update mesh renderer transform
-                        if let Some(transform) = new_transform {
-                            let mut vp = viewport_state.lock();
-                            vp.renderer
-                                .update_part_transform(&queue, part_id, transform);
-                            drop(vp);
-                        }
+                    // Update mesh renderer transform
+                    if let Some(transform) = new_transform {
+                        let mut vp = viewport_state.lock();
+                        vp.renderer
+                            .update_part_transform(&queue, part_id, transform);
+                        drop(vp);
                     }
                 }
                 GizmoTransform::Rotation(rotation) => {
                     // Rotating the whole part
-                    if selected_joint_point.is_none() {
-                        let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                            let (scale, old_rotation, translation) =
-                                part.origin_transform.to_scale_rotation_translation();
-                            let new_rotation = rotation * old_rotation;
-                            part.origin_transform = glam::Mat4::from_scale_rotation_translation(
-                                scale,
-                                new_rotation,
-                                translation,
-                            );
-                            Some(part.origin_transform)
-                        } else {
-                            None
-                        };
-                        drop(app);
-
-                        // Update mesh renderer transform
-                        if let Some(transform) = new_transform {
-                            let mut vp = viewport_state.lock();
-                            vp.renderer
-                                .update_part_transform(&queue, part_id, transform);
-                            drop(vp);
-                        }
+                    let new_transform = if let Some(part) = app.get_part_mut(part_id) {
+                        let (scale, old_rotation, translation) =
+                            part.origin_transform.to_scale_rotation_translation();
+                        let new_rotation = rotation * old_rotation;
+                        part.origin_transform = glam::Mat4::from_scale_rotation_translation(
+                            scale,
+                            new_rotation,
+                            translation,
+                        );
+                        Some(part.origin_transform)
                     } else {
-                        drop(app);
+                        None
+                    };
+                    drop(app);
+
+                    // Update mesh renderer transform
+                    if let Some(transform) = new_transform {
+                        let mut vp = viewport_state.lock();
+                        vp.renderer
+                            .update_part_transform(&queue, part_id, transform);
+                        drop(vp);
                     }
                 }
                 GizmoTransform::Scale(scale_delta) => {
                     // Scaling the whole part
-                    if selected_joint_point.is_none() {
-                        let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                            let (old_scale, rotation, translation) =
-                                part.origin_transform.to_scale_rotation_translation();
-                            let new_scale = old_scale * scale_delta;
-                            part.origin_transform = glam::Mat4::from_scale_rotation_translation(
-                                new_scale,
-                                rotation,
-                                translation,
-                            );
-                            Some(part.origin_transform)
-                        } else {
-                            None
-                        };
-                        drop(app);
-
-                        // Update mesh renderer transform
-                        if let Some(transform) = new_transform {
-                            let mut vp = viewport_state.lock();
-                            vp.renderer
-                                .update_part_transform(&queue, part_id, transform);
-                            drop(vp);
-                        }
+                    let new_transform = if let Some(part) = app.get_part_mut(part_id) {
+                        let (old_scale, rotation, translation) =
+                            part.origin_transform.to_scale_rotation_translation();
+                        let new_scale = old_scale * scale_delta;
+                        part.origin_transform = glam::Mat4::from_scale_rotation_translation(
+                            new_scale,
+                            rotation,
+                            translation,
+                        );
+                        Some(part.origin_transform)
                     } else {
-                        drop(app);
+                        None
+                    };
+                    drop(app);
+
+                    // Update mesh renderer transform
+                    if let Some(transform) = new_transform {
+                        let mut vp = viewport_state.lock();
+                        vp.renderer
+                            .update_part_transform(&queue, part_id, transform);
+                        drop(vp);
                     }
                 }
             }
@@ -337,37 +307,52 @@ impl Panel for ViewportPanel {
             vp_state = viewport_state.lock();
         }
 
+        // Get camera sensitivity from config
+        let (orbit_sens, pan_sens, zoom_sens) = {
+            let cfg = config.read();
+            let cam = &cfg.config().renderer.camera;
+            (
+                cam.orbit_sensitivity,
+                cam.pan_sensitivity,
+                cam.zoom_sensitivity,
+            )
+        };
+
         // Middle mouse button for orbit/pan (only if not dragging gizmo)
         if !vp_state.is_dragging_gizmo() && response.dragged_by(egui::PointerButton::Middle) {
             let delta = response.drag_delta();
             if ui.input(|i| i.modifiers.shift) {
                 // Pan
-                vp_state.renderer.camera_mut().pan(delta.x, delta.y);
-            } else {
-                // Orbit
-                let sensitivity = 0.005;
                 vp_state
                     .renderer
                     .camera_mut()
-                    .orbit(-delta.x * sensitivity, delta.y * sensitivity);
+                    .pan_with_sensitivity(delta.x, delta.y, pan_sens);
+            } else {
+                // Orbit
+                vp_state
+                    .renderer
+                    .camera_mut()
+                    .orbit(-delta.x * orbit_sens, delta.y * orbit_sens);
             }
         }
 
         // Right mouse button for orbit as well
         if !vp_state.is_dragging_gizmo() && response.dragged_by(egui::PointerButton::Secondary) {
             let delta = response.drag_delta();
-            let sensitivity = 0.005;
             vp_state
                 .renderer
                 .camera_mut()
-                .orbit(-delta.x * sensitivity, delta.y * sensitivity);
+                .orbit(-delta.x * orbit_sens, delta.y * orbit_sens);
         }
 
         // Zoom with scroll
         if response.hovered() {
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll_delta != 0.0 {
-                vp_state.renderer.camera_mut().zoom(scroll_delta * 0.01);
+                vp_state
+                    .renderer
+                    .camera_mut()
+                    .zoom(scroll_delta * zoom_sens);
             }
         }
 

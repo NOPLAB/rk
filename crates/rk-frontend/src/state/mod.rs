@@ -12,7 +12,7 @@ pub use viewport::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
@@ -57,10 +57,6 @@ pub enum AppAction {
     UpdatePartTransform { part_id: Uuid, transform: Mat4 },
 
     // Assembly actions
-    /// Add a joint point to a part
-    AddJointPoint { part_id: Uuid, position: Vec3 },
-    /// Remove a joint point
-    RemoveJointPoint { part_id: Uuid, point_id: Uuid },
     /// Connect two parts
     ConnectParts { parent: Uuid, child: Uuid },
     /// Disconnect a part from its parent
@@ -89,8 +85,6 @@ pub struct AppState {
     pub project: Project,
     /// Currently selected part
     pub selected_part: Option<Uuid>,
-    /// Currently selected joint point (part_id, point_index)
-    pub selected_joint_point: Option<(Uuid, usize)>,
     /// Hovered part
     pub hovered_part: Option<Uuid>,
     /// Current editor tool
@@ -105,7 +99,7 @@ pub struct AppState {
     pending_actions: Vec<AppAction>,
     /// Show axes on selected part
     pub show_part_axes: bool,
-    /// Show joint point markers
+    /// Show joint markers
     pub show_joint_markers: bool,
     /// Global unit setting for STL import and other operations
     pub stl_import_unit: StlUnit,
@@ -118,7 +112,6 @@ impl Default for AppState {
         Self {
             project: Project::default(),
             selected_part: None,
-            selected_joint_point: None,
             hovered_part: None,
             current_tool: EditorTool::default(),
             symmetry_mode: false,
@@ -199,13 +192,6 @@ impl AppState {
     /// Select a part
     pub fn select_part(&mut self, id: Option<Uuid>) {
         self.selected_part = id;
-        self.selected_joint_point = None;
-    }
-
-    /// Select a joint point
-    pub fn select_joint_point(&mut self, part_id: Uuid, point_idx: usize) {
-        self.selected_part = Some(part_id);
-        self.selected_joint_point = Some((part_id, point_idx));
     }
 
     /// Queue an action
@@ -222,7 +208,6 @@ impl AppState {
     pub fn new_project(&mut self) {
         self.project = Project::default();
         self.selected_part = None;
-        self.selected_joint_point = None;
         self.project_path = None;
         self.modified = false;
     }
@@ -232,7 +217,6 @@ impl AppState {
         self.project = project;
         self.project_path = Some(path);
         self.selected_part = None;
-        self.selected_joint_point = None;
         self.modified = false;
     }
 }
