@@ -210,6 +210,11 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
                     app_state.lock().queue_action(AppAction::DeleteSelectedPart);
                     ui.close();
                 }
+                ui.separator();
+                if ui.button("Preferences...").clicked() {
+                    menu_action = Some(MenuAction::OpenPreferences);
+                    ui.close();
+                }
             });
 
             ui.menu_button("View", |ui| {
@@ -227,4 +232,5 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
 /// Actions triggered by the menu
 pub enum MenuAction {
     ResetLayout,
+    OpenPreferences,
 }

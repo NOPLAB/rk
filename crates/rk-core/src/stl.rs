@@ -4,10 +4,12 @@ use std::collections::HashMap;
 use std::io::BufReader;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use crate::part::Part;
 
 /// STL import scale unit
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum StlUnit {
     /// Meters (no scaling)
     Meters,

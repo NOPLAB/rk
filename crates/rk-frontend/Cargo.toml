@@ -25,6 +25,9 @@ parking_lot = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 rfd = { workspace = true }
+serde = { workspace = true }
+ron = { workspace = true }
+dirs = "6"
 
 # Native-only dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

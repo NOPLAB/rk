@@ -2,11 +2,13 @@
 
 mod joint_list;
 mod part_list;
+mod preferences;
 mod properties;
 mod viewport;
 
 pub use joint_list::JointListPanel;
 pub use part_list::PartListPanel;
+pub use preferences::PreferencesPanel;
 pub use properties::PropertiesPanel;
 pub use viewport::ViewportPanel;
 

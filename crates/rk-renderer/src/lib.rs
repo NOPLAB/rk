@@ -28,6 +28,7 @@
 //! ```
 
 // Core abstractions
+pub mod config;
 pub mod context;
 pub mod plugin;
 pub mod resources;
@@ -68,6 +69,7 @@ pub mod mesh {
 
 // Re-exports for convenience
 pub use camera::*;
+pub use config::RendererConfig;
 pub use context::RenderContext;
 pub use light::{DirectionalLight, LightUniform};
 pub use plugin::{RendererPlugin, RendererRegistry};

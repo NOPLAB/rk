@@ -11,6 +11,8 @@ use egui_dock::{DockArea, DockState, Style};
 use parking_lot::Mutex;
 
 use crate::actions::{ActionContext, dispatch_action};
+use crate::config::{SharedConfig, create_shared_config};
+use crate::panels::PreferencesPanel;
 use crate::state::{SharedAppState, SharedViewportState, ViewportState, create_shared_state};
 use crate::update::{SharedUpdateStatus, UpdateStatus, check_for_updates, create_update_status};
 use welcome::WelcomeDialog;
@@ -32,19 +34,47 @@ pub struct UrdfEditorApp {
     update_dismissed: bool,
     /// Welcome dialog state
     welcome_dialog: WelcomeDialog,
+    /// Application configuration
+    config: SharedConfig,
+    /// Preferences panel
+    preferences_panel: PreferencesPanel,
+    /// Whether preferences window is open
+    preferences_open: bool,
 }
 
 impl UrdfEditorApp {
     /// Create a new app
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Load configuration
+        let config = create_shared_config();
+
         // Create viewport state if WGPU is available
         let viewport_state = cc.wgpu_render_state.as_ref().map(|render_state| {
             let device = Arc::new(render_state.device.clone());
             let queue = Arc::new(render_state.queue.clone());
             let format = render_state.target_format;
 
-            Arc::new(Mutex::new(ViewportState::new(device, queue, format)))
+            let mut vp_state = ViewportState::new(device, queue, format);
+
+            // Apply renderer config from saved settings
+            {
+                let cfg = config.read();
+                vp_state.renderer.apply_config(&cfg.config().renderer);
+            }
+
+            Arc::new(Mutex::new(vp_state))
         });
+
+        // Create app state and apply editor config
+        let app_state = create_shared_state();
+        {
+            let cfg = config.read();
+            let mut state = app_state.lock();
+            state.show_part_axes = cfg.config().editor.show_part_axes;
+            state.show_joint_markers = cfg.config().editor.show_joint_markers;
+            state.angle_display_mode = cfg.config().editor.angle_display_mode;
+            state.stl_import_unit = cfg.config().editor.stl_import_unit;
+        }
 
         // Create dock layout
         let dock_state = create_dock_layout();
@@ -61,11 +91,14 @@ impl UrdfEditorApp {
 
         Self {
             dock_state,
-            app_state: create_shared_state(),
+            app_state,
             viewport_state,
             update_status,
             update_dismissed: false,
             welcome_dialog: WelcomeDialog::new(is_first_launch),
+            config,
+            preferences_panel: PreferencesPanel::new(),
+            preferences_open: false,
         }
     }
 
@@ -130,6 +163,9 @@ impl eframe::App for UrdfEditorApp {
                 MenuAction::ResetLayout => {
                     self.dock_state = create_dock_layout();
                 }
+                MenuAction::OpenPreferences => {
+                    self.preferences_open = true;
+                }
             }
         }
 
@@ -157,10 +193,26 @@ impl eframe::App for UrdfEditorApp {
 
         // Welcome dialog (shown on first launch)
         self.welcome_dialog.show(ctx);
+
+        // Preferences window
+        if self.preferences_open {
+            self.preferences_panel.show(
+                ctx,
+                &self.config,
+                &self.app_state,
+                &self.viewport_state,
+                &mut self.preferences_open,
+            );
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         // Mark that first launch has completed
         storage.set_string(FIRST_LAUNCH_KEY, "true".to_string());
+
+        // Save configuration to disk
+        if let Err(e) = self.config.write().save() {
+            tracing::error!("Failed to save config on exit: {}", e);
+        }
     }
 }

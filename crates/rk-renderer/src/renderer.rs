@@ -21,6 +21,10 @@ use wgpu::util::DeviceExt;
 use rk_core::Part;
 
 use crate::camera::Camera;
+use crate::config::{
+    CameraConfig, GizmoConfig, GridConfig, LightingConfig, RendererConfig, ShadowConfig,
+    ViewportConfig,
+};
 use crate::constants::shadow::{SHADOW_MAP_FORMAT, SHADOW_MAP_SIZE};
 use crate::constants::viewport::{CLEAR_COLOR, SAMPLE_COUNT};
 use crate::light::DirectionalLight;
@@ -834,5 +838,73 @@ impl Renderer {
     /// Get a mutable reference to the renderer registry.
     pub fn registry_mut(&mut self) -> &mut RendererRegistry {
         &mut self.registry
+    }
+
+    // ========== Configuration Methods ==========
+
+    /// Apply a full renderer configuration.
+    ///
+    /// This updates all renderer settings from the provided config.
+    /// Note: Some settings like MSAA require a restart to take effect.
+    pub fn apply_config(&mut self, config: &RendererConfig) {
+        self.apply_grid_config(&config.grid);
+        self.apply_shadow_config(&config.shadow);
+        self.apply_lighting_config(&config.lighting);
+        self.apply_camera_config(&config.camera);
+        self.apply_gizmo_config(&config.gizmo);
+        // Note: viewport.msaa_sample_count changes require renderer recreation
+        // Note: viewport.background_color is applied during render
+    }
+
+    /// Apply grid configuration.
+    pub fn apply_grid_config(&mut self, config: &GridConfig) {
+        self.show_grid = config.enabled;
+        // Note: Grid size/spacing/colors require grid geometry regeneration
+        // which is not currently supported at runtime
+    }
+
+    /// Apply shadow configuration.
+    pub fn apply_shadow_config(&mut self, config: &ShadowConfig) {
+        self.light.shadows_enabled = config.enabled;
+        self.light.shadow_bias = config.bias;
+        self.light.shadow_normal_bias = config.normal_bias;
+        self.light.shadow_softness = config.softness;
+        // Note: shadow.map_size changes require shadow texture recreation
+    }
+
+    /// Apply lighting configuration.
+    pub fn apply_lighting_config(&mut self, config: &LightingConfig) {
+        self.light.set_direction(Vec3::from_array(config.direction));
+        self.light.color = Vec3::from_array(config.color);
+        self.light.intensity = config.intensity;
+        self.light.ambient_color = Vec3::from_array(config.ambient_color);
+        self.light.ambient_strength = config.ambient_strength;
+    }
+
+    /// Apply camera configuration.
+    pub fn apply_camera_config(&mut self, config: &CameraConfig) {
+        self.camera.set_fov_degrees(config.fov_degrees);
+        self.camera.set_near(config.near_plane);
+        self.camera.set_far(config.far_plane);
+        // Note: sensitivity values are used by the frontend, not stored here
+    }
+
+    /// Apply gizmo configuration.
+    pub fn apply_gizmo_config(&mut self, config: &GizmoConfig) {
+        self.show_gizmo = config.enabled;
+        // Note: gizmo scale and colors are currently set per-instance
+    }
+
+    /// Apply viewport configuration.
+    ///
+    /// Note: MSAA changes require renderer recreation and are not applied here.
+    pub fn apply_viewport_config(&mut self, _config: &ViewportConfig) {
+        // Background color is applied during render via CLEAR_COLOR constant
+        // MSAA changes require recreation of pipelines and textures
+    }
+
+    /// Get the current MSAA sample count.
+    pub fn sample_count(&self) -> u32 {
+        SAMPLE_COUNT
     }
 }
