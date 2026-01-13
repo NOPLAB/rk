@@ -106,6 +106,9 @@ pub struct Renderer {
     show_markers: bool,
     show_gizmo: bool,
 
+    // Configurable rendering settings
+    clear_color: wgpu::Color,
+
     format: wgpu::TextureFormat,
     width: u32,
     height: u32,
@@ -278,6 +281,7 @@ impl Renderer {
             show_axes: true,
             show_markers: true,
             show_gizmo: true,
+            clear_color: CLEAR_COLOR,
             format,
             width,
             height,
@@ -730,7 +734,7 @@ impl Renderer {
                 view: msaa_view,
                 resolve_target: Some(view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(CLEAR_COLOR),
+                    load: wgpu::LoadOp::Clear(self.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,
@@ -741,7 +745,7 @@ impl Renderer {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(CLEAR_COLOR),
+                    load: wgpu::LoadOp::Clear(self.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,
@@ -846,21 +850,27 @@ impl Renderer {
     ///
     /// This updates all renderer settings from the provided config.
     /// Note: Some settings like MSAA require a restart to take effect.
-    pub fn apply_config(&mut self, config: &RendererConfig) {
-        self.apply_grid_config(&config.grid);
+    pub fn apply_config(&mut self, config: &RendererConfig, device: &wgpu::Device) {
+        self.apply_grid_config(&config.grid, device);
+        self.apply_viewport_config(&config.viewport);
         self.apply_shadow_config(&config.shadow);
         self.apply_lighting_config(&config.lighting);
         self.apply_camera_config(&config.camera);
         self.apply_gizmo_config(&config.gizmo);
-        // Note: viewport.msaa_sample_count changes require renderer recreation
-        // Note: viewport.background_color is applied during render
     }
 
     /// Apply grid configuration.
-    pub fn apply_grid_config(&mut self, config: &GridConfig) {
+    pub fn apply_grid_config(&mut self, config: &GridConfig, device: &wgpu::Device) {
         self.show_grid = config.enabled;
-        // Note: Grid size/spacing/colors require grid geometry regeneration
-        // which is not currently supported at runtime
+        // Rebuild grid with new parameters
+        self.grid_renderer.rebuild(
+            device,
+            config.size,
+            config.spacing,
+            config.line_color,
+            config.x_axis_color,
+            config.y_axis_color,
+        );
     }
 
     /// Apply shadow configuration.
@@ -898,9 +908,15 @@ impl Renderer {
     /// Apply viewport configuration.
     ///
     /// Note: MSAA changes require renderer recreation and are not applied here.
-    pub fn apply_viewport_config(&mut self, _config: &ViewportConfig) {
-        // Background color is applied during render via CLEAR_COLOR constant
-        // MSAA changes require recreation of pipelines and textures
+    pub fn apply_viewport_config(&mut self, config: &ViewportConfig) {
+        // Apply background color
+        self.clear_color = wgpu::Color {
+            r: config.background_color[0] as f64,
+            g: config.background_color[1] as f64,
+            b: config.background_color[2] as f64,
+            a: config.background_color[3] as f64,
+        };
+        // Note: MSAA changes require recreation of pipelines and textures
     }
 
     /// Get the current MSAA sample count.

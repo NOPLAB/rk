@@ -60,10 +60,53 @@ impl GridRenderer {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.draw(0..self.vertex_count, 0..1);
     }
+
+    /// Rebuild grid with new parameters
+    pub fn rebuild(
+        &mut self,
+        device: &wgpu::Device,
+        size: f32,
+        spacing: f32,
+        line_color: [f32; 3],
+        x_axis_color: [f32; 3],
+        y_axis_color: [f32; 3],
+    ) {
+        let vertices = generate_grid_vertices_with_colors(
+            size,
+            spacing,
+            line_color,
+            x_axis_color,
+            y_axis_color,
+        );
+        self.vertex_count = vertices.len() as u32;
+
+        self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+    }
 }
 
 /// Generate grid line vertices
 fn generate_grid_vertices(size: f32, spacing: f32) -> Vec<PositionColorVertex> {
+    generate_grid_vertices_with_colors(
+        size,
+        spacing,
+        constants::LINE_COLOR,
+        constants::X_AXIS_COLOR,
+        constants::Y_AXIS_COLOR,
+    )
+}
+
+/// Generate grid line vertices with custom colors
+fn generate_grid_vertices_with_colors(
+    size: f32,
+    spacing: f32,
+    line_color: [f32; 3],
+    x_axis_color: [f32; 3],
+    y_axis_color: [f32; 3],
+) -> Vec<PositionColorVertex> {
     let mut vertices = Vec::new();
     let half_size = size;
     let num_lines = (size / spacing) as i32;
@@ -71,11 +114,7 @@ fn generate_grid_vertices(size: f32, spacing: f32) -> Vec<PositionColorVertex> {
     // Lines parallel to X axis
     for i in -num_lines..=num_lines {
         let y = i as f32 * spacing;
-        let color = if i == 0 {
-            constants::X_AXIS_COLOR
-        } else {
-            constants::LINE_COLOR
-        };
+        let color = if i == 0 { x_axis_color } else { line_color };
 
         // Start point
         vertices.push(PositionColorVertex {
@@ -92,11 +131,7 @@ fn generate_grid_vertices(size: f32, spacing: f32) -> Vec<PositionColorVertex> {
     // Lines parallel to Y axis
     for i in -num_lines..=num_lines {
         let x = i as f32 * spacing;
-        let color = if i == 0 {
-            constants::Y_AXIS_COLOR
-        } else {
-            constants::LINE_COLOR
-        };
+        let color = if i == 0 { y_axis_color } else { line_color };
 
         // Start point
         vertices.push(PositionColorVertex {

@@ -71,7 +71,7 @@ impl ConfigManager {
 
     /// Get the configuration file path
     fn config_path() -> PathBuf {
-        Self::config_dir().join("config.ron")
+        Self::config_dir().join("config.rk")
     }
 
     /// Load configuration from a file path

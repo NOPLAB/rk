@@ -59,7 +59,9 @@ impl UrdfEditorApp {
             // Apply renderer config from saved settings
             {
                 let cfg = config.read();
-                vp_state.renderer.apply_config(&cfg.config().renderer);
+                vp_state
+                    .renderer
+                    .apply_config(&cfg.config().renderer, &vp_state.device);
             }
 
             Arc::new(Mutex::new(vp_state))

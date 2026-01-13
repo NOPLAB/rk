@@ -87,7 +87,12 @@ impl PreferencesPanel {
                         // Apply defaults to renderer
                         if let Some(vp) = viewport_state {
                             let cfg = config.read();
-                            vp.lock().renderer.apply_config(&cfg.config().renderer);
+                            let vp_lock = vp.lock();
+                            let device = vp_lock.device.clone();
+                            drop(vp_lock);
+                            vp.lock()
+                                .renderer
+                                .apply_config(&cfg.config().renderer, &device);
                         }
                         // Apply defaults to app state
                         {
@@ -343,7 +348,10 @@ impl PreferencesPanel {
 
             // Apply to renderer immediately
             if let Some(vp) = viewport_state {
-                vp.lock().renderer.apply_config(&new_config);
+                let vp_lock = vp.lock();
+                let device = vp_lock.device.clone();
+                drop(vp_lock);
+                vp.lock().renderer.apply_config(&new_config, &device);
             }
         }
     }
