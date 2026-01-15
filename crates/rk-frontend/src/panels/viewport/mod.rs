@@ -234,9 +234,14 @@ impl Panel for ViewportPanel {
                 GizmoTransform::Translation(delta) => {
                     // Moving the whole part - update part transform
                     let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                        let translation = part.origin_transform.to_scale_rotation_translation().2;
+                        let (scale, rotation, translation) =
+                            part.origin_transform.to_scale_rotation_translation();
                         let new_translation = translation + delta;
-                        part.origin_transform = glam::Mat4::from_translation(new_translation);
+                        part.origin_transform = glam::Mat4::from_scale_rotation_translation(
+                            scale,
+                            rotation,
+                            new_translation,
+                        );
                         Some(part.origin_transform)
                     } else {
                         None
