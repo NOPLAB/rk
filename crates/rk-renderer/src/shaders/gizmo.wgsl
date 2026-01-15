@@ -12,7 +12,9 @@ struct GizmoConfig {
     y_axis_color: vec4<f32>,
     z_axis_color: vec4<f32>,
     use_config_colors: f32, // 1.0 = use config colors, 0.0 = use vertex colors
-    _pad: vec3<f32>,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
 };
 
 @group(0) @binding(0)
