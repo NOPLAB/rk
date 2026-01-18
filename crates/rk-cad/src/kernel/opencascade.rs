@@ -7,7 +7,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::{Axis3D, BooleanType, CadError, CadKernel, CadResult, Solid, TessellatedMesh, Wire2D};
+use super::{
+    Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo, Solid,
+    TessellatedMesh, Wire2D,
+};
 
 // Re-export OpenCASCADE types
 use opencascade_sys::ffi;
@@ -346,6 +349,344 @@ impl CadKernel for OpenCascadeKernel {
 
         let sphere = ffi::BRepPrimAPI_MakeSphere_ctor(&origin, radius as f64);
         Ok(self.store_solid(sphere.Shape()))
+    }
+
+    fn get_edges(&self, solid: &Solid) -> CadResult<Vec<EdgeInfo>> {
+        let occ_solid = self
+            .get_solid(solid.id)
+            .ok_or_else(|| CadError::OperationFailed("Solid not found".into()))?;
+
+        let mut edges = Vec::new();
+        let mut index = 0u32;
+
+        // Use TopExp_Explorer to iterate through all edges
+        let mut explorer =
+            ffi::TopExp_Explorer_ctor(&occ_solid.shape, ffi::TopAbs_ShapeEnum::TopAbs_EDGE);
+
+        while ffi::TopExp_Explorer_More(&explorer) {
+            let edge_shape = ffi::TopExp_Explorer_Current(&explorer);
+            let edge = ffi::TopoDS_cast_to_edge(&edge_shape);
+
+            // Get edge curve and parameters
+            let mut first = 0.0f64;
+            let mut last = 0.0f64;
+            let curve = ffi::BRep_Tool_Curve(&edge, &mut first, &mut last);
+
+            if !curve.is_null() {
+                // Get start and end points
+                let start_pnt = ffi::Geom_Curve_Value(&curve, first);
+                let end_pnt = ffi::Geom_Curve_Value(&curve, last);
+                let mid_pnt = ffi::Geom_Curve_Value(&curve, (first + last) / 2.0);
+
+                let start = Vec3::new(
+                    ffi::gp_Pnt_X(&start_pnt) as f32,
+                    ffi::gp_Pnt_Y(&start_pnt) as f32,
+                    ffi::gp_Pnt_Z(&start_pnt) as f32,
+                );
+                let end = Vec3::new(
+                    ffi::gp_Pnt_X(&end_pnt) as f32,
+                    ffi::gp_Pnt_Y(&end_pnt) as f32,
+                    ffi::gp_Pnt_Z(&end_pnt) as f32,
+                );
+                let midpoint = Vec3::new(
+                    ffi::gp_Pnt_X(&mid_pnt) as f32,
+                    ffi::gp_Pnt_Y(&mid_pnt) as f32,
+                    ffi::gp_Pnt_Z(&mid_pnt) as f32,
+                );
+
+                edges.push(EdgeInfo {
+                    id: EdgeId::new(solid.id, index),
+                    start,
+                    end,
+                    midpoint,
+                    length: (end - start).length(),
+                });
+            }
+
+            index += 1;
+            ffi::TopExp_Explorer_Next(&mut explorer);
+        }
+
+        Ok(edges)
+    }
+
+    fn get_faces(&self, solid: &Solid) -> CadResult<Vec<FaceInfo>> {
+        let occ_solid = self
+            .get_solid(solid.id)
+            .ok_or_else(|| CadError::OperationFailed("Solid not found".into()))?;
+
+        let mut faces = Vec::new();
+        let mut index = 0u32;
+
+        // Use TopExp_Explorer to iterate through all faces
+        let mut explorer =
+            ffi::TopExp_Explorer_ctor(&occ_solid.shape, ffi::TopAbs_ShapeEnum::TopAbs_FACE);
+
+        while ffi::TopExp_Explorer_More(&explorer) {
+            let face_shape = ffi::TopExp_Explorer_Current(&explorer);
+            let face = ffi::TopoDS_cast_to_face(&face_shape);
+
+            // Get surface
+            let surface = ffi::BRep_Tool_Surface(&face);
+
+            if !surface.is_null() {
+                // Get face bounds
+                let mut umin = 0.0f64;
+                let mut umax = 0.0f64;
+                let mut vmin = 0.0f64;
+                let mut vmax = 0.0f64;
+                ffi::BRepTools_UVBounds_face(&face, &mut umin, &mut umax, &mut vmin, &mut vmax);
+
+                // Calculate center point
+                let u_mid = (umin + umax) / 2.0;
+                let v_mid = (vmin + vmax) / 2.0;
+
+                let center_pnt = ffi::Geom_Surface_Value(&surface, u_mid, v_mid);
+                let center = Vec3::new(
+                    ffi::gp_Pnt_X(&center_pnt) as f32,
+                    ffi::gp_Pnt_Y(&center_pnt) as f32,
+                    ffi::gp_Pnt_Z(&center_pnt) as f32,
+                );
+
+                // Get normal at center
+                let mut pnt = ffi::new_gp_Pnt(0.0, 0.0, 0.0);
+                let mut normal_vec = ffi::new_gp_Vec(0.0, 0.0, 1.0);
+                ffi::BRepGProp_Face_Normal(&face, u_mid, v_mid, &mut pnt, &mut normal_vec);
+
+                let normal = Vec3::new(
+                    ffi::gp_Vec_X(&normal_vec) as f32,
+                    ffi::gp_Vec_Y(&normal_vec) as f32,
+                    ffi::gp_Vec_Z(&normal_vec) as f32,
+                );
+
+                // Calculate approximate area
+                let mut props = ffi::GProp_GProps_ctor();
+                ffi::BRepGProp_SurfaceProperties(&face_shape, &mut props, 1e-6);
+                let area = ffi::GProp_GProps_Mass(&props) as f32;
+
+                faces.push(FaceInfo {
+                    id: FaceId::new(solid.id, index),
+                    center,
+                    normal: normal.normalize(),
+                    area,
+                });
+            }
+
+            index += 1;
+            ffi::TopExp_Explorer_Next(&mut explorer);
+        }
+
+        Ok(faces)
+    }
+
+    fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f32) -> CadResult<Solid> {
+        let occ_solid = self
+            .get_solid(solid.id)
+            .ok_or_else(|| CadError::OperationFailed("Solid not found".into()))?;
+
+        if edges.is_empty() {
+            return Err(CadError::OperationFailed("No edges specified".into()));
+        }
+
+        // Create fillet maker
+        let mut fillet = ffi::BRepFilletAPI_MakeFillet_ctor(&occ_solid.shape);
+
+        // Find and add edges by index
+        let mut edge_index = 0u32;
+        let mut explorer =
+            ffi::TopExp_Explorer_ctor(&occ_solid.shape, ffi::TopAbs_ShapeEnum::TopAbs_EDGE);
+
+        while ffi::TopExp_Explorer_More(&explorer) {
+            // Check if this edge is in our list
+            if edges.iter().any(|e| e.index == edge_index) {
+                let edge_shape = ffi::TopExp_Explorer_Current(&explorer);
+                let edge = ffi::TopoDS_cast_to_edge(&edge_shape);
+                ffi::BRepFilletAPI_MakeFillet_Add(&mut fillet, radius as f64, &edge);
+            }
+
+            edge_index += 1;
+            ffi::TopExp_Explorer_Next(&mut explorer);
+        }
+
+        // Build the result
+        ffi::BRepFilletAPI_MakeFillet_Build(&mut fillet);
+
+        let result = ffi::BRepFilletAPI_MakeFillet_Shape(&fillet);
+        Ok(self.store_solid(result))
+    }
+
+    fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f32) -> CadResult<Solid> {
+        let occ_solid = self
+            .get_solid(solid.id)
+            .ok_or_else(|| CadError::OperationFailed("Solid not found".into()))?;
+
+        if edges.is_empty() {
+            return Err(CadError::OperationFailed("No edges specified".into()));
+        }
+
+        // Create chamfer maker
+        let mut chamfer = ffi::BRepFilletAPI_MakeChamfer_ctor(&occ_solid.shape);
+
+        // Build edge-face map
+        let mut edge_face_map = ffi::TopTools_IndexedDataMapOfShapeListOfShape_ctor();
+        ffi::TopExp_MapShapesAndAncestors(
+            &occ_solid.shape,
+            ffi::TopAbs_ShapeEnum::TopAbs_EDGE,
+            ffi::TopAbs_ShapeEnum::TopAbs_FACE,
+            &mut edge_face_map,
+        );
+
+        // Find and add edges by index
+        let mut edge_index = 0u32;
+        let mut explorer =
+            ffi::TopExp_Explorer_ctor(&occ_solid.shape, ffi::TopAbs_ShapeEnum::TopAbs_EDGE);
+
+        while ffi::TopExp_Explorer_More(&explorer) {
+            // Check if this edge is in our list
+            if edges.iter().any(|e| e.index == edge_index) {
+                let edge_shape = ffi::TopExp_Explorer_Current(&explorer);
+                let edge = ffi::TopoDS_cast_to_edge(&edge_shape);
+
+                // Get adjacent face
+                let face_list = ffi::TopTools_IndexedDataMapOfShapeListOfShape_FindFromKey(
+                    &edge_face_map,
+                    &edge_shape,
+                );
+                if !ffi::TopTools_ListOfShape_IsEmpty(&face_list) {
+                    let face_shape = ffi::TopTools_ListOfShape_First(&face_list);
+                    let face = ffi::TopoDS_cast_to_face(face_shape);
+                    ffi::BRepFilletAPI_MakeChamfer_Add_face(
+                        &mut chamfer,
+                        distance as f64,
+                        &edge,
+                        &face,
+                    );
+                }
+            }
+
+            edge_index += 1;
+            ffi::TopExp_Explorer_Next(&mut explorer);
+        }
+
+        // Build the result
+        ffi::BRepFilletAPI_MakeChamfer_Build(&mut chamfer);
+
+        let result = ffi::BRepFilletAPI_MakeChamfer_Shape(&chamfer);
+        Ok(self.store_solid(result))
+    }
+
+    fn shell(&self, solid: &Solid, thickness: f32, faces_to_remove: &[FaceId]) -> CadResult<Solid> {
+        let occ_solid = self
+            .get_solid(solid.id)
+            .ok_or_else(|| CadError::OperationFailed("Solid not found".into()))?;
+
+        // Collect faces to remove
+        let mut faces_list = ffi::TopTools_ListOfShape_ctor();
+
+        if !faces_to_remove.is_empty() {
+            let mut face_index = 0u32;
+            let mut explorer =
+                ffi::TopExp_Explorer_ctor(&occ_solid.shape, ffi::TopAbs_ShapeEnum::TopAbs_FACE);
+
+            while ffi::TopExp_Explorer_More(&explorer) {
+                if faces_to_remove.iter().any(|f| f.index == face_index) {
+                    let face_shape = ffi::TopExp_Explorer_Current(&explorer);
+                    ffi::TopTools_ListOfShape_Append(&mut faces_list, &face_shape);
+                }
+
+                face_index += 1;
+                ffi::TopExp_Explorer_Next(&mut explorer);
+            }
+        }
+
+        // Create thick solid (shell)
+        let thick_solid = ffi::BRepOffsetAPI_MakeThickSolid_ctor();
+        ffi::BRepOffsetAPI_MakeThickSolid_MakeThickSolidByJoin(
+            &thick_solid,
+            &occ_solid.shape,
+            &faces_list,
+            thickness as f64,
+            1e-6, // tolerance
+        );
+
+        let result = ffi::BRepOffsetAPI_MakeThickSolid_Shape(&thick_solid);
+        Ok(self.store_solid(result))
+    }
+
+    fn sweep(
+        &self,
+        profile: &Wire2D,
+        profile_plane_origin: Vec3,
+        profile_plane_normal: Vec3,
+        path: &Wire2D,
+        path_plane_origin: Vec3,
+        path_plane_normal: Vec3,
+    ) -> CadResult<Solid> {
+        if profile.points.len() < 3 {
+            return Err(CadError::InvalidProfile(
+                "Profile must have at least 3 points".into(),
+            ));
+        }
+        if path.points.len() < 2 {
+            return Err(CadError::InvalidProfile(
+                "Path must have at least 2 points".into(),
+            ));
+        }
+
+        // Create profile wire
+        let profile_wire = self.create_wire(profile, profile_plane_origin, profile_plane_normal)?;
+
+        // Create path wire (spine)
+        let path_wire = self.create_wire(path, path_plane_origin, path_plane_normal)?;
+
+        // Create pipe shell
+        let mut pipe = ffi::BRepOffsetAPI_MakePipeShell_ctor(&path_wire);
+
+        // Add profile
+        ffi::BRepOffsetAPI_MakePipeShell_Add_wire(&mut pipe, &profile_wire, false, false);
+
+        // Build
+        ffi::BRepOffsetAPI_MakePipeShell_Build(&mut pipe);
+
+        // Make solid
+        ffi::BRepOffsetAPI_MakePipeShell_MakeSolid(&mut pipe);
+
+        let result = ffi::BRepOffsetAPI_MakePipeShell_Shape(&pipe);
+        Ok(self.store_solid(result))
+    }
+
+    fn loft(
+        &self,
+        profiles: &[(Wire2D, Vec3, Vec3)],
+        create_solid: bool,
+        ruled: bool,
+    ) -> CadResult<Solid> {
+        if profiles.len() < 2 {
+            return Err(CadError::InvalidProfile(
+                "Loft requires at least 2 profiles".into(),
+            ));
+        }
+
+        // Create loft maker
+        let mut loft = ffi::BRepOffsetAPI_ThruSections_ctor(create_solid, ruled, 1e-6);
+
+        // Add all profiles
+        for (profile, origin, normal) in profiles {
+            if profile.points.len() < 3 {
+                return Err(CadError::InvalidProfile(
+                    "Each profile must have at least 3 points".into(),
+                ));
+            }
+
+            let wire = self.create_wire(profile, *origin, *normal)?;
+            ffi::BRepOffsetAPI_ThruSections_AddWire(&mut loft, &wire);
+        }
+
+        // Build
+        ffi::BRepOffsetAPI_ThruSections_Build(&mut loft);
+
+        let result = ffi::BRepOffsetAPI_ThruSections_Shape(&loft);
+        Ok(self.store_solid(result))
     }
 }
 

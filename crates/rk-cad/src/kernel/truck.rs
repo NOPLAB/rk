@@ -12,7 +12,10 @@ use uuid::Uuid;
 
 use truck_modeling::{InnerSpace, Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
 
-use super::{Axis3D, BooleanType, CadError, CadKernel, CadResult, Solid, TessellatedMesh, Wire2D};
+use super::{
+    Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo, Solid,
+    TessellatedMesh, Wire2D,
+};
 
 /// Truck-based CAD kernel
 pub struct TruckKernel {
@@ -270,5 +273,65 @@ impl CadKernel for TruckKernel {
             &Axis3D::new(center, Vec3::Y),
             std::f32::consts::TAU,
         )
+    }
+
+    fn get_edges(&self, _solid: &Solid) -> CadResult<Vec<EdgeInfo>> {
+        Err(CadError::OperationFailed(
+            "Edge enumeration is not supported in Truck kernel".into(),
+        ))
+    }
+
+    fn get_faces(&self, _solid: &Solid) -> CadResult<Vec<FaceInfo>> {
+        Err(CadError::OperationFailed(
+            "Face enumeration is not supported in Truck kernel".into(),
+        ))
+    }
+
+    fn fillet(&self, _solid: &Solid, _edges: &[EdgeId], _radius: f32) -> CadResult<Solid> {
+        Err(CadError::OperationFailed(
+            "Fillet is not supported in Truck kernel".into(),
+        ))
+    }
+
+    fn chamfer(&self, _solid: &Solid, _edges: &[EdgeId], _distance: f32) -> CadResult<Solid> {
+        Err(CadError::OperationFailed(
+            "Chamfer is not supported in Truck kernel".into(),
+        ))
+    }
+
+    fn shell(
+        &self,
+        _solid: &Solid,
+        _thickness: f32,
+        _faces_to_remove: &[FaceId],
+    ) -> CadResult<Solid> {
+        Err(CadError::OperationFailed(
+            "Shell is not supported in Truck kernel".into(),
+        ))
+    }
+
+    fn sweep(
+        &self,
+        _profile: &Wire2D,
+        _profile_plane_origin: Vec3,
+        _profile_plane_normal: Vec3,
+        _path: &Wire2D,
+        _path_plane_origin: Vec3,
+        _path_plane_normal: Vec3,
+    ) -> CadResult<Solid> {
+        Err(CadError::OperationFailed(
+            "Sweep is not supported in Truck kernel".into(),
+        ))
+    }
+
+    fn loft(
+        &self,
+        _profiles: &[(Wire2D, Vec3, Vec3)],
+        _create_solid: bool,
+        _ruled: bool,
+    ) -> CadResult<Solid> {
+        Err(CadError::OperationFailed(
+            "Loft is not supported in Truck kernel".into(),
+        ))
     }
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::kernel::{Axis3D, BooleanType, CadKernel, Solid, TessellatedMesh};
+use crate::kernel::{Axis3D, BooleanType, CadKernel, EdgeId, FaceId, Solid, TessellatedMesh};
 use crate::sketch::Sketch;
 
 /// Feature-related errors
@@ -147,7 +147,7 @@ pub enum Feature {
         /// Fillet radius
         radius: f32,
         /// Edge IDs to fillet
-        edges: Vec<Uuid>,
+        edges: Vec<EdgeId>,
         /// Whether the feature is suppressed
         #[serde(default)]
         suppressed: bool,
@@ -164,7 +164,64 @@ pub enum Feature {
         /// Chamfer distance
         distance: f32,
         /// Edge IDs to chamfer
-        edges: Vec<Uuid>,
+        edges: Vec<EdgeId>,
+        /// Whether the feature is suppressed
+        #[serde(default)]
+        suppressed: bool,
+    },
+
+    /// Shell (hollow out a solid)
+    Shell {
+        /// Unique identifier
+        id: Uuid,
+        /// Name of the feature
+        name: String,
+        /// Body to modify
+        body_id: Uuid,
+        /// Wall thickness
+        thickness: f32,
+        /// Faces to remove (create openings)
+        faces_to_remove: Vec<FaceId>,
+        /// Whether the feature is suppressed
+        #[serde(default)]
+        suppressed: bool,
+    },
+
+    /// Sweep a profile along a path
+    Sweep {
+        /// Unique identifier
+        id: Uuid,
+        /// Name of the feature
+        name: String,
+        /// Profile sketch ID
+        profile_sketch_id: Uuid,
+        /// Path sketch ID
+        path_sketch_id: Uuid,
+        /// Boolean operation with existing body
+        boolean_op: BooleanOp,
+        /// Target body ID (for boolean operations)
+        target_body: Option<Uuid>,
+        /// Whether the feature is suppressed
+        #[serde(default)]
+        suppressed: bool,
+    },
+
+    /// Loft between multiple profiles
+    Loft {
+        /// Unique identifier
+        id: Uuid,
+        /// Name of the feature
+        name: String,
+        /// Profile sketch IDs (in order)
+        profile_sketch_ids: Vec<Uuid>,
+        /// Whether to create a solid (vs shell)
+        create_solid: bool,
+        /// Whether to use ruled surfaces
+        ruled: bool,
+        /// Boolean operation with existing body
+        boolean_op: BooleanOp,
+        /// Target body ID (for boolean operations)
+        target_body: Option<Uuid>,
         /// Whether the feature is suppressed
         #[serde(default)]
         suppressed: bool,
@@ -180,6 +237,9 @@ impl Feature {
             Feature::Boolean { id, .. } => *id,
             Feature::Fillet { id, .. } => *id,
             Feature::Chamfer { id, .. } => *id,
+            Feature::Shell { id, .. } => *id,
+            Feature::Sweep { id, .. } => *id,
+            Feature::Loft { id, .. } => *id,
         }
     }
 
@@ -191,6 +251,9 @@ impl Feature {
             Feature::Boolean { name, .. } => name,
             Feature::Fillet { name, .. } => name,
             Feature::Chamfer { name, .. } => name,
+            Feature::Shell { name, .. } => name,
+            Feature::Sweep { name, .. } => name,
+            Feature::Loft { name, .. } => name,
         }
     }
 
@@ -202,6 +265,9 @@ impl Feature {
             Feature::Boolean { .. } => "Boolean",
             Feature::Fillet { .. } => "Fillet",
             Feature::Chamfer { .. } => "Chamfer",
+            Feature::Shell { .. } => "Shell",
+            Feature::Sweep { .. } => "Sweep",
+            Feature::Loft { .. } => "Loft",
         }
     }
 
@@ -213,6 +279,9 @@ impl Feature {
             Feature::Boolean { suppressed, .. } => *suppressed,
             Feature::Fillet { suppressed, .. } => *suppressed,
             Feature::Chamfer { suppressed, .. } => *suppressed,
+            Feature::Shell { suppressed, .. } => *suppressed,
+            Feature::Sweep { suppressed, .. } => *suppressed,
+            Feature::Loft { suppressed, .. } => *suppressed,
         }
     }
 
@@ -224,6 +293,9 @@ impl Feature {
             Feature::Boolean { suppressed, .. } => *suppressed = value,
             Feature::Fillet { suppressed, .. } => *suppressed = value,
             Feature::Chamfer { suppressed, .. } => *suppressed = value,
+            Feature::Shell { suppressed, .. } => *suppressed = value,
+            Feature::Sweep { suppressed, .. } => *suppressed = value,
+            Feature::Loft { suppressed, .. } => *suppressed = value,
         }
     }
 
@@ -256,6 +328,84 @@ impl Feature {
             axis_origin: axis.origin,
             axis_direction: axis.direction,
             angle,
+            boolean_op: BooleanOp::New,
+            target_body: None,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new fillet feature
+    pub fn fillet(name: impl Into<String>, body_id: Uuid, edges: Vec<EdgeId>, radius: f32) -> Self {
+        Feature::Fillet {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            body_id,
+            radius,
+            edges,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new chamfer feature
+    pub fn chamfer(
+        name: impl Into<String>,
+        body_id: Uuid,
+        edges: Vec<EdgeId>,
+        distance: f32,
+    ) -> Self {
+        Feature::Chamfer {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            body_id,
+            distance,
+            edges,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new shell feature
+    pub fn shell(
+        name: impl Into<String>,
+        body_id: Uuid,
+        thickness: f32,
+        faces_to_remove: Vec<FaceId>,
+    ) -> Self {
+        Feature::Shell {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            body_id,
+            thickness,
+            faces_to_remove,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new sweep feature
+    pub fn sweep(name: impl Into<String>, profile_sketch_id: Uuid, path_sketch_id: Uuid) -> Self {
+        Feature::Sweep {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            profile_sketch_id,
+            path_sketch_id,
+            boolean_op: BooleanOp::New,
+            target_body: None,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new loft feature
+    pub fn loft(
+        name: impl Into<String>,
+        profile_sketch_ids: Vec<Uuid>,
+        create_solid: bool,
+        ruled: bool,
+    ) -> Self {
+        Feature::Loft {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            profile_sketch_ids,
+            create_solid,
+            ruled,
             boolean_op: BooleanOp::New,
             target_body: None,
             suppressed: false,
@@ -407,9 +557,158 @@ impl Feature {
                 kernel.boolean(target, tool, op).map_err(|e| e.into())
             }
 
-            Feature::Fillet { .. } | Feature::Chamfer { .. } => Err(FeatureError::InvalidFeature(
-                "Fillet/Chamfer not yet implemented".into(),
-            )),
+            Feature::Fillet {
+                body_id,
+                radius,
+                edges,
+                ..
+            } => {
+                let body = existing_bodies
+                    .get(body_id)
+                    .ok_or(FeatureError::InvalidFeature("Body not found".into()))?;
+
+                kernel.fillet(body, edges, *radius).map_err(|e| e.into())
+            }
+
+            Feature::Chamfer {
+                body_id,
+                distance,
+                edges,
+                ..
+            } => {
+                let body = existing_bodies
+                    .get(body_id)
+                    .ok_or(FeatureError::InvalidFeature("Body not found".into()))?;
+
+                kernel.chamfer(body, edges, *distance).map_err(|e| e.into())
+            }
+
+            Feature::Shell {
+                body_id,
+                thickness,
+                faces_to_remove,
+                ..
+            } => {
+                let body = existing_bodies
+                    .get(body_id)
+                    .ok_or(FeatureError::InvalidFeature("Body not found".into()))?;
+
+                kernel
+                    .shell(body, *thickness, faces_to_remove)
+                    .map_err(|e| e.into())
+            }
+
+            Feature::Sweep {
+                profile_sketch_id,
+                path_sketch_id,
+                boolean_op,
+                target_body,
+                ..
+            } => {
+                let profile_sketch =
+                    sketches
+                        .get(profile_sketch_id)
+                        .ok_or(FeatureError::InvalidFeature(format!(
+                            "Profile sketch {} not found",
+                            profile_sketch_id
+                        )))?;
+
+                let path_sketch =
+                    sketches
+                        .get(path_sketch_id)
+                        .ok_or(FeatureError::InvalidFeature(format!(
+                            "Path sketch {} not found",
+                            path_sketch_id
+                        )))?;
+
+                // Extract profiles
+                let profiles = profile_sketch.extract_profiles()?;
+                if profiles.is_empty() {
+                    return Err(FeatureError::InvalidFeature(
+                        "No closed profiles found in profile sketch".into(),
+                    ));
+                }
+
+                // Extract path (can be open)
+                let path_profiles = path_sketch.extract_profiles()?;
+                if path_profiles.is_empty() {
+                    return Err(FeatureError::InvalidFeature(
+                        "No path found in path sketch".into(),
+                    ));
+                }
+
+                let mut solid = kernel.sweep(
+                    &profiles[0],
+                    profile_sketch.plane.origin,
+                    profile_sketch.plane.normal,
+                    &path_profiles[0],
+                    path_sketch.plane.origin,
+                    path_sketch.plane.normal,
+                )?;
+
+                // Apply boolean operation
+                if let (Some(op), Some(target_id)) =
+                    (Option::<BooleanType>::from(*boolean_op), target_body)
+                    && let Some(target) = existing_bodies.get(target_id)
+                {
+                    solid = kernel.boolean(target, &solid, op)?;
+                }
+
+                Ok(solid)
+            }
+
+            Feature::Loft {
+                profile_sketch_ids,
+                create_solid,
+                ruled,
+                boolean_op,
+                target_body,
+                ..
+            } => {
+                if profile_sketch_ids.len() < 2 {
+                    return Err(FeatureError::InvalidFeature(
+                        "Loft requires at least 2 profiles".into(),
+                    ));
+                }
+
+                // Collect all profiles with their planes
+                let mut profiles_with_planes = Vec::new();
+                for sketch_id in profile_sketch_ids {
+                    let sketch =
+                        sketches
+                            .get(sketch_id)
+                            .ok_or(FeatureError::InvalidFeature(format!(
+                                "Sketch {} not found",
+                                sketch_id
+                            )))?;
+
+                    let sketch_profiles = sketch.extract_profiles()?;
+                    if sketch_profiles.is_empty() {
+                        return Err(FeatureError::InvalidFeature(format!(
+                            "No closed profiles found in sketch {}",
+                            sketch_id
+                        )));
+                    }
+
+                    profiles_with_planes.push((
+                        sketch_profiles[0].clone(),
+                        sketch.plane.origin,
+                        sketch.plane.normal,
+                    ));
+                }
+
+                let mut solid = kernel.loft(&profiles_with_planes, *create_solid, *ruled)?;
+
+                // Apply boolean operation
+                if let (Some(op), Some(target_id)) =
+                    (Option::<BooleanType>::from(*boolean_op), target_body)
+                    && let Some(target) = existing_bodies.get(target_id)
+                {
+                    solid = kernel.boolean(target, &solid, op)?;
+                }
+
+                Ok(solid)
+            }
         }
     }
 }

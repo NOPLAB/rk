@@ -7,6 +7,105 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Unique identifier for an edge within a solid
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EdgeId {
+    /// ID of the solid this edge belongs to
+    pub solid_id: Uuid,
+    /// Index of the edge within the solid
+    pub index: u32,
+}
+
+impl EdgeId {
+    /// Create a new edge ID
+    pub fn new(solid_id: Uuid, index: u32) -> Self {
+        Self { solid_id, index }
+    }
+}
+
+/// Unique identifier for a face within a solid
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FaceId {
+    /// ID of the solid this face belongs to
+    pub solid_id: Uuid,
+    /// Index of the face within the solid
+    pub index: u32,
+}
+
+impl FaceId {
+    /// Create a new face ID
+    pub fn new(solid_id: Uuid, index: u32) -> Self {
+        Self { solid_id, index }
+    }
+}
+
+/// Information about an edge
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgeInfo {
+    /// Unique identifier for this edge
+    pub id: EdgeId,
+    /// Start point of the edge
+    pub start: Vec3,
+    /// End point of the edge
+    pub end: Vec3,
+    /// Midpoint of the edge
+    pub midpoint: Vec3,
+    /// Length of the edge
+    pub length: f32,
+}
+
+impl EdgeInfo {
+    /// Create a new edge info
+    pub fn new(id: EdgeId, start: Vec3, end: Vec3) -> Self {
+        let midpoint = (start + end) * 0.5;
+        let length = (end - start).length();
+        Self {
+            id,
+            start,
+            end,
+            midpoint,
+            length,
+        }
+    }
+}
+
+/// Information about a face
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceInfo {
+    /// Unique identifier for this face
+    pub id: FaceId,
+    /// Center point of the face
+    pub center: Vec3,
+    /// Normal vector of the face
+    pub normal: Vec3,
+    /// Approximate area of the face
+    pub area: f32,
+}
+
+impl FaceInfo {
+    /// Create a new face info
+    pub fn new(id: FaceId, center: Vec3, normal: Vec3, area: f32) -> Self {
+        Self {
+            id,
+            center,
+            normal: normal.normalize(),
+            area,
+        }
+    }
+}
+
+/// Corner type for sweep operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SweepCornerType {
+    /// Natural corners (default)
+    #[default]
+    Natural,
+    /// Rounded corners
+    Round,
+    /// Angular corners
+    Angular,
+}
+
 /// Error type for CAD kernel operations
 #[derive(Debug, Clone, Error)]
 pub enum CadError {
@@ -264,6 +363,82 @@ pub trait CadKernel: Send + Sync {
 
     /// Create a sphere primitive
     fn create_sphere(&self, center: Vec3, radius: f32) -> CadResult<Solid>;
+
+    // ========== Edge/Face Query Methods ==========
+
+    /// Get all edges of a solid with their geometric information
+    ///
+    /// # Arguments
+    /// * `solid` - The solid to query
+    fn get_edges(&self, solid: &Solid) -> CadResult<Vec<EdgeInfo>>;
+
+    /// Get all faces of a solid with their geometric information
+    ///
+    /// # Arguments
+    /// * `solid` - The solid to query
+    fn get_faces(&self, solid: &Solid) -> CadResult<Vec<FaceInfo>>;
+
+    // ========== Fillet/Chamfer Methods ==========
+
+    /// Apply fillet (rounded edge) to selected edges
+    ///
+    /// # Arguments
+    /// * `solid` - The solid to modify
+    /// * `edges` - Edge IDs to fillet
+    /// * `radius` - Fillet radius
+    fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f32) -> CadResult<Solid>;
+
+    /// Apply chamfer (beveled edge) to selected edges
+    ///
+    /// # Arguments
+    /// * `solid` - The solid to modify
+    /// * `edges` - Edge IDs to chamfer
+    /// * `distance` - Chamfer distance
+    fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f32) -> CadResult<Solid>;
+
+    // ========== Shell Method ==========
+
+    /// Create a hollow shell from a solid
+    ///
+    /// # Arguments
+    /// * `solid` - The solid to shell
+    /// * `thickness` - Wall thickness (positive = inward, negative = outward)
+    /// * `faces_to_remove` - Faces to remove (create openings)
+    fn shell(&self, solid: &Solid, thickness: f32, faces_to_remove: &[FaceId]) -> CadResult<Solid>;
+
+    // ========== Sweep/Loft Methods ==========
+
+    /// Sweep a profile along a path
+    ///
+    /// # Arguments
+    /// * `profile` - The 2D profile to sweep
+    /// * `profile_plane_origin` - Origin of the profile plane
+    /// * `profile_plane_normal` - Normal of the profile plane
+    /// * `path` - The 3D path to sweep along (as Wire2D on XY plane)
+    /// * `path_plane_origin` - Origin of the path plane
+    /// * `path_plane_normal` - Normal of the path plane
+    fn sweep(
+        &self,
+        profile: &Wire2D,
+        profile_plane_origin: Vec3,
+        profile_plane_normal: Vec3,
+        path: &Wire2D,
+        path_plane_origin: Vec3,
+        path_plane_normal: Vec3,
+    ) -> CadResult<Solid>;
+
+    /// Loft between multiple profiles
+    ///
+    /// # Arguments
+    /// * `profiles` - List of profiles with their plane information
+    /// * `create_solid` - Whether to create a solid (true) or shell (false)
+    /// * `ruled` - Whether to use ruled surfaces
+    fn loft(
+        &self,
+        profiles: &[(Wire2D, Vec3, Vec3)], // (profile, plane_origin, plane_normal)
+        create_solid: bool,
+        ruled: bool,
+    ) -> CadResult<Solid>;
 }
 
 /// A null kernel that always returns errors (used when no kernel is available)
@@ -336,6 +511,66 @@ impl CadKernel for NullKernel {
     }
 
     fn create_sphere(&self, _center: Vec3, _radius: f32) -> CadResult<Solid> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn get_edges(&self, _solid: &Solid) -> CadResult<Vec<EdgeInfo>> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn get_faces(&self, _solid: &Solid) -> CadResult<Vec<FaceInfo>> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn fillet(&self, _solid: &Solid, _edges: &[EdgeId], _radius: f32) -> CadResult<Solid> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn chamfer(&self, _solid: &Solid, _edges: &[EdgeId], _distance: f32) -> CadResult<Solid> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn shell(
+        &self,
+        _solid: &Solid,
+        _thickness: f32,
+        _faces_to_remove: &[FaceId],
+    ) -> CadResult<Solid> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn sweep(
+        &self,
+        _profile: &Wire2D,
+        _profile_plane_origin: Vec3,
+        _profile_plane_normal: Vec3,
+        _path: &Wire2D,
+        _path_plane_origin: Vec3,
+        _path_plane_normal: Vec3,
+    ) -> CadResult<Solid> {
+        Err(CadError::KernelNotAvailable(
+            "No CAD kernel available".into(),
+        ))
+    }
+
+    fn loft(
+        &self,
+        _profiles: &[(Wire2D, Vec3, Vec3)],
+        _create_solid: bool,
+        _ruled: bool,
+    ) -> CadResult<Solid> {
         Err(CadError::KernelNotAvailable(
             "No CAD kernel available".into(),
         ))
