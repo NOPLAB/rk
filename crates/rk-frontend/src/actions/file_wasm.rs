@@ -9,18 +9,18 @@ use super::ActionContext;
 /// Handle WASM file-related actions (bytes-based)
 pub fn handle_file_action_wasm(action: AppAction, ctx: &ActionContext) {
     match action {
-        AppAction::ImportStlBytes { name, data } => handle_import_stl_bytes(&name, &data, ctx),
+        AppAction::ImportMeshBytes { name, data } => handle_import_mesh_bytes(&name, &data, ctx),
         AppAction::LoadProjectBytes { name, data } => handle_load_project_bytes(&name, &data, ctx),
         _ => {}
     }
 }
 
-fn handle_import_stl_bytes(name: &str, data: &[u8], ctx: &ActionContext) {
+fn handle_import_mesh_bytes(name: &str, data: &[u8], ctx: &ActionContext) {
     let unit = ctx.app_state.lock().stl_import_unit;
     match load_stl_from_bytes(name, data, unit) {
         Ok(part) => {
             tracing::info!(
-                "Loaded STL from bytes: {} ({} vertices, unit={:?})",
+                "Loaded mesh from bytes: {} ({} vertices, unit={:?})",
                 part.name,
                 part.vertices.len(),
                 unit
@@ -50,7 +50,7 @@ fn handle_import_stl_bytes(name: &str, data: &[u8], ctx: &ActionContext) {
             ctx.app_state.lock().add_part(part);
         }
         Err(e) => {
-            tracing::error!("Failed to load STL from bytes: {}", e);
+            tracing::error!("Failed to load mesh from bytes: {}", e);
         }
     }
 }

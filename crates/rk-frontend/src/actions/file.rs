@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use rk_core::{ImportOptions, Project, import_urdf, load_stl_with_unit};
+use rk_core::{ImportOptions, Project, import_urdf, load_mesh};
 
 use crate::state::AppAction;
 
@@ -11,7 +11,7 @@ use super::ActionContext;
 /// Handle file-related actions
 pub fn handle_file_action(action: AppAction, ctx: &ActionContext) {
     match action {
-        AppAction::ImportStl(path) => handle_import_stl(path, ctx),
+        AppAction::ImportMesh(path) => handle_import_mesh(path, ctx),
         AppAction::ImportUrdf(path) => handle_import_urdf(path, ctx),
         AppAction::SaveProject(path) => handle_save_project(path, ctx),
         AppAction::LoadProject(path) => handle_load_project(path, ctx),
@@ -21,12 +21,12 @@ pub fn handle_file_action(action: AppAction, ctx: &ActionContext) {
     }
 }
 
-fn handle_import_stl(path: std::path::PathBuf, ctx: &ActionContext) {
+fn handle_import_mesh(path: std::path::PathBuf, ctx: &ActionContext) {
     let unit = ctx.app_state.lock().stl_import_unit;
-    match load_stl_with_unit(&path, unit) {
+    match load_mesh(&path, unit) {
         Ok(part) => {
             tracing::info!(
-                "Loaded STL: {} ({} vertices, unit={:?})",
+                "Loaded mesh: {} ({} vertices, unit={:?})",
                 part.name,
                 part.vertices.len(),
                 unit
@@ -65,7 +65,7 @@ fn handle_import_stl(path: std::path::PathBuf, ctx: &ActionContext) {
             ctx.app_state.lock().add_part(part);
         }
         Err(e) => {
-            tracing::error!("Failed to load STL: {}", e);
+            tracing::error!("Failed to load mesh: {}", e);
         }
     }
 }

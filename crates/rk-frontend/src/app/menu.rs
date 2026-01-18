@@ -40,15 +40,35 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Import STL...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("STL files", &["stl", "STL"])
-                            .pick_file()
-                        {
-                            app_state.lock().queue_action(AppAction::ImportStl(path));
+                    ui.menu_button("Import Parts", |ui| {
+                        if ui.button("STL...").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("STL files", &["stl", "STL"])
+                                .pick_file()
+                            {
+                                app_state.lock().queue_action(AppAction::ImportMesh(path));
+                            }
+                            ui.close();
                         }
-                        ui.close();
-                    }
+                        if ui.button("OBJ...").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("OBJ files", &["obj", "OBJ"])
+                                .pick_file()
+                            {
+                                app_state.lock().queue_action(AppAction::ImportMesh(path));
+                            }
+                            ui.close();
+                        }
+                        if ui.button("DAE (COLLADA)...").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("DAE files", &["dae", "DAE"])
+                                .pick_file()
+                            {
+                                app_state.lock().queue_action(AppAction::ImportMesh(path));
+                            }
+                            ui.close();
+                        }
+                    });
                     if ui.button("Import URDF...").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("URDF", &["urdf", "xacro", "xml"])
@@ -142,30 +162,32 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Import STL...").clicked() {
-                        let app_state = app_state.clone();
-                        wasm_bindgen_futures::spawn_local(async move {
-                            if let Some(file) = rfd::AsyncFileDialog::new()
-                                .add_filter("STL files", &["stl", "STL"])
-                                .pick_file()
-                                .await
-                            {
-                                let name = file.file_name();
-                                // Remove .stl extension for part name
-                                let part_name = name
-                                    .strip_suffix(".stl")
-                                    .or_else(|| name.strip_suffix(".STL"))
-                                    .unwrap_or(&name)
-                                    .to_string();
-                                let data = file.read().await;
-                                app_state.lock().queue_action(AppAction::ImportStlBytes {
-                                    name: part_name,
-                                    data,
-                                });
-                            }
-                        });
-                        ui.close();
-                    }
+                    ui.menu_button("Import Parts", |ui| {
+                        if ui.button("STL...").clicked() {
+                            let app_state = app_state.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                if let Some(file) = rfd::AsyncFileDialog::new()
+                                    .add_filter("STL files", &["stl", "STL"])
+                                    .pick_file()
+                                    .await
+                                {
+                                    let name = file.file_name();
+                                    // Remove .stl extension for part name
+                                    let part_name = name
+                                        .strip_suffix(".stl")
+                                        .or_else(|| name.strip_suffix(".STL"))
+                                        .unwrap_or(&name)
+                                        .to_string();
+                                    let data = file.read().await;
+                                    app_state.lock().queue_action(AppAction::ImportMeshBytes {
+                                        name: part_name,
+                                        data,
+                                    });
+                                }
+                            });
+                            ui.close();
+                        }
+                    });
                     if ui.button("Export URDF...").clicked() {
                         let app_state = app_state.clone();
                         wasm_bindgen_futures::spawn_local(async move {

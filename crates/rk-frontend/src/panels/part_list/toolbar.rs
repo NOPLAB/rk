@@ -22,17 +22,37 @@ pub fn render_unit_selector(ui: &mut egui::Ui, app_state: &SharedAppState) {
 
 /// Show context menu for creating new objects
 pub fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
-    // Import STL (native only)
+    // Import Parts submenu (native only)
     #[cfg(not(target_arch = "wasm32"))]
-    if ui.button("Import STL...").clicked() {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("STL files", &["stl", "STL"])
-            .pick_file()
-        {
-            app_state.lock().queue_action(AppAction::ImportStl(path));
+    ui.menu_button("Import Parts", |ui| {
+        if ui.button("STL...").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("STL files", &["stl", "STL"])
+                .pick_file()
+            {
+                app_state.lock().queue_action(AppAction::ImportMesh(path));
+            }
+            ui.close();
         }
-        ui.close();
-    }
+        if ui.button("OBJ...").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OBJ files", &["obj", "OBJ"])
+                .pick_file()
+            {
+                app_state.lock().queue_action(AppAction::ImportMesh(path));
+            }
+            ui.close();
+        }
+        if ui.button("DAE (COLLADA)...").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("DAE files", &["dae", "DAE"])
+                .pick_file()
+            {
+                app_state.lock().queue_action(AppAction::ImportMesh(path));
+            }
+            ui.close();
+        }
+    });
 
     #[cfg(not(target_arch = "wasm32"))]
     ui.separator();

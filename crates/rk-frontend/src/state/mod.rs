@@ -22,8 +22,8 @@ use rk_core::{GeometryType, JointLimits, JointType, Part, Pose, Project, StlUnit
 #[derive(Debug, Clone)]
 pub enum AppAction {
     // File actions (path-based, native only)
-    /// Import an STL file
-    ImportStl(PathBuf),
+    /// Import a mesh file (STL, OBJ, DAE)
+    ImportMesh(PathBuf),
     /// Import a URDF file
     ImportUrdf(PathBuf),
     /// Save project
@@ -36,8 +36,8 @@ pub enum AppAction {
     NewProject,
 
     // File actions (bytes-based, for WASM)
-    /// Import an STL from bytes
-    ImportStlBytes { name: String, data: Vec<u8> },
+    /// Import a mesh from bytes (STL format only for now)
+    ImportMeshBytes { name: String, data: Vec<u8> },
     /// Load project from bytes
     LoadProjectBytes { name: String, data: Vec<u8> },
 

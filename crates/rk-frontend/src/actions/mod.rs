@@ -42,7 +42,7 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
     match action {
         // File actions (native only)
         #[cfg(not(target_arch = "wasm32"))]
-        AppAction::ImportStl(_)
+        AppAction::ImportMesh(_)
         | AppAction::ImportUrdf(_)
         | AppAction::SaveProject(_)
         | AppAction::LoadProject(_)
@@ -53,7 +53,7 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
 
         // File actions (WASM - ignore)
         #[cfg(target_arch = "wasm32")]
-        AppAction::ImportStl(_)
+        AppAction::ImportMesh(_)
         | AppAction::ImportUrdf(_)
         | AppAction::SaveProject(_)
         | AppAction::LoadProject(_)
@@ -72,12 +72,12 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
 
         // Bytes-based file actions (for WASM, but works on native too)
         #[cfg(target_arch = "wasm32")]
-        AppAction::ImportStlBytes { .. } | AppAction::LoadProjectBytes { .. } => {
+        AppAction::ImportMeshBytes { .. } | AppAction::LoadProjectBytes { .. } => {
             handle_file_action_wasm(action, ctx);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        AppAction::ImportStlBytes { .. } | AppAction::LoadProjectBytes { .. } => {
+        AppAction::ImportMeshBytes { .. } | AppAction::LoadProjectBytes { .. } => {
             // On native, bytes-based actions can still be used (e.g., for testing)
             // but we don't have the handler compiled, so just log
             tracing::warn!("Bytes-based file actions are primarily for WASM");
