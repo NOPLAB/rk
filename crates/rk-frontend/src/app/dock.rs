@@ -91,25 +91,25 @@ pub fn create_dock_layout() -> DockState<PanelType> {
     let surface = dock_state.main_surface_mut();
 
     // 1. Split right for properties (Viewport 75%, Properties 25%)
-    let [viewport_area, _properties] = surface.split_right(
+    let [viewport_area, right] = surface.split_right(
         NodeIndex::root(),
         0.75,
         vec![PanelType::Properties(PropertiesPanel::new())],
     );
 
-    // 2. Split left from viewport area for parts list
-    let [left, _viewport] = surface.split_left(
-        viewport_area,
-        0.25, // Left panel gets 25% of the viewport area
-        vec![PanelType::PartList(PartListPanel::new())],
+    // 2. Split right panel vertically to add JointList below Properties
+    let [_properties, _joints] = surface.split_below(
+        right,
+        0.6, // Properties gets 60%, JointList gets 40%
+        vec![PanelType::JointList(JointListPanel::new())],
     );
 
-    // 3. Split left panel vertically to add joints and features below parts
-    let [_parts, _joints] = surface.split_below(
-        left,
-        0.6, // Parts gets 60%, bottom tabs get 40%
+    // 3. Split left from viewport area for PartList/FeatureTree tabs
+    let [_left, _viewport] = surface.split_left(
+        viewport_area,
+        0.25, // Left panel gets 25% of the viewport area
         vec![
-            PanelType::JointList(JointListPanel::new()),
+            PanelType::PartList(PartListPanel::new()),
             PanelType::FeatureTree(FeatureTreePanel::new()),
         ],
     );

@@ -12,7 +12,9 @@ use crate::state::{
     AppAction, GizmoTransform, PickablePartData, SharedAppState, SharedViewportState, pick_object,
 };
 
-use camera_overlay::{render_axes_indicator, render_camera_settings, render_gizmo_toggle};
+use camera_overlay::{
+    render_axes_indicator, render_camera_settings, render_gizmo_toggle, render_sketch_toolbar,
+};
 
 /// Colors for sketch rendering
 mod sketch_colors {
@@ -615,6 +617,16 @@ impl Panel for ViewportPanel {
             viewport_state,
             &mut self.show_camera_settings,
         );
+
+        // Draw sketch toolbar (bottom-left) when in sketch mode
+        {
+            let app = app_state.lock();
+            if let Some(sketch_state) = app.cad.editor_mode.sketch() {
+                let current_tool = sketch_state.current_tool;
+                drop(app); // Release lock before calling render
+                render_sketch_toolbar(ui, response.rect, app_state, current_tool);
+            }
+        }
 
         self.last_size = available_size;
     }
