@@ -9,6 +9,7 @@ mod file;
 #[cfg(target_arch = "wasm32")]
 mod file_wasm;
 mod part;
+mod sketch;
 
 use crate::state::{AppAction, SharedAppState, SharedViewportState};
 
@@ -18,6 +19,7 @@ pub use file::handle_file_action;
 #[cfg(target_arch = "wasm32")]
 pub use file_wasm::handle_file_action_wasm;
 pub use part::handle_part_action;
+pub use sketch::handle_sketch_action;
 
 /// Context for action handlers
 pub struct ActionContext<'a> {
@@ -112,6 +114,11 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
         | AppAction::UpdateCollisionOrigin { .. }
         | AppAction::UpdateCollisionGeometry { .. } => {
             handle_assembly_action(action, ctx);
+        }
+
+        // Sketch/CAD actions
+        AppAction::SketchAction(_) => {
+            handle_sketch_action(action, ctx);
         }
     }
 }

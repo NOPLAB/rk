@@ -1,11 +1,13 @@
 //! UI panels
 
+mod feature_tree;
 mod joint_list;
 mod part_list;
 mod preferences;
 mod properties;
 mod viewport;
 
+pub use feature_tree::FeatureTreePanel;
 pub use joint_list::JointListPanel;
 pub use part_list::PartListPanel;
 pub use preferences::PreferencesPanel;

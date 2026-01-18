@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rk-core = { workspace = true }
+rk-cad = { workspace = true }
 rk-renderer = { workspace = true }
 egui = { workspace = true }
 egui_dock = { workspace = true }

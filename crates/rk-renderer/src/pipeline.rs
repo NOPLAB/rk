@@ -29,6 +29,10 @@ pub struct PipelineConfig<'a> {
     pub blend: Option<wgpu::BlendState>,
     /// MSAA sample count (1 = disabled)
     pub sample_count: u32,
+    /// Vertex shader entry point
+    pub vs_entry_point: &'a str,
+    /// Fragment shader entry point
+    pub fs_entry_point: &'a str,
 }
 
 impl<'a> PipelineConfig<'a> {
@@ -62,6 +66,8 @@ impl<'a> PipelineConfig<'a> {
             depth_compare: wgpu::CompareFunction::Less,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             sample_count: SAMPLE_COUNT,
+            vs_entry_point: "vs_main",
+            fs_entry_point: "fs_main",
         }
     }
 
@@ -99,8 +105,21 @@ impl<'a> PipelineConfig<'a> {
     }
 
     /// Set blend state.
-    pub fn with_blend(mut self, blend: Option<wgpu::BlendState>) -> Self {
-        self.blend = blend;
+    pub fn with_blend(mut self, blend: wgpu::BlendState) -> Self {
+        self.blend = Some(blend);
+        self
+    }
+
+    /// Set depth write enable.
+    pub fn with_depth_write(mut self, enabled: bool) -> Self {
+        self.depth_write = enabled;
+        self
+    }
+
+    /// Set custom entry points for vertex and fragment shaders.
+    pub fn with_entry_point(mut self, vs: &'a str, fs: &'a str) -> Self {
+        self.vs_entry_point = vs;
+        self.fs_entry_point = fs;
         self
     }
 
@@ -122,13 +141,13 @@ impl<'a> PipelineConfig<'a> {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some(self.vs_entry_point),
                 buffers: &self.vertex_layouts,
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some(self.fs_entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: self.format,
                     blend: self.blend,

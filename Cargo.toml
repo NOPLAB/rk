@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/rk-core",
+    "crates/rk-cad",
     "crates/rk-renderer",
     "crates/rk-frontend",
 ]
@@ -54,5 +55,6 @@ open = "5"
 
 # Internal crates
 rk-core = { path = "crates/rk-core" }
+rk-cad = { path = "crates/rk-cad" }
 rk-renderer = { path = "crates/rk-renderer" }
 rk-frontend = { path = "crates/rk-frontend" }

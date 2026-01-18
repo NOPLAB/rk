@@ -28,16 +28,21 @@ cargo fmt
 
 # Lint
 cargo clippy
+
+# Build with CAD kernel (optional features)
+cargo build --features rk-cad/truck    # Pure Rust B-Rep kernel
+cargo build --features rk-cad/opencascade  # OpenCASCADE bindings
 ```
 
 ## Architecture
 
-RK is a 3D CAD editor built with Rust. The codebase is organized as a Cargo workspace with three crates:
+RK is a 3D CAD editor built with Rust. The codebase is organized as a Cargo workspace with four crates:
 
 ### Crate Dependencies
 
 ```
 rk-frontend (egui application)
+    ├── rk-cad (CAD kernel abstraction)
     └── rk-renderer (wgpu rendering)
             └── rk-core (data structures)
 ```
@@ -51,6 +56,16 @@ Core data structures and logic:
 - `Project`: Serializable project file (RON format)
 - Mesh import/export (STL, OBJ, DAE, URDF)
 
+### rk-cad
+
+CAD kernel abstraction and parametric modeling:
+
+- **Kernel abstraction** (`CadKernel` trait): Interface for geometry backends (OpenCASCADE, Truck, or NullKernel)
+- **Sketch system**: 2D sketches with entities (points, lines, arcs, circles) and constraints (coincident, parallel, perpendicular, dimensions)
+- **Constraint solver**: Newton-Raphson iteration for sketch constraint solving
+- **Feature operations**: Extrude, revolve, boolean operations on sketches to create 3D solids
+- **Parametric history**: Ordered feature list with rollback/rebuild support
+
 ### rk-renderer
 
 WGPU-based 3D renderer with plugin architecture:
@@ -60,15 +75,18 @@ WGPU-based 3D renderer with plugin architecture:
 - `RenderContext`: GPU context abstraction
 - `Scene` / `RenderObject`: Scene management
 - `MeshManager`: GPU mesh resource management
-- Built-in sub-renderers: Grid, Mesh, Axis, Marker, Gizmo
+- Built-in sub-renderers: Grid, Mesh, Axis, Marker, Gizmo, Collision, Sketch
+- Render priorities defined in `sub_renderers::priorities`
 
 ### rk-frontend
 
 egui-based GUI application:
 
 - `AppState`: Central application state with action queue pattern
-- `AppAction`: Enum defining all possible state mutations
+- `AppAction`: Enum defining all possible state mutations (file, part, assembly, joint, collision, sketch actions)
 - `SharedAppState`: Thread-safe state wrapper (`Arc<Mutex<AppState>>`)
+- `CadState`: CAD-specific state including `EditorMode` (Assembly/Sketch modes)
+- `SketchModeState`: Sketch editing state with tools, selection, and in-progress entities
 - Panels in `panels/` module for UI components
 
 ## Key Patterns
@@ -76,6 +94,8 @@ egui-based GUI application:
 - **Action Queue**: UI components queue `AppAction` variants, which are processed centrally in the update loop
 - **Plugin Renderer**: New rendering features implement `SubRenderer` trait and register with `RendererRegistry`
 - **Shared State**: `SharedAppState` (`Arc<Mutex<AppState>>`) is passed to panels and the renderer
+- **Editor Modes**: `EditorMode::Assembly` for 3D editing, `EditorMode::Sketch` for 2D sketch editing
+- **CAD Kernel Abstraction**: `CadKernel` trait allows switching between geometry backends via feature flags
 
 ## Platform Support
 

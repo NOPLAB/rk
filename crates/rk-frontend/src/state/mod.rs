@@ -1,9 +1,13 @@
 //! Application state module
 
 mod editor;
+mod sketch_mode;
 mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
+pub use sketch_mode::{
+    CadState, EditorMode, InProgressEntity, SketchAction, SketchModeState, SketchTool,
+};
 pub use viewport::{
     GizmoInteraction, GizmoTransform, PickablePartData, SharedViewportState, ViewportState,
     pick_object,
@@ -108,6 +112,10 @@ pub enum AppAction {
         index: usize,
         geometry: GeometryType,
     },
+
+    // Sketch/CAD actions
+    /// Execute a sketch action
+    SketchAction(SketchAction),
 }
 
 /// Angle display mode for joint sliders
@@ -122,6 +130,8 @@ pub enum AngleDisplayMode {
 pub struct AppState {
     /// Current project (contains parts, assembly, materials)
     pub project: Project,
+    /// CAD state (sketches, features, editor mode)
+    pub cad: CadState,
     /// Currently selected part
     pub selected_part: Option<Uuid>,
     /// Currently selected collision element (link_id, collision_index)
@@ -152,6 +162,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             project: Project::default(),
+            cad: CadState::default(),
             selected_part: None,
             selected_collision: None,
             hovered_part: None,
@@ -249,6 +260,7 @@ impl AppState {
     /// Reset to a new project
     pub fn new_project(&mut self) {
         self.project = Project::default();
+        self.cad = CadState::default();
         self.selected_part = None;
         self.selected_collision = None;
         self.project_path = None;
@@ -258,6 +270,7 @@ impl AppState {
     /// Load a project
     pub fn load_project(&mut self, project: Project, path: PathBuf) {
         self.project = project;
+        self.cad = CadState::default(); // TODO: Load CAD data from project
         self.project_path = Some(path);
         self.selected_part = None;
         self.selected_collision = None;

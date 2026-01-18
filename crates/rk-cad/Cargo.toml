@@ -1,0 +1,31 @@
+[package]
+name = "rk-cad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CAD kernel abstraction and sketch system for RK"
+
+[features]
+default = []
+opencascade = ["opencascade-sys"]
+truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh"]
+
+[dependencies]
+# Workspace dependencies
+uuid = { workspace = true }
+glam = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+
+# Optional: OpenCASCADE (C++ bindings)
+opencascade-sys = { version = "0.2", optional = true }
+
+# Optional: Truck (Pure Rust B-Rep)
+truck-modeling = { version = "0.4", optional = true }
+truck-meshalgo = { version = "0.4", optional = true }
+truck-topology = { version = "0.4", optional = true }
+truck-polymesh = { version = "0.4", optional = true }
+
+[dev-dependencies]
+approx = "0.5"

@@ -4,6 +4,7 @@
 //!
 //! ## New Architecture (SubRenderer trait)
 //! - [`GridSubRenderer`]: Grid sub-renderer implementing the new trait
+//! - [`SketchRenderer`]: 2D sketch visualization on 3D planes
 //!
 //! ## Legacy Renderers (being migrated)
 //! - [`grid_legacy::GridRenderer`]: Legacy grid implementation
@@ -15,6 +16,7 @@
 
 // New trait-based implementations
 mod grid;
+pub mod sketch;
 
 // Legacy implementations (to be migrated to SubRenderer trait)
 pub mod axis;
@@ -26,6 +28,7 @@ pub mod mesh;
 
 // Re-exports for new architecture
 pub use grid::GridSubRenderer;
+pub use sketch::{SketchRenderData, SketchRenderer, SketchVertex};
 
 // Re-exports for legacy code
 pub use axis::{AxisInstance, AxisRenderer};
@@ -42,6 +45,8 @@ pub use mesh::{MeshData, MeshRenderer, MeshVertex};
 pub mod priorities {
     /// Grid is rendered first (background)
     pub const GRID: i32 = 0;
+    /// Sketches are rendered after grid, before meshes
+    pub const SKETCH: i32 = 50;
     /// Meshes are the main content
     pub const MESH: i32 = 100;
     /// Axes are rendered on top of meshes

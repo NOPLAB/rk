@@ -4,23 +4,35 @@ on:
   push:
     branches:
       - main
+      - develop
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-wasm:
     name: Build WASM
     runs-on: ubuntu-latest
+    outputs:
+      deploy-path: ${{ steps.deploy-path.outputs.path }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set deploy path
+        id: deploy-path
+        run: |
+          if [ "${{ github.ref_name }}" = "develop" ]; then
+            echo "path=dev" >> $GITHUB_OUTPUT
+          else
+            echo "path=app" >> $GITHUB_OUTPUT
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -34,7 +46,7 @@ jobs:
 
       - name: Build WASM
         working-directory: crates/rk-frontend
-        run: trunk build --release --public-url "/rk/app/"
+        run: trunk build --release --public-url "/rk/${{ steps.deploy-path.outputs.path }}/"
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
@@ -46,6 +58,8 @@ jobs:
   build-docs:
     name: Build Docs
     runs-on: ubuntu-latest
+    # Only build docs on main branch
+    if: github.ref_name == 'main'
     steps:
       - uses: actions/checkout@v4
 
@@ -76,31 +90,34 @@ jobs:
           path: docs/dist
           retention-days: 1
 
-  combine-and-deploy:
-    name: Combine and Deploy
+  deploy:
+    name: Deploy
     needs: [build-wasm, build-docs]
+    if: always() && needs.build-wasm.result == 'success'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download docs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docs-build
-          path: _site
-
       - name: Download WASM artifact
         uses: actions/download-artifact@v4
         with:
           name: wasm-build
-          path: _site/app
+          path: _site/${{ needs.build-wasm.outputs.deploy-path }}
 
-      - name: Upload combined artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Download docs artifact
+        if: github.ref_name == 'main'
+        uses: actions/download-artifact@v4
         with:
-          path: _site
+          name: docs-build
+          path: _site_docs
+
+      - name: Merge docs into site
+        if: github.ref_name == 'main'
+        run: |
+          # Copy docs to root, but preserve app/dev folders
+          cp -r _site_docs/* _site/
 
       - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          keep_files: true
