@@ -3,18 +3,18 @@
 mod camera_overlay;
 
 use glam::{Vec2, Vec3};
-use rk_cad::{Sketch, SketchEntity};
+use rk_cad::{Sketch, SketchEntity, SketchPlane};
 use rk_renderer::{Camera, GizmoAxis, GizmoMode, GizmoSpace, SketchRenderData, plane_ids};
 
 use crate::config::SharedConfig;
 use crate::panels::Panel;
 use crate::state::{
-    AppAction, GizmoTransform, PickablePartData, ReferencePlane, SharedAppState,
-    SharedViewportState, SketchAction, pick_object,
+    AppAction, GizmoTransform, InProgressEntity, PickablePartData, ReferencePlane, SharedAppState,
+    SharedViewportState, SketchAction, SketchTool, pick_object,
 };
 
 use camera_overlay::{
-    render_axes_indicator, render_camera_settings, render_gizmo_toggle,
+    render_axes_indicator, render_camera_settings, render_extrude_dialog, render_gizmo_toggle,
     render_plane_selection_hint, render_sketch_toolbar,
 };
 
@@ -27,6 +27,7 @@ mod sketch_colors {
     pub const CIRCLE: Vec4 = Vec4::new(0.0, 0.7, 1.0, 1.0); // Cyan
     pub const ARC: Vec4 = Vec4::new(0.0, 0.7, 1.0, 1.0); // Cyan
     pub const SELECTED: Vec4 = Vec4::new(1.0, 0.5, 0.0, 1.0); // Orange
+    pub const PREVIEW: Vec4 = Vec4::new(0.5, 0.5, 1.0, 0.7); // Semi-transparent blue for preview
 }
 
 /// Convert a Sketch to SketchRenderData
@@ -34,6 +35,7 @@ fn sketch_to_render_data(
     sketch: &Sketch,
     selected_entities: &[uuid::Uuid],
     is_active: bool,
+    in_progress: Option<&InProgressEntity>,
 ) -> SketchRenderData {
     let mut render_data = SketchRenderData::new(sketch.id, sketch.plane.transform());
     render_data.is_active = is_active;
@@ -122,7 +124,89 @@ fn sketch_to_render_data(
         }
     }
 
+    // Render in-progress entity preview
+    if let Some(in_progress) = in_progress {
+        render_in_progress_preview(&mut render_data, in_progress, &point_positions);
+    }
+
     render_data
+}
+
+/// Render preview for in-progress entities
+fn render_in_progress_preview(
+    render_data: &mut SketchRenderData,
+    in_progress: &InProgressEntity,
+    point_positions: &std::collections::HashMap<uuid::Uuid, Vec2>,
+) {
+    let preview_color = sketch_colors::PREVIEW;
+
+    match in_progress {
+        InProgressEntity::Line {
+            start_point,
+            preview_end,
+        } => {
+            if let Some(&start_pos) = point_positions.get(start_point) {
+                render_data.add_line(start_pos, *preview_end, preview_color, 0);
+                // Also draw preview point at the end
+                render_data.add_point(*preview_end, preview_color, 0);
+            }
+        }
+        InProgressEntity::Circle {
+            center_point,
+            preview_radius,
+        } => {
+            if let Some(&center_pos) = point_positions.get(center_point) {
+                render_data.add_circle(center_pos, *preview_radius, preview_color, 0, 64);
+            }
+        }
+        InProgressEntity::Arc {
+            center_point,
+            start_point,
+            preview_end,
+        } => {
+            if let Some(&center_pos) = point_positions.get(center_point) {
+                if let Some(start_id) = start_point {
+                    if let Some(&start_pos) = point_positions.get(start_id) {
+                        let radius = (start_pos - center_pos).length();
+                        let start_offset = start_pos - center_pos;
+                        let end_offset = *preview_end - center_pos;
+                        let start_angle = start_offset.y.atan2(start_offset.x);
+                        let end_angle = end_offset.y.atan2(end_offset.x);
+                        render_data.add_arc(
+                            center_pos,
+                            radius,
+                            start_angle,
+                            end_angle,
+                            preview_color,
+                            0,
+                            32,
+                        );
+                    }
+                } else {
+                    // Just show a line from center to preview
+                    render_data.add_line(center_pos, *preview_end, preview_color, 0);
+                }
+                render_data.add_point(*preview_end, preview_color, 0);
+            }
+        }
+        InProgressEntity::Rectangle {
+            corner1,
+            preview_corner2,
+        } => {
+            // Draw rectangle as 4 lines
+            let c1 = *corner1;
+            let c2 = *preview_corner2;
+            let tl = Vec2::new(c1.x, c2.y);
+            let br = Vec2::new(c2.x, c1.y);
+            render_data.add_line(c1, tl, preview_color, 0);
+            render_data.add_line(tl, c2, preview_color, 0);
+            render_data.add_line(c2, br, preview_color, 0);
+            render_data.add_line(br, c1, preview_color, 0);
+            // Draw corner points
+            render_data.add_point(c1, preview_color, 0);
+            render_data.add_point(c2, preview_color, 0);
+        }
+    }
 }
 
 /// Size of the reference planes for picking
@@ -189,6 +273,382 @@ fn is_point_in_plane_bounds(point: Vec3, plane: ReferencePlane, size: f32) -> bo
     }
 }
 
+/// Convert screen coordinates to sketch 2D coordinates.
+///
+/// Returns None if the ray is parallel to the sketch plane or if the intersection
+/// is behind the camera.
+fn screen_to_sketch_coords(
+    camera: &Camera,
+    sketch_plane: &SketchPlane,
+    screen_x: f32,
+    screen_y: f32,
+    width: f32,
+    height: f32,
+) -> Option<Vec2> {
+    let (ray_origin, ray_dir) = camera.screen_to_ray(screen_x, screen_y, width, height);
+
+    // Ray-plane intersection
+    let denom = ray_dir.dot(sketch_plane.normal);
+    if denom.abs() < 1e-6 {
+        return None; // Ray is parallel to the plane
+    }
+
+    let t = (sketch_plane.origin - ray_origin).dot(sketch_plane.normal) / denom;
+    if t < 0.0 {
+        return None; // Intersection is behind the camera
+    }
+
+    let hit_3d = ray_origin + ray_dir * t;
+    Some(sketch_plane.to_local(hit_3d))
+}
+
+use crate::state::ViewportState;
+
+/// Handle sketch mode mouse input.
+///
+/// Returns true if the input was consumed by sketch mode.
+fn handle_sketch_mode_input(
+    response: &egui::Response,
+    ui: &egui::Ui,
+    local_mouse: Option<egui::Vec2>,
+    available_size: egui::Vec2,
+    app_state: &SharedAppState,
+    vp_state: &parking_lot::MutexGuard<ViewportState>,
+) -> bool {
+    let Some(pos) = local_mouse else {
+        return false;
+    };
+
+    // Get sketch info from app state
+    let (sketch_plane, current_tool, snap_to_grid, grid_spacing, active_sketch_id) = {
+        let app = app_state.lock();
+        let Some(sketch_state) = app.cad.editor_mode.sketch() else {
+            return false;
+        };
+        let sketch_id = sketch_state.active_sketch;
+        let Some(sketch) = app.cad.get_sketch(sketch_id) else {
+            return false;
+        };
+        (
+            sketch.plane,
+            sketch_state.current_tool,
+            sketch_state.snap_to_grid,
+            sketch_state.grid_spacing,
+            sketch_id,
+        )
+    };
+
+    // Convert screen position to sketch coordinates
+    let camera = vp_state.renderer.camera();
+    let Some(sketch_pos) = screen_to_sketch_coords(
+        camera,
+        &sketch_plane,
+        pos.x,
+        pos.y,
+        available_size.x,
+        available_size.y,
+    ) else {
+        return false;
+    };
+
+    // Apply grid snapping
+    let snapped_pos = if snap_to_grid {
+        Vec2::new(
+            (sketch_pos.x / grid_spacing).round() * grid_spacing,
+            (sketch_pos.y / grid_spacing).round() * grid_spacing,
+        )
+    } else {
+        sketch_pos
+    };
+
+    // Handle mouse move (update preview position for in-progress entities)
+    {
+        let mut app = app_state.lock();
+
+        // First, collect all the point positions from the sketch
+        let point_positions: std::collections::HashMap<uuid::Uuid, Vec2> =
+            if let Some(sketch) = app.cad.get_sketch(active_sketch_id) {
+                sketch
+                    .entities()
+                    .values()
+                    .filter_map(|entity| {
+                        if let SketchEntity::Point { id, position } = entity {
+                            Some((*id, *position))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                std::collections::HashMap::new()
+            };
+
+        // Now update the in_progress state
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            match &mut sketch_state.in_progress {
+                Some(InProgressEntity::Line { preview_end, .. }) => {
+                    *preview_end = snapped_pos;
+                }
+                Some(InProgressEntity::Circle {
+                    center_point,
+                    preview_radius,
+                }) => {
+                    if let Some(&center_pos) = point_positions.get(center_point) {
+                        *preview_radius = (center_pos - snapped_pos).length();
+                    }
+                }
+                Some(InProgressEntity::Arc { preview_end, .. }) => {
+                    *preview_end = snapped_pos;
+                }
+                Some(InProgressEntity::Rectangle {
+                    preview_corner2, ..
+                }) => {
+                    *preview_corner2 = snapped_pos;
+                }
+                None => {}
+            }
+        }
+    }
+
+    // Handle Escape key to cancel in-progress drawing
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let mut app = app_state.lock();
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut()
+            && sketch_state.in_progress.is_some()
+        {
+            sketch_state.cancel_drawing();
+            return true;
+        }
+    }
+
+    // Handle right-click to cancel in-progress drawing
+    if response.clicked_by(egui::PointerButton::Secondary) {
+        let mut app = app_state.lock();
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut()
+            && sketch_state.in_progress.is_some()
+        {
+            sketch_state.cancel_drawing();
+            return true;
+        }
+    }
+
+    // Handle left click based on current tool
+    if response.clicked_by(egui::PointerButton::Primary) {
+        match current_tool {
+            SketchTool::Point => {
+                // Create a point at the clicked position
+                let point = SketchEntity::point(snapped_pos);
+                app_state
+                    .lock()
+                    .queue_action(AppAction::SketchAction(SketchAction::AddEntity {
+                        entity: point,
+                    }));
+                return true;
+            }
+            SketchTool::Line => {
+                return handle_line_tool_click(app_state, snapped_pos);
+            }
+            SketchTool::RectangleCorner => {
+                return handle_rectangle_tool_click(app_state, snapped_pos);
+            }
+            SketchTool::CircleCenterRadius => {
+                return handle_circle_tool_click(app_state, snapped_pos);
+            }
+            SketchTool::Select => {
+                // TODO: Implement entity selection
+                return false;
+            }
+            _ => {
+                // Other tools not yet implemented
+                return false;
+            }
+        }
+    }
+
+    false
+}
+
+/// Handle line tool click.
+/// First click creates start point and starts line preview.
+/// Second click creates end point and the line.
+fn handle_line_tool_click(app_state: &SharedAppState, snapped_pos: Vec2) -> bool {
+    let mut app = app_state.lock();
+
+    let Some(sketch_state) = app.cad.editor_mode.sketch_mut() else {
+        return false;
+    };
+
+    let active_sketch_id = sketch_state.active_sketch;
+
+    if sketch_state.in_progress.is_none() {
+        // First click: create start point and start line preview
+        let start_point = SketchEntity::point(snapped_pos);
+        let start_id = start_point.id();
+
+        // Add the start point to the sketch
+        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
+            sketch.add_entity(start_point);
+        }
+
+        // Start the line preview
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            sketch_state.in_progress = Some(InProgressEntity::Line {
+                start_point: start_id,
+                preview_end: snapped_pos,
+            });
+        }
+
+        true
+    } else if let Some(InProgressEntity::Line { start_point, .. }) =
+        sketch_state.in_progress.clone()
+    {
+        // Second click: create end point and line
+        let end_point = SketchEntity::point(snapped_pos);
+        let end_id = end_point.id();
+
+        let line = SketchEntity::line(start_point, end_id);
+
+        // Add entities to sketch
+        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
+            sketch.add_entity(end_point);
+            sketch.add_entity(line);
+        }
+
+        // Clear in-progress
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            sketch_state.in_progress = None;
+        }
+
+        true
+    } else {
+        false
+    }
+}
+
+/// Handle rectangle tool click (corner mode).
+/// First click sets the first corner.
+/// Second click creates the rectangle.
+fn handle_rectangle_tool_click(app_state: &SharedAppState, snapped_pos: Vec2) -> bool {
+    let mut app = app_state.lock();
+
+    let Some(sketch_state) = app.cad.editor_mode.sketch_mut() else {
+        return false;
+    };
+
+    let active_sketch_id = sketch_state.active_sketch;
+
+    if sketch_state.in_progress.is_none() {
+        // First click: start rectangle preview
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            sketch_state.in_progress = Some(InProgressEntity::Rectangle {
+                corner1: snapped_pos,
+                preview_corner2: snapped_pos,
+            });
+        }
+        true
+    } else if let Some(InProgressEntity::Rectangle { corner1, .. }) =
+        sketch_state.in_progress.clone()
+    {
+        // Second click: create rectangle
+        let c1 = corner1;
+        let c2 = snapped_pos;
+
+        // Create four corner points
+        let p1 = SketchEntity::point(c1); // bottom-left
+        let p2 = SketchEntity::point(Vec2::new(c2.x, c1.y)); // bottom-right
+        let p3 = SketchEntity::point(c2); // top-right
+        let p4 = SketchEntity::point(Vec2::new(c1.x, c2.y)); // top-left
+
+        let p1_id = p1.id();
+        let p2_id = p2.id();
+        let p3_id = p3.id();
+        let p4_id = p4.id();
+
+        // Create four lines
+        let line1 = SketchEntity::line(p1_id, p2_id);
+        let line2 = SketchEntity::line(p2_id, p3_id);
+        let line3 = SketchEntity::line(p3_id, p4_id);
+        let line4 = SketchEntity::line(p4_id, p1_id);
+
+        // Add all entities
+        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
+            sketch.add_entity(p1);
+            sketch.add_entity(p2);
+            sketch.add_entity(p3);
+            sketch.add_entity(p4);
+            sketch.add_entity(line1);
+            sketch.add_entity(line2);
+            sketch.add_entity(line3);
+            sketch.add_entity(line4);
+        }
+
+        // Clear in-progress
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            sketch_state.in_progress = None;
+        }
+
+        true
+    } else {
+        false
+    }
+}
+
+/// Handle circle tool click (center-radius mode).
+/// First click sets the center.
+/// Second click sets the radius and creates the circle.
+fn handle_circle_tool_click(app_state: &SharedAppState, snapped_pos: Vec2) -> bool {
+    let mut app = app_state.lock();
+
+    let Some(sketch_state) = app.cad.editor_mode.sketch_mut() else {
+        return false;
+    };
+
+    let active_sketch_id = sketch_state.active_sketch;
+
+    if sketch_state.in_progress.is_none() {
+        // First click: create center point and start circle preview
+        let center_point = SketchEntity::point(snapped_pos);
+        let center_id = center_point.id();
+
+        // Add center point to sketch
+        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
+            sketch.add_entity(center_point);
+        }
+
+        // Start circle preview
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            sketch_state.in_progress = Some(InProgressEntity::Circle {
+                center_point: center_id,
+                preview_radius: 0.0,
+            });
+        }
+
+        true
+    } else if let Some(InProgressEntity::Circle {
+        center_point,
+        preview_radius,
+    }) = sketch_state.in_progress.clone()
+    {
+        // Second click: create circle
+        if preview_radius > 0.001 {
+            let circle = SketchEntity::circle(center_point, preview_radius);
+
+            if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
+                sketch.add_entity(circle);
+            }
+        }
+
+        // Clear in-progress
+        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+            sketch_state.in_progress = None;
+        }
+
+        true
+    } else {
+        false
+    }
+}
+
 /// Convert ReferencePlane to plane_ids for the renderer.
 fn reference_plane_to_id(plane: Option<ReferencePlane>) -> u32 {
     match plane {
@@ -206,6 +666,8 @@ pub struct ViewportPanel {
     show_camera_settings: bool,
     /// Gizmo toolbar collapsed state
     gizmo_collapsed: bool,
+    /// Camera toolbar collapsed state
+    camera_collapsed: bool,
 }
 
 impl ViewportPanel {
@@ -215,6 +677,7 @@ impl ViewportPanel {
             hovered_axis: GizmoAxis::None,
             show_camera_settings: false,
             gizmo_collapsed: false,
+            camera_collapsed: false,
         }
     }
 }
@@ -328,14 +791,17 @@ impl Panel for ViewportPanel {
                 let app = app_state.lock();
                 let cad = &app.cad;
 
-                // Get selected entities if in sketch mode
-                let selected_entities: Vec<uuid::Uuid> = cad
-                    .editor_mode
-                    .sketch()
-                    .map(|s| s.selected_entities.clone())
-                    .unwrap_or_default();
-
-                let active_sketch_id = cad.editor_mode.sketch().map(|s| s.active_sketch);
+                // Get selected entities and in-progress state if in sketch mode
+                let (selected_entities, in_progress, active_sketch_id) =
+                    if let Some(sketch_state) = cad.editor_mode.sketch() {
+                        (
+                            sketch_state.selected_entities.clone(),
+                            sketch_state.in_progress.clone(),
+                            Some(sketch_state.active_sketch),
+                        )
+                    } else {
+                        (Vec::new(), None, None)
+                    };
 
                 // Convert all sketches to render data
                 cad.data
@@ -344,7 +810,12 @@ impl Panel for ViewportPanel {
                     .values()
                     .map(|sketch| {
                         let is_active = active_sketch_id == Some(sketch.id);
-                        sketch_to_render_data(sketch, &selected_entities, is_active)
+                        let in_prog_ref = if is_active {
+                            in_progress.as_ref()
+                        } else {
+                            None
+                        };
+                        sketch_to_render_data(sketch, &selected_entities, is_active, in_prog_ref)
                     })
                     .collect()
             };
@@ -406,10 +877,33 @@ impl Panel for ViewportPanel {
             }
         }
 
-        // Gizmo interaction (left mouse button)
+        // Check if in sketch mode
+        let is_sketch_mode = {
+            let app = app_state.lock();
+            app.cad.editor_mode.is_sketch()
+        };
+
+        // Handle sketch mode input
+        if is_sketch_mode {
+            let sketch_input_result = handle_sketch_mode_input(
+                &response,
+                ui,
+                local_mouse,
+                available_size,
+                app_state,
+                &vp_state,
+            );
+
+            // If sketch mode consumed the click, skip normal interaction
+            if sketch_input_result {
+                // Continue to camera controls at the end
+            }
+        }
+
+        // Gizmo interaction (left mouse button) - skip if in sketch mode
         let mut gizmo_delta: Option<GizmoTransform> = None;
 
-        if let Some(pos) = local_mouse {
+        if !is_sketch_mode && let Some(pos) = local_mouse {
             // Check for gizmo hover
             if !vp_state.is_dragging_gizmo() {
                 let hit_axis =
@@ -738,6 +1232,7 @@ impl Panel for ViewportPanel {
             response.rect,
             viewport_state,
             &mut self.show_camera_settings,
+            &mut self.camera_collapsed,
         );
 
         // Draw sketch toolbar (bottom-left) when in sketch mode
@@ -745,8 +1240,14 @@ impl Panel for ViewportPanel {
             let app = app_state.lock();
             if let Some(sketch_state) = app.cad.editor_mode.sketch() {
                 let current_tool = sketch_state.current_tool;
+                let extrude_dialog_open = sketch_state.extrude_dialog.open;
                 drop(app); // Release lock before calling render
                 render_sketch_toolbar(ui, response.rect, app_state, current_tool);
+
+                // Draw extrude dialog if open
+                if extrude_dialog_open {
+                    render_extrude_dialog(ui, response.rect, app_state);
+                }
             }
         }
 

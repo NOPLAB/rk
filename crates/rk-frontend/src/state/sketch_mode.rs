@@ -248,6 +248,77 @@ pub enum InProgressEntity {
     },
 }
 
+/// Direction for extrusion
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExtrudeDirection {
+    /// Extrude in the positive normal direction
+    #[default]
+    Positive,
+    /// Extrude in the negative normal direction
+    Negative,
+    /// Extrude symmetrically in both directions
+    Symmetric,
+}
+
+impl ExtrudeDirection {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            ExtrudeDirection::Positive => "Positive",
+            ExtrudeDirection::Negative => "Negative",
+            ExtrudeDirection::Symmetric => "Symmetric",
+        }
+    }
+
+    /// Get all direction variants
+    pub fn all() -> [ExtrudeDirection; 3] {
+        [
+            ExtrudeDirection::Positive,
+            ExtrudeDirection::Negative,
+            ExtrudeDirection::Symmetric,
+        ]
+    }
+}
+
+/// State for the extrude dialog
+#[derive(Debug, Clone)]
+pub struct ExtrudeDialogState {
+    /// Whether the dialog is open
+    pub open: bool,
+    /// ID of the sketch to extrude
+    pub sketch_id: Uuid,
+    /// Extrusion distance
+    pub distance: f32,
+    /// Extrusion direction
+    pub direction: ExtrudeDirection,
+}
+
+impl Default for ExtrudeDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            sketch_id: Uuid::nil(),
+            distance: 10.0,
+            direction: ExtrudeDirection::Positive,
+        }
+    }
+}
+
+impl ExtrudeDialogState {
+    /// Open the dialog for a sketch
+    pub fn open_for_sketch(&mut self, sketch_id: Uuid) {
+        self.open = true;
+        self.sketch_id = sketch_id;
+        self.distance = 10.0;
+        self.direction = ExtrudeDirection::Positive;
+    }
+
+    /// Close the dialog
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+}
+
 /// Sketch editing mode state
 #[derive(Debug, Clone)]
 pub struct SketchModeState {
@@ -265,6 +336,8 @@ pub struct SketchModeState {
     pub snap_to_grid: bool,
     /// Grid spacing for snapping
     pub grid_spacing: f32,
+    /// Extrude dialog state
+    pub extrude_dialog: ExtrudeDialogState,
 }
 
 impl Default for SketchModeState {
@@ -277,6 +350,7 @@ impl Default for SketchModeState {
             hovered_entity: None,
             snap_to_grid: true,
             grid_spacing: 1.0,
+            extrude_dialog: ExtrudeDialogState::default(),
         }
     }
 }
@@ -423,6 +497,16 @@ pub enum SketchAction {
     ToggleSnap,
     /// Set grid spacing
     SetGridSpacing { spacing: f32 },
+    /// Show the extrude dialog for the current sketch
+    ShowExtrudeDialog,
+    /// Update extrude dialog distance
+    UpdateExtrudeDistance { distance: f32 },
+    /// Update extrude dialog direction
+    UpdateExtrudeDirection { direction: ExtrudeDirection },
+    /// Cancel the extrude dialog
+    CancelExtrudeDialog,
+    /// Execute the extrusion with current dialog settings
+    ExecuteExtrude,
 }
 
 /// Extended CAD state for the application

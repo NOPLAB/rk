@@ -176,5 +176,78 @@ pub fn handle_sketch_action(action: AppAction, ctx: &ActionContext) {
                 sketch_state.grid_spacing = spacing;
             }
         }
+
+        SketchAction::ShowExtrudeDialog => {
+            let mut state = ctx.app_state.lock();
+            if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                let sketch_id = sketch_state.active_sketch;
+                sketch_state.extrude_dialog.open_for_sketch(sketch_id);
+                info!("Opened extrude dialog for sketch: {}", sketch_id);
+            }
+        }
+
+        SketchAction::UpdateExtrudeDistance { distance } => {
+            let mut state = ctx.app_state.lock();
+            if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                sketch_state.extrude_dialog.distance = distance;
+            }
+        }
+
+        SketchAction::UpdateExtrudeDirection { direction } => {
+            let mut state = ctx.app_state.lock();
+            if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                sketch_state.extrude_dialog.direction = direction;
+            }
+        }
+
+        SketchAction::CancelExtrudeDialog => {
+            let mut state = ctx.app_state.lock();
+            if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                sketch_state.extrude_dialog.close();
+                info!("Cancelled extrude dialog");
+            }
+        }
+
+        SketchAction::ExecuteExtrude => {
+            let mut state = ctx.app_state.lock();
+
+            // Get extrude parameters
+            let (sketch_id, distance, direction) = {
+                let Some(sketch_state) = state.cad.editor_mode.sketch() else {
+                    return;
+                };
+                (
+                    sketch_state.extrude_dialog.sketch_id,
+                    sketch_state.extrude_dialog.distance,
+                    sketch_state.extrude_dialog.direction,
+                )
+            };
+
+            // Solve the sketch first
+            if let Some(sketch) = state.cad.get_sketch_mut(sketch_id) {
+                sketch.solve();
+            }
+
+            // TODO: Extract profiles from sketch and create extrusion feature
+            // This would require:
+            // 1. sketch.extract_profiles() - to get closed loops
+            // 2. Feature::extrude(profile, distance, direction)
+            // 3. history.add_feature(feature)
+            // 4. history.rebuild() - to generate geometry
+
+            info!(
+                "Execute extrude: sketch={}, distance={}, direction={:?}",
+                sketch_id, distance, direction
+            );
+
+            // Close the dialog and exit sketch mode
+            if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                sketch_state.extrude_dialog.close();
+            }
+
+            // For now, just exit sketch mode
+            state.cad.exit_sketch_mode();
+            info!("Exited sketch mode after extrude");
+        }
     }
 }

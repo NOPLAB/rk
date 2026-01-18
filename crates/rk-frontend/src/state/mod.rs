@@ -6,8 +6,8 @@ mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
 pub use sketch_mode::{
-    CadState, EditorMode, InProgressEntity, PlaneSelectionState, ReferencePlane, SketchAction,
-    SketchModeState, SketchTool,
+    CadState, EditorMode, ExtrudeDialogState, ExtrudeDirection, InProgressEntity,
+    PlaneSelectionState, ReferencePlane, SketchAction, SketchModeState, SketchTool,
 };
 pub use viewport::{
     GizmoInteraction, GizmoTransform, PickablePartData, SharedViewportState, ViewportState,

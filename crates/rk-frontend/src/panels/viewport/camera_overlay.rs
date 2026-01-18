@@ -3,7 +3,9 @@
 use glam::Vec3;
 use rk_renderer::{GizmoMode, GizmoSpace};
 
-use crate::state::{AppAction, SharedAppState, SharedViewportState, SketchAction, SketchTool};
+use crate::state::{
+    AppAction, ExtrudeDirection, SharedAppState, SharedViewportState, SketchAction, SketchTool,
+};
 
 /// Render camera settings overlay in the top-right corner (Unity-style)
 pub fn render_camera_settings(
@@ -11,13 +13,75 @@ pub fn render_camera_settings(
     rect: egui::Rect,
     viewport_state: &SharedViewportState,
     show_camera_settings: &mut bool,
+    collapsed: &mut bool,
 ) {
     let panel_width = 180.0;
     let panel_margin = 10.0;
 
+    // When collapsed, show only the expand arrow button
+    if *collapsed {
+        let arrow_pos = egui::pos2(
+            rect.right() - panel_margin - 10.0,
+            rect.top() + panel_margin,
+        );
+
+        egui::Area::new(egui::Id::new("camera_expand_btn"))
+            .fixed_pos(arrow_pos)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 220))
+                    .corner_radius(4.0)
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .inner_margin(2.0)
+                    .show(ui, |ui| {
+                        // Expand button (left arrow - to expand from right)
+                        let button_size = egui::vec2(10.0, 24.0);
+                        let (response, painter) =
+                            ui.allocate_painter(button_size, egui::Sense::click());
+
+                        if response.hovered() {
+                            painter.rect_filled(
+                                response.rect,
+                                2.0,
+                                egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200),
+                            );
+                        }
+
+                        let center = response.rect.center();
+                        let arrow_height = 5.0;
+                        let arrow_width = 3.0;
+
+                        // Left pointing arrow (to expand)
+                        let tip = egui::pos2(center.x - arrow_width, center.y);
+                        let top = egui::pos2(center.x + arrow_width, center.y - arrow_height);
+                        let bottom = egui::pos2(center.x + arrow_width, center.y + arrow_height);
+
+                        let arrow_color = if response.hovered() {
+                            egui::Color32::from_gray(200)
+                        } else {
+                            egui::Color32::from_gray(100)
+                        };
+
+                        painter.line_segment([top, tip], egui::Stroke::new(1.0, arrow_color));
+                        painter.line_segment([tip, bottom], egui::Stroke::new(1.0, arrow_color));
+
+                        if response.clicked() {
+                            *collapsed = false;
+                        }
+
+                        response.on_hover_text("Show camera settings");
+                    });
+            });
+
+        return;
+    }
+
+    // When expanded, show the full toolbar with collapse arrow
+
     // Toggle button at top-right
     let toggle_pos = egui::pos2(
-        rect.right() - panel_margin - 28.0,
+        rect.right() - panel_margin - 42.0, // Adjust for collapse button
         rect.top() + panel_margin,
     );
 
@@ -31,12 +95,62 @@ pub fn render_camera_settings(
                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
                 .inner_margin(2.0)
                 .show(ui, |ui| {
-                    let button = egui::Button::new("📷")
-                        .selected(*show_camera_settings)
-                        .min_size(egui::vec2(24.0, 24.0));
-                    if ui.add(button).on_hover_text("Camera Settings").clicked() {
-                        *show_camera_settings = !*show_camera_settings;
-                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+
+                        // Collapse toggle button (thin arrow)
+                        let button_size = egui::vec2(10.0, 24.0);
+                        let (response, painter) =
+                            ui.allocate_painter(button_size, egui::Sense::click());
+
+                        // Button background on hover
+                        if response.hovered() {
+                            painter.rect_filled(
+                                response.rect,
+                                2.0,
+                                egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200),
+                            );
+                        }
+
+                        // Draw arrow
+                        let center = response.rect.center();
+                        let arrow_height = 5.0;
+                        let arrow_width = 3.0;
+
+                        // Right pointing arrow (to collapse to the right)
+                        let tip = egui::pos2(center.x + arrow_width, center.y);
+                        let top = egui::pos2(center.x - arrow_width, center.y - arrow_height);
+                        let bottom = egui::pos2(center.x - arrow_width, center.y + arrow_height);
+
+                        let arrow_color = if response.hovered() {
+                            egui::Color32::from_gray(200)
+                        } else {
+                            egui::Color32::from_gray(100)
+                        };
+
+                        // Draw thin arrow (just lines)
+                        painter.line_segment([top, tip], egui::Stroke::new(1.0, arrow_color));
+                        painter.line_segment([tip, bottom], egui::Stroke::new(1.0, arrow_color));
+
+                        if response.clicked() {
+                            *collapsed = true;
+                        }
+
+                        response.on_hover_text("Hide camera settings");
+
+                        // Separator
+                        ui.add_space(2.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // Camera button
+                        let button = egui::Button::new("📷")
+                            .selected(*show_camera_settings)
+                            .min_size(egui::vec2(24.0, 24.0));
+                        if ui.add(button).on_hover_text("Camera Settings").clicked() {
+                            *show_camera_settings = !*show_camera_settings;
+                        }
+                    });
                 });
         });
 
@@ -466,7 +580,7 @@ pub fn render_sketch_toolbar(
     // Position at bottom-left
     let toolbar_pos = egui::pos2(
         rect.left() + panel_margin,
-        rect.bottom() - panel_margin - 140.0,
+        rect.bottom() - panel_margin - 180.0, // Increased height for operations section
     );
 
     egui::Area::new(egui::Id::new("sketch_toolbar"))
@@ -519,6 +633,151 @@ pub fn render_sketch_toolbar(
                             );
                         });
                         render_dimension_tools(ui, app_state, current_tool);
+
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(2.0);
+
+                        // Operations section
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("Operations")
+                                    .small()
+                                    .color(egui::Color32::GRAY),
+                            );
+                        });
+                        render_operations_tools(ui, app_state);
+                    });
+                });
+        });
+}
+
+/// Render operations tools row (Extrude, etc.)
+fn render_operations_tools(ui: &mut egui::Ui, app_state: &SharedAppState) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+
+        // Extrude button
+        let extrude_btn = egui::Button::new("Extrude").min_size(egui::vec2(60.0, 26.0));
+        if ui
+            .add(extrude_btn)
+            .on_hover_text("Extrude sketch to 3D")
+            .clicked()
+        {
+            app_state
+                .lock()
+                .queue_action(AppAction::SketchAction(SketchAction::ShowExtrudeDialog));
+        }
+
+        // Exit sketch mode button
+        let exit_btn = egui::Button::new("Exit").min_size(egui::vec2(40.0, 26.0));
+        if ui.add(exit_btn).on_hover_text("Exit sketch mode").clicked() {
+            app_state
+                .lock()
+                .queue_action(AppAction::SketchAction(SketchAction::ExitSketchMode));
+        }
+    });
+}
+
+/// Render extrude dialog overlay
+pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &SharedAppState) {
+    let dialog_width = 200.0;
+    let dialog_height = 140.0;
+
+    // Center the dialog
+    let dialog_pos = egui::pos2(
+        rect.center().x - dialog_width / 2.0,
+        rect.center().y - dialog_height / 2.0,
+    );
+
+    egui::Area::new(egui::Id::new("extrude_dialog"))
+        .fixed_pos(dialog_pos)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style())
+                .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 245))
+                .corner_radius(6.0)
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.set_width(dialog_width - 24.0);
+
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("Extrude").size(14.0).strong());
+                        ui.add_space(8.0);
+
+                        // Distance input
+                        ui.horizontal(|ui| {
+                            ui.label("Distance:");
+                            let mut distance = {
+                                let app = app_state.lock();
+                                app.cad
+                                    .editor_mode
+                                    .sketch()
+                                    .map(|s| s.extrude_dialog.distance)
+                                    .unwrap_or(10.0)
+                            };
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut distance)
+                                        .speed(0.1)
+                                        .range(0.001..=10000.0),
+                                )
+                                .changed()
+                            {
+                                app_state.lock().queue_action(AppAction::SketchAction(
+                                    SketchAction::UpdateExtrudeDistance { distance },
+                                ));
+                            }
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Direction selection
+                        ui.horizontal(|ui| {
+                            ui.label("Direction:");
+                            let current_direction = {
+                                let app = app_state.lock();
+                                app.cad
+                                    .editor_mode
+                                    .sketch()
+                                    .map(|s| s.extrude_dialog.direction)
+                                    .unwrap_or(ExtrudeDirection::Positive)
+                            };
+
+                            egui::ComboBox::from_id_salt("extrude_direction")
+                                .selected_text(current_direction.name())
+                                .show_ui(ui, |ui| {
+                                    for dir in ExtrudeDirection::all() {
+                                        if ui
+                                            .selectable_label(dir == current_direction, dir.name())
+                                            .clicked()
+                                        {
+                                            app_state.lock().queue_action(AppAction::SketchAction(
+                                                SketchAction::UpdateExtrudeDirection {
+                                                    direction: dir,
+                                                },
+                                            ));
+                                        }
+                                    }
+                                });
+                        });
+
+                        ui.add_space(12.0);
+
+                        // OK / Cancel buttons
+                        ui.horizontal(|ui| {
+                            if ui.button("OK").clicked() {
+                                app_state.lock().queue_action(AppAction::SketchAction(
+                                    SketchAction::ExecuteExtrude,
+                                ));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                app_state.lock().queue_action(AppAction::SketchAction(
+                                    SketchAction::CancelExtrudeDialog,
+                                ));
+                            }
+                        });
                     });
                 });
         });
