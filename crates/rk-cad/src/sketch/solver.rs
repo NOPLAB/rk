@@ -313,8 +313,164 @@ impl ConstraintSolver {
                     }
                 }
 
-                // TODO: Implement remaining constraint types
-                _ => {}
+                SketchConstraint::Diameter { circle, value, .. } => {
+                    if let Some(SketchEntity::Circle { radius, .. }) = sketch.get_entity(*circle) {
+                        // Diameter = 2 * radius
+                        errors.push(2.0 * radius - value);
+                    }
+                }
+
+                SketchConstraint::EqualRadius {
+                    circle1, circle2, ..
+                } => {
+                    let r1 = self.get_circle_radius(sketch, *circle1);
+                    let r2 = self.get_circle_radius(sketch, *circle2);
+                    if let (Some(r1), Some(r2)) = (r1, r2) {
+                        errors.push(r1 - r2);
+                    }
+                }
+
+                SketchConstraint::PointOnCurve { point, curve, .. } => {
+                    let p = var_map.get_point_position(sketch, *point);
+
+                    if let Some(entity) = sketch.get_entity(*curve) {
+                        match entity {
+                            SketchEntity::Line { start, end, .. } => {
+                                // Point should be collinear with line
+                                let s = var_map.get_point_position(sketch, *start);
+                                let e = var_map.get_point_position(sketch, *end);
+                                // Cross product of (p - s) and (e - s) should be zero
+                                let ps = p - s;
+                                let es = e - s;
+                                errors.push(ps.x * es.y - ps.y * es.x);
+                            }
+                            SketchEntity::Circle { center, radius, .. } => {
+                                // Distance from point to center should equal radius
+                                let c = var_map.get_point_position(sketch, *center);
+                                let dist = (p - c).length();
+                                errors.push(dist - radius);
+                            }
+                            SketchEntity::Arc { center, radius, .. } => {
+                                // Distance from point to center should equal radius
+                                let c = var_map.get_point_position(sketch, *center);
+                                let dist = (p - c).length();
+                                errors.push(dist - radius);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                SketchConstraint::Tangent { curve1, curve2, .. } => {
+                    if let (Some(e1), Some(e2)) =
+                        (sketch.get_entity(*curve1), sketch.get_entity(*curve2))
+                    {
+                        match (e1, e2) {
+                            // Line-Circle tangency: distance from line to center = radius
+                            (
+                                SketchEntity::Line { start, end, .. },
+                                SketchEntity::Circle { center, radius, .. },
+                            )
+                            | (
+                                SketchEntity::Circle { center, radius, .. },
+                                SketchEntity::Line { start, end, .. },
+                            ) => {
+                                let s = var_map.get_point_position(sketch, *start);
+                                let e = var_map.get_point_position(sketch, *end);
+                                let c = var_map.get_point_position(sketch, *center);
+
+                                // Distance from point to line
+                                let line_vec = e - s;
+                                let line_len = line_vec.length();
+                                if line_len > 1e-6 {
+                                    let t = ((c - s).dot(line_vec)) / (line_len * line_len);
+                                    let closest = s + line_vec * t.clamp(0.0, 1.0);
+                                    let dist = (c - closest).length();
+                                    errors.push(dist - radius);
+                                }
+                            }
+                            // Circle-Circle tangency: |d| = r1 + r2 (external) or |r1 - r2| (internal)
+                            (
+                                SketchEntity::Circle {
+                                    center: c1,
+                                    radius: r1,
+                                    ..
+                                },
+                                SketchEntity::Circle {
+                                    center: c2,
+                                    radius: r2,
+                                    ..
+                                },
+                            ) => {
+                                let center1 = var_map.get_point_position(sketch, *c1);
+                                let center2 = var_map.get_point_position(sketch, *c2);
+                                let dist = (center2 - center1).length();
+                                // External tangency: dist = r1 + r2
+                                errors.push(dist - (r1 + r2));
+                            }
+                            // Line-Arc tangency
+                            (
+                                SketchEntity::Line { start, end, .. },
+                                SketchEntity::Arc { center, radius, .. },
+                            )
+                            | (
+                                SketchEntity::Arc { center, radius, .. },
+                                SketchEntity::Line { start, end, .. },
+                            ) => {
+                                let s = var_map.get_point_position(sketch, *start);
+                                let e = var_map.get_point_position(sketch, *end);
+                                let c = var_map.get_point_position(sketch, *center);
+
+                                let line_vec = e - s;
+                                let line_len = line_vec.length();
+                                if line_len > 1e-6 {
+                                    let t = ((c - s).dot(line_vec)) / (line_len * line_len);
+                                    let closest = s + line_vec * t.clamp(0.0, 1.0);
+                                    let dist = (c - closest).length();
+                                    errors.push(dist - radius);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                SketchConstraint::Symmetric {
+                    entity1,
+                    entity2,
+                    axis,
+                    ..
+                } => {
+                    // For point symmetry about a line axis:
+                    // 1. Midpoint of p1-p2 lies on the axis
+                    // 2. Line p1-p2 is perpendicular to the axis
+                    if let Some((axis_start, axis_end)) = self.get_line_endpoints(sketch, *axis) {
+                        let as_pos = var_map.get_point_position(sketch, axis_start);
+                        let ae_pos = var_map.get_point_position(sketch, axis_end);
+                        let axis_dir = ae_pos - as_pos;
+                        let axis_len = axis_dir.length();
+
+                        if axis_len > 1e-6 {
+                            let axis_unit = axis_dir / axis_len;
+
+                            // Get positions of entities (treat as points for now)
+                            let p1 = var_map.get_point_position(sketch, *entity1);
+                            let p2 = var_map.get_point_position(sketch, *entity2);
+
+                            // Midpoint should lie on the axis line
+                            let mid = (p1 + p2) * 0.5;
+                            let mid_to_axis = mid - as_pos;
+                            // Cross product for distance to line
+                            let cross = mid_to_axis.x * axis_unit.y - mid_to_axis.y * axis_unit.x;
+                            errors.push(cross);
+
+                            // Line p1-p2 should be perpendicular to axis (dot product = 0)
+                            let p1_to_p2 = p2 - p1;
+                            let dot = p1_to_p2.dot(axis_unit);
+                            errors.push(dot);
+                        }
+                    }
+                }
             }
         }
 
@@ -449,6 +605,15 @@ impl ConstraintSolver {
     fn get_line_endpoints(&self, sketch: &Sketch, line_id: Uuid) -> Option<(Uuid, Uuid)> {
         match sketch.get_entity(line_id) {
             Some(SketchEntity::Line { start, end, .. }) => Some((*start, *end)),
+            _ => None,
+        }
+    }
+
+    /// Get the radius of a circle or arc entity
+    fn get_circle_radius(&self, sketch: &Sketch, entity_id: Uuid) -> Option<f32> {
+        match sketch.get_entity(entity_id) {
+            Some(SketchEntity::Circle { radius, .. }) => Some(*radius),
+            Some(SketchEntity::Arc { radius, .. }) => Some(*radius),
             _ => None,
         }
     }

@@ -261,13 +261,62 @@ impl FeatureHistory {
     }
 
     /// Rebuild a single feature and all dependent features
+    ///
+    /// This is optimized to only rebuild features from the specified feature onwards,
+    /// rather than rebuilding the entire history.
     pub fn rebuild_from(&mut self, id: Uuid, kernel: &dyn CadKernel) -> FeatureResult<()> {
-        // Verify the feature exists
-        let _start_index = self.index_of(id).ok_or(FeatureError::FeatureNotFound(id))?;
+        let start_index = self.index_of(id).ok_or(FeatureError::FeatureNotFound(id))?;
+        let end = self.effective_len();
 
-        // For now, just do a full rebuild
-        // TODO: Optimize to only rebuild affected features
-        self.rebuild(kernel)
+        // If start_index is 0, just do a full rebuild
+        if start_index == 0 {
+            return self.rebuild(kernel);
+        }
+
+        // Remove bodies created by features from start_index onwards
+        for entry in &self.entries[start_index..end] {
+            for body_id in &entry.created_bodies {
+                self.bodies.remove(body_id);
+            }
+        }
+
+        // Build solids map from existing bodies (before start_index)
+        let mut solids: HashMap<Uuid, Solid> = self
+            .bodies
+            .iter()
+            .filter_map(|(id, body)| body.solid.clone().map(|s| (*id, s)))
+            .collect();
+
+        // Re-execute features from start_index onwards
+        for entry in &mut self.entries[start_index..end] {
+            if entry.feature.is_suppressed() {
+                continue;
+            }
+
+            // Clear previous results for this entry
+            entry.created_bodies.clear();
+            entry.modified_bodies.clear();
+            entry.deleted_bodies.clear();
+
+            match entry.feature.execute(kernel, &self.sketches, &solids) {
+                Ok(solid) => {
+                    let mut body = CadBody::new(entry.feature.name());
+                    body.source_feature = Some(entry.feature.id());
+                    let body_id = body.id;
+
+                    solids.insert(body_id, solid.clone());
+                    body.solid = Some(solid);
+
+                    self.bodies.insert(body_id, body);
+                    entry.created_bodies = vec![body_id];
+                }
+                Err(e) => {
+                    tracing::warn!("Feature {} failed: {}", entry.feature.name(), e);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
