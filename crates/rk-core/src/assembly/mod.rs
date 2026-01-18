@@ -13,8 +13,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use joint::{Joint, JointBuilder, JointDynamics, JointMimic};
-pub use types::{CollisionElement, InertialProperties, Link, Pose, VisualElement};
+pub use joint::{Joint, JointBuilder};
+pub use types::{CollisionElement, InertialProperties, Link, VisualElement};
+// Re-export from types for backwards compatibility
+pub use crate::types::{JointDynamics, JointMimic, Pose};
 
 use tree_cache::TreeCache;
 

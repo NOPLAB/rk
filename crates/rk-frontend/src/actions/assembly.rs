@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 
-use rk_core::{Joint, Link, Pose};
+use rk_core::{CollisionElement, GeometryType, Joint, Link, Pose};
 
 use crate::state::{AppAction, AppState};
 
@@ -18,6 +18,23 @@ pub fn handle_assembly_action(action: AppAction, ctx: &ActionContext) {
         }
         AppAction::ResetJointPosition { joint_id } => handle_reset_joint_position(joint_id, ctx),
         AppAction::ResetAllJointPositions => handle_reset_all_joint_positions(ctx),
+        AppAction::SelectCollision(selection) => handle_select_collision(selection, ctx),
+        AppAction::AddCollision { link_id, geometry } => {
+            handle_add_collision(link_id, geometry, ctx)
+        }
+        AppAction::RemoveCollision { link_id, index } => {
+            handle_remove_collision(link_id, index, ctx)
+        }
+        AppAction::UpdateCollisionOrigin {
+            link_id,
+            index,
+            origin,
+        } => handle_update_collision_origin(link_id, index, origin, ctx),
+        AppAction::UpdateCollisionGeometry {
+            link_id,
+            index,
+            geometry,
+        } => handle_update_collision_geometry(link_id, index, geometry, ctx),
         _ => {}
     }
 }
@@ -288,4 +305,99 @@ fn get_part_center(state: &AppState, link_id: Uuid) -> glam::Vec3 {
         return part.origin_transform.transform_point3(center);
     }
     glam::Vec3::ZERO
+}
+
+// ========== Collision action handlers ==========
+
+fn handle_select_collision(selection: Option<(Uuid, usize)>, ctx: &ActionContext) {
+    let mut state = ctx.app_state.lock();
+    state.selected_collision = selection;
+    tracing::debug!("Selected collision: {:?}", selection);
+}
+
+fn handle_add_collision(link_id: Uuid, geometry: GeometryType, ctx: &ActionContext) {
+    let mut state = ctx.app_state.lock();
+
+    if let Some(link) = state.project.assembly.get_link_mut(link_id) {
+        let collision = CollisionElement {
+            name: None,
+            origin: Pose::default(),
+            geometry,
+        };
+        link.collisions.push(collision);
+        state.modified = true;
+        tracing::info!("Added collision to link {}", link_id);
+    } else {
+        tracing::warn!("Link {} not found for adding collision", link_id);
+    }
+}
+
+fn handle_remove_collision(link_id: Uuid, index: usize, ctx: &ActionContext) {
+    let mut state = ctx.app_state.lock();
+
+    // Clear selection if removing the selected collision
+    if state.selected_collision == Some((link_id, index)) {
+        state.selected_collision = None;
+    }
+
+    if let Some(link) = state.project.assembly.get_link_mut(link_id) {
+        if index < link.collisions.len() {
+            link.collisions.remove(index);
+            state.modified = true;
+            tracing::info!("Removed collision {} from link {}", index, link_id);
+        } else {
+            tracing::warn!(
+                "Collision index {} out of bounds for link {}",
+                index,
+                link_id
+            );
+        }
+    } else {
+        tracing::warn!("Link {} not found for removing collision", link_id);
+    }
+}
+
+fn handle_update_collision_origin(link_id: Uuid, index: usize, origin: Pose, ctx: &ActionContext) {
+    let mut state = ctx.app_state.lock();
+
+    if let Some(link) = state.project.assembly.get_link_mut(link_id) {
+        if let Some(collision) = link.collisions.get_mut(index) {
+            collision.origin = origin;
+            state.modified = true;
+            tracing::debug!("Updated collision {} origin for link {}", index, link_id);
+        } else {
+            tracing::warn!(
+                "Collision index {} out of bounds for link {}",
+                index,
+                link_id
+            );
+        }
+    } else {
+        tracing::warn!("Link {} not found for updating collision origin", link_id);
+    }
+}
+
+fn handle_update_collision_geometry(
+    link_id: Uuid,
+    index: usize,
+    geometry: GeometryType,
+    ctx: &ActionContext,
+) {
+    let mut state = ctx.app_state.lock();
+
+    if let Some(link) = state.project.assembly.get_link_mut(link_id) {
+        if let Some(collision) = link.collisions.get_mut(index) {
+            collision.geometry = geometry;
+            state.modified = true;
+            tracing::debug!("Updated collision {} geometry for link {}", index, link_id);
+        } else {
+            tracing::warn!(
+                "Collision index {} out of bounds for link {}",
+                index,
+                link_id
+            );
+        }
+    } else {
+        tracing::warn!("Link {} not found for updating collision geometry", link_id);
+    }
 }

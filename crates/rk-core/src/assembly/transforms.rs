@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use glam::{Mat4, Quat};
 use uuid::Uuid;
 
-use crate::part::JointType;
+use crate::types::JointType;
 
 use super::Assembly;
 use super::joint::Joint;

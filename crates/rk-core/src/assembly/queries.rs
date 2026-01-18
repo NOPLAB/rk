@@ -38,6 +38,11 @@ impl Assembly {
         self.links.values().find(|l| l.part_id == Some(part_id))
     }
 
+    /// Find a mutable link by its associated part ID
+    pub fn find_link_by_part_mut(&mut self, part_id: Uuid) -> Option<&mut Link> {
+        self.links.values_mut().find(|l| l.part_id == Some(part_id))
+    }
+
     /// Get the chain of link IDs from a link to the root
     pub fn get_chain_to_root(&self, link_id: Uuid) -> Vec<Uuid> {
         self.ensure_cache_valid();

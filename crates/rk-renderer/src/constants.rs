@@ -77,6 +77,20 @@ pub mod instances {
     pub const MAX_AXES: u32 = 64;
     /// Maximum number of marker instances
     pub const MAX_MARKERS: u32 = 256;
+    /// Maximum number of collision instances
+    pub const MAX_COLLISIONS: u32 = 128;
+}
+
+/// Collision visualization constants
+pub mod collision {
+    /// Number of segments for cylinder/capsule geometry
+    pub const SEGMENTS: u32 = 16;
+    /// Number of rings for sphere geometry
+    pub const RINGS: u32 = 12;
+    /// Default collision color (semi-transparent cyan)
+    pub const DEFAULT_COLOR: [f32; 4] = [0.0, 0.8, 0.8, 0.3];
+    /// Selected collision color (semi-transparent yellow)
+    pub const SELECTED_COLOR: [f32; 4] = [1.0, 0.8, 0.0, 0.5];
 }
 
 /// Camera default parameters

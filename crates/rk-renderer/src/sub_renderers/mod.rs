@@ -11,12 +11,14 @@
 //! - [`axis::AxisRenderer`]: Coordinate frame indicators
 //! - [`marker::MarkerRenderer`]: Joint point visualization
 //! - [`gizmo::GizmoRenderer`]: Transform manipulation tool
+//! - [`collision::CollisionRenderer`]: Collision shape visualization
 
 // New trait-based implementations
 mod grid;
 
 // Legacy implementations (to be migrated to SubRenderer trait)
 pub mod axis;
+pub mod collision;
 pub mod gizmo;
 pub mod grid_legacy;
 pub mod marker;
@@ -27,6 +29,7 @@ pub use grid::GridSubRenderer;
 
 // Re-exports for legacy code
 pub use axis::{AxisInstance, AxisRenderer};
+pub use collision::{CollisionInstance, CollisionRenderer};
 pub use gizmo::{GizmoAxis, GizmoMode, GizmoRenderer, GizmoSpace};
 pub use grid_legacy::GridRenderer;
 pub use marker::{MarkerInstance, MarkerRenderer};

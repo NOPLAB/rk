@@ -2,7 +2,10 @@
 
 use egui::Ui;
 use glam::Mat4;
-use rk_core::Part;
+use rk_core::{CollisionElement, Part};
+use uuid::Uuid;
+
+use crate::state::AppAction;
 
 /// Context passed to property components for rendering
 pub struct PropertyContext<'a> {
@@ -10,6 +13,14 @@ pub struct PropertyContext<'a> {
     pub part: &'a mut Part,
     /// Parent link's world transform (if this part has a parent in assembly)
     pub parent_world_transform: Option<Mat4>,
+    /// The link's UUID (if any)
+    pub link_id: Option<Uuid>,
+    /// Copy of the link's collisions for display (modifications via actions)
+    pub collisions: Vec<CollisionElement>,
+    /// Currently selected collision index (if any)
+    pub selected_collision_index: Option<usize>,
+    /// Queue for actions to be processed
+    pub pending_actions: &'a mut Vec<AppAction>,
 }
 
 /// Trait for property panel components (Unity-style Inspector sections)

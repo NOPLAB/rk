@@ -100,5 +100,14 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
         | AppAction::ResetAllJointPositions => {
             handle_assembly_action(action, ctx);
         }
+
+        // Collision actions
+        AppAction::SelectCollision(_)
+        | AppAction::AddCollision { .. }
+        | AppAction::RemoveCollision { .. }
+        | AppAction::UpdateCollisionOrigin { .. }
+        | AppAction::UpdateCollisionGeometry { .. } => {
+            handle_assembly_action(action, ctx);
+        }
     }
 }

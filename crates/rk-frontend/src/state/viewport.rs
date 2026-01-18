@@ -20,6 +20,7 @@ struct RenderTexture {
 }
 
 /// Gizmo transform result from drag operation
+#[derive(Clone, Copy)]
 pub enum GizmoTransform {
     Translation(Vec3),
     Rotation(Quat),
@@ -35,6 +36,10 @@ pub struct GizmoInteraction {
     pub drag_start_angle: f32,
     pub part_start_transform: Mat4,
     pub part_id: Option<Uuid>,
+    /// Collision being edited: (link_id, collision_index)
+    pub editing_collision: Option<(Uuid, usize)>,
+    /// Link world transform for collision editing
+    pub link_world_transform: Mat4,
     pub gizmo_position: Vec3,
     pub gizmo_scale: f32,
 }
@@ -226,6 +231,49 @@ impl ViewportState {
     pub fn hide_gizmo(&mut self) {
         self.renderer.hide_gizmo();
         self.gizmo.part_id = None;
+        self.gizmo.editing_collision = None;
+    }
+
+    /// Show gizmo for a collision element
+    ///
+    /// # Arguments
+    /// * `link_id` - The link containing the collision
+    /// * `collision_index` - Index of the collision element
+    /// * `link_world_transform` - World transform of the link
+    /// * `collision_origin` - Local transform of the collision (from Pose)
+    pub fn show_gizmo_for_collision(
+        &mut self,
+        link_id: Uuid,
+        collision_index: usize,
+        link_world_transform: Mat4,
+        collision_origin: Mat4,
+    ) {
+        // Compute collision world transform
+        let world_transform = link_world_transform * collision_origin;
+
+        // Extract position from world transform
+        let (_, rotation, translation) = world_transform.to_scale_rotation_translation();
+
+        // Use fixed scale - shader handles distance-based scaling
+        let scale = 1.0;
+
+        // Store gizmo state
+        self.gizmo.gizmo_position = translation;
+        self.gizmo.gizmo_scale = scale;
+        self.gizmo.part_id = None;
+        self.gizmo.editing_collision = Some((link_id, collision_index));
+        self.gizmo.link_world_transform = link_world_transform;
+        self.gizmo.part_start_transform = collision_origin;
+
+        // Set object rotation for local coordinate space
+        self.renderer
+            .set_gizmo_object_rotation(&self.queue, rotation);
+        self.renderer.show_gizmo(&self.queue, translation, scale);
+    }
+
+    /// Check if currently editing a collision element
+    pub fn is_editing_collision(&self) -> bool {
+        self.gizmo.editing_collision.is_some()
     }
 
     /// Test if a screen position hits the gizmo
@@ -236,7 +284,7 @@ impl ViewportState {
         width: f32,
         height: f32,
     ) -> GizmoAxis {
-        if self.gizmo.part_id.is_none() {
+        if self.gizmo.part_id.is_none() && self.gizmo.editing_collision.is_none() {
             return GizmoAxis::None;
         }
 

@@ -6,11 +6,13 @@ mod helpers;
 
 pub use component::{PropertyComponent, PropertyContext};
 
-use components::{GeometryComponent, PhysicalComponent, TransformComponent, VisualComponent};
+use components::{
+    CollisionComponent, GeometryComponent, PhysicalComponent, TransformComponent, VisualComponent,
+};
 
 use crate::config::SharedConfig;
 use crate::panels::Panel;
-use crate::state::{SharedAppState, SharedViewportState};
+use crate::state::{AppAction, SharedAppState, SharedViewportState};
 
 /// Properties panel for editing selected part
 pub struct PropertiesPanel {
@@ -18,6 +20,7 @@ pub struct PropertiesPanel {
     physical: PhysicalComponent,
     visual: VisualComponent,
     geometry: GeometryComponent,
+    collision: CollisionComponent,
 }
 
 impl PropertiesPanel {
@@ -27,6 +30,7 @@ impl PropertiesPanel {
             physical: PhysicalComponent::new(),
             visual: VisualComponent::new(),
             geometry: GeometryComponent::new(),
+            collision: CollisionComponent::new(),
         }
     }
 }
@@ -66,18 +70,29 @@ impl Panel for PropertiesPanel {
             return;
         };
 
-        // Find parent's world transform if this part is in assembly
-        let parent_world_transform = state
+        // Find link info for this part
+        let (link_id, parent_world_transform, collisions) = state
             .project
             .assembly
             .find_link_by_part(selected_id)
-            .and_then(|link| {
-                state
+            .map(|link| {
+                let parent_transform = state
                     .project
                     .assembly
                     .get_parent_link(link.id)
-                    .map(|parent| parent.world_transform)
-            });
+                    .map(|parent| parent.world_transform);
+                (Some(link.id), parent_transform, link.collisions.clone())
+            })
+            .unwrap_or((None, None, Vec::new()));
+
+        // Get selected collision index if the link matches
+        let selected_collision_index = state.selected_collision.and_then(|(sel_link_id, index)| {
+            if Some(sel_link_id) == link_id {
+                Some(index)
+            } else {
+                None
+            }
+        });
 
         let Some(part) = state.get_part_mut(selected_id) else {
             ui.weak("Selected part not found");
@@ -95,10 +110,17 @@ impl Panel for PropertiesPanel {
 
         ui.separator();
 
+        // Pending actions to queue after rendering
+        let mut pending_actions: Vec<AppAction> = Vec::new();
+
         // Create context for components
         let mut ctx = PropertyContext {
             part,
             parent_world_transform,
+            link_id,
+            collisions,
+            selected_collision_index,
+            pending_actions: &mut pending_actions,
         };
 
         // Render each component with collapsible header
@@ -107,6 +129,7 @@ impl Panel for PropertiesPanel {
         render_component(ui, &mut self.physical, &mut ctx);
         render_component(ui, &mut self.visual, &mut ctx);
         render_component(ui, &mut self.geometry, &mut ctx);
+        render_component(ui, &mut self.collision, &mut ctx);
 
         // If transform changed, update the renderer
         let new_transform = if transform_changed {
@@ -114,6 +137,11 @@ impl Panel for PropertiesPanel {
         } else {
             None
         };
+
+        // Queue any pending actions from components
+        for action in pending_actions {
+            state.queue_action(action);
+        }
 
         drop(state);
 

@@ -16,7 +16,7 @@ use glam::Mat4;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use rk_core::{Part, Project, StlUnit};
+use rk_core::{GeometryType, Part, Pose, Project, StlUnit};
 
 /// Actions that can be performed on the app state
 #[derive(Debug, Clone)]
@@ -69,6 +69,29 @@ pub enum AppAction {
     ResetJointPosition { joint_id: Uuid },
     /// Reset all joint positions to 0
     ResetAllJointPositions,
+
+    // Collision actions
+    /// Select a collision element (link_id, collision_index)
+    SelectCollision(Option<(Uuid, usize)>),
+    /// Add a collision element to a link
+    AddCollision {
+        link_id: Uuid,
+        geometry: GeometryType,
+    },
+    /// Remove a collision element from a link
+    RemoveCollision { link_id: Uuid, index: usize },
+    /// Update collision origin (position/rotation)
+    UpdateCollisionOrigin {
+        link_id: Uuid,
+        index: usize,
+        origin: Pose,
+    },
+    /// Update collision geometry type
+    UpdateCollisionGeometry {
+        link_id: Uuid,
+        index: usize,
+        geometry: GeometryType,
+    },
 }
 
 /// Angle display mode for joint sliders
@@ -85,6 +108,8 @@ pub struct AppState {
     pub project: Project,
     /// Currently selected part
     pub selected_part: Option<Uuid>,
+    /// Currently selected collision element (link_id, collision_index)
+    pub selected_collision: Option<(Uuid, usize)>,
     /// Hovered part
     pub hovered_part: Option<Uuid>,
     /// Current editor tool
@@ -112,6 +137,7 @@ impl Default for AppState {
         Self {
             project: Project::default(),
             selected_part: None,
+            selected_collision: None,
             hovered_part: None,
             current_tool: EditorTool::default(),
             symmetry_mode: false,
@@ -208,6 +234,7 @@ impl AppState {
     pub fn new_project(&mut self) {
         self.project = Project::default();
         self.selected_part = None;
+        self.selected_collision = None;
         self.project_path = None;
         self.modified = false;
     }
@@ -217,6 +244,7 @@ impl AppState {
         self.project = project;
         self.project_path = Some(path);
         self.selected_part = None;
+        self.selected_collision = None;
         self.modified = false;
     }
 }

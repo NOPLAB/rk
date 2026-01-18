@@ -4,9 +4,7 @@ use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::part::{JointLimits, JointType};
-
-use super::types::Pose;
+use crate::types::{JointDynamics, JointLimits, JointMimic, JointType, Pose};
 
 /// A joint connecting two links
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,43 +26,6 @@ pub struct Joint {
     pub dynamics: Option<JointDynamics>,
     /// Joint mimic configuration (follows another joint)
     pub mimic: Option<JointMimic>,
-}
-
-/// Joint mimic configuration
-/// Makes this joint follow another joint's position: value = multiplier * other_joint + offset
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JointMimic {
-    /// ID of the joint to mimic
-    pub joint_id: Uuid,
-    /// Multiplier applied to the mimicked joint's position (default: 1.0)
-    pub multiplier: f32,
-    /// Offset added after multiplication (default: 0.0)
-    pub offset: f32,
-}
-
-impl JointMimic {
-    /// Create a new mimic configuration
-    pub fn new(joint_id: Uuid) -> Self {
-        Self {
-            joint_id,
-            multiplier: 1.0,
-            offset: 0.0,
-        }
-    }
-
-    /// Create a new mimic configuration with multiplier and offset
-    pub fn with_params(joint_id: Uuid, multiplier: f32, offset: f32) -> Self {
-        Self {
-            joint_id,
-            multiplier,
-            offset,
-        }
-    }
-
-    /// Calculate the mimic value from the source joint's position
-    pub fn calculate(&self, source_position: f32) -> f32 {
-        self.multiplier * source_position + self.offset
-    }
 }
 
 impl Joint {
@@ -252,22 +213,6 @@ impl JointBuilder {
             limits: self.limits,
             dynamics: self.dynamics,
             mimic: self.mimic,
-        }
-    }
-}
-
-/// Joint dynamics
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct JointDynamics {
-    pub damping: f32,
-    pub friction: f32,
-}
-
-impl Default for JointDynamics {
-    fn default() -> Self {
-        Self {
-            damping: 0.0,
-            friction: 0.0,
         }
     }
 }

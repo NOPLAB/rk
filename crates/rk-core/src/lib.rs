@@ -8,21 +8,21 @@
 pub mod assembly;
 pub mod constants;
 pub mod export;
-pub mod geometry;
 pub mod import;
 pub mod inertia;
 pub mod mesh;
 pub mod part;
 pub mod primitive;
 pub mod project;
+pub mod types;
 
 pub use assembly::*;
 pub use constants::*;
 pub use export::*;
-pub use geometry::*;
 pub use import::*;
 pub use inertia::*;
 pub use mesh::*;
 pub use part::*;
 pub use primitive::*;
 pub use project::*;
+pub use types::*;

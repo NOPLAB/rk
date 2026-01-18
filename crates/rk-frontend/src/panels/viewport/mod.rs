@@ -221,8 +221,58 @@ impl Panel for ViewportPanel {
             }
         }
 
-        // Apply gizmo transform to part
+        // Apply gizmo transform to collision element
         if let Some(transform) = gizmo_delta
+            && let Some((link_id, collision_index)) = vp_state.gizmo.editing_collision
+        {
+            let link_world_transform = vp_state.gizmo.link_world_transform;
+            drop(vp_state);
+
+            // Calculate the delta in link-local space
+            let link_world_inv = link_world_transform.inverse();
+
+            let mut app = app_state.lock();
+
+            match transform {
+                GizmoTransform::Translation(delta) => {
+                    // Transform world delta to link-local delta
+                    let local_delta = link_world_inv.transform_vector3(delta);
+
+                    if let Some(link) = app.project.assembly.get_link_mut(link_id)
+                        && let Some(collision) = link.collisions.get_mut(collision_index)
+                    {
+                        collision.origin.xyz[0] += local_delta.x;
+                        collision.origin.xyz[1] += local_delta.y;
+                        collision.origin.xyz[2] += local_delta.z;
+                    }
+                }
+                GizmoTransform::Rotation(rotation) => {
+                    // For rotation, we need to update the RPY angles
+                    if let Some(link) = app.project.assembly.get_link_mut(link_id)
+                        && let Some(collision) = link.collisions.get_mut(collision_index)
+                    {
+                        // Current rotation as quaternion
+                        let current_quat = collision.origin.to_quat();
+                        // Apply the rotation delta
+                        let new_quat = rotation * current_quat;
+                        // Convert back to euler angles (XYZ order)
+                        let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
+                        collision.origin.rpy = [x, y, z];
+                    }
+                }
+                GizmoTransform::Scale(_) => {
+                    // Collision origins don't support scaling - ignore
+                }
+            }
+
+            app.modified = true;
+            drop(app);
+
+            // Re-lock viewport state for rest of handling
+            vp_state = viewport_state.lock();
+        }
+        // Apply gizmo transform to part
+        else if let Some(transform) = gizmo_delta
             && let Some(part_id) = vp_state.gizmo.part_id
         {
             let queue = vp_state.queue.clone();

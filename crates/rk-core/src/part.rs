@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::inertia::InertiaMatrix;
+use crate::types::{JointLimits, JointType};
 
 /// A part loaded from an STL file with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,121 +145,6 @@ impl JointPoint {
             joint_type: JointType::Revolute,
             axis: axis.normalize(),
             limits: Some(JointLimits::default()),
-        }
-    }
-}
-
-/// Joint type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum JointType {
-    #[default]
-    Fixed,
-    Revolute,
-    Continuous,
-    Prismatic,
-    Floating,
-    Planar,
-}
-
-impl JointType {
-    /// Check if this joint type has an axis
-    pub fn has_axis(&self) -> bool {
-        matches!(
-            self,
-            JointType::Revolute | JointType::Continuous | JointType::Prismatic
-        )
-    }
-
-    /// Check if this joint type has limits
-    pub fn has_limits(&self) -> bool {
-        matches!(self, JointType::Revolute | JointType::Prismatic)
-    }
-
-    /// Get display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            JointType::Fixed => "Fixed",
-            JointType::Revolute => "Revolute",
-            JointType::Continuous => "Continuous",
-            JointType::Prismatic => "Prismatic",
-            JointType::Floating => "Floating",
-            JointType::Planar => "Planar",
-        }
-    }
-
-    /// All joint types for UI
-    pub fn all() -> &'static [JointType] {
-        &[
-            JointType::Fixed,
-            JointType::Revolute,
-            JointType::Continuous,
-            JointType::Prismatic,
-            JointType::Floating,
-            JointType::Planar,
-        ]
-    }
-}
-
-impl From<&urdf_rs::JointType> for JointType {
-    fn from(urdf_type: &urdf_rs::JointType) -> Self {
-        match urdf_type {
-            urdf_rs::JointType::Fixed => JointType::Fixed,
-            urdf_rs::JointType::Revolute => JointType::Revolute,
-            urdf_rs::JointType::Continuous => JointType::Continuous,
-            urdf_rs::JointType::Prismatic => JointType::Prismatic,
-            urdf_rs::JointType::Floating => JointType::Floating,
-            urdf_rs::JointType::Planar => JointType::Planar,
-            urdf_rs::JointType::Spherical => JointType::Floating, // Approximate as floating
-        }
-    }
-}
-
-/// Joint limits
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct JointLimits {
-    /// Lower position limit (rad or m)
-    pub lower: f32,
-    /// Upper position limit (rad or m)
-    pub upper: f32,
-    /// Maximum effort (N or Nm)
-    pub effort: f32,
-    /// Maximum velocity (rad/s or m/s)
-    pub velocity: f32,
-}
-
-impl Default for JointLimits {
-    fn default() -> Self {
-        Self {
-            lower: -std::f32::consts::PI,
-            upper: std::f32::consts::PI,
-            effort: 100.0,
-            velocity: 1.0,
-        }
-    }
-}
-
-impl JointLimits {
-    /// Create default limits for revolute joints (-PI to PI)
-    pub fn default_revolute() -> Self {
-        Self::default()
-    }
-
-    /// Create default limits for prismatic joints (-1m to 1m)
-    pub fn default_prismatic() -> Self {
-        Self {
-            lower: -1.0,
-            upper: 1.0,
-            effort: 100.0,
-            velocity: 1.0,
-        }
-    }
-
-    /// Create limits with specified range
-    pub fn with_range(lower: f32, upper: f32) -> Self {
-        Self {
-            lower,
-            upper,
-            ..Self::default()
         }
     }
 }

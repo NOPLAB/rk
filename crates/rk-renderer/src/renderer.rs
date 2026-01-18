@@ -32,8 +32,8 @@ use crate::plugin::RendererRegistry;
 use crate::resources::MeshManager;
 use crate::scene::Scene;
 use crate::sub_renderers::{
-    AxisInstance, AxisRenderer, GizmoAxis, GizmoMode, GizmoRenderer, GizmoSpace, GridRenderer,
-    MarkerInstance, MarkerRenderer, MeshData, MeshRenderer,
+    AxisInstance, AxisRenderer, CollisionRenderer, GizmoAxis, GizmoMode, GizmoRenderer, GizmoSpace,
+    GridRenderer, MarkerInstance, MarkerRenderer, MeshData, MeshRenderer,
 };
 
 /// Mesh entry with bind group
@@ -97,6 +97,7 @@ pub struct Renderer {
     axis_renderer: AxisRenderer,
     marker_renderer: MarkerRenderer,
     gizmo_renderer: GizmoRenderer,
+    collision_renderer: CollisionRenderer,
 
     // Data - UUID-keyed storage for O(1) lookup and removal
     meshes: HashMap<Uuid, MeshEntry>,
@@ -245,6 +246,14 @@ impl Renderer {
             &camera_buffer,
         );
 
+        let collision_renderer = CollisionRenderer::new(
+            device,
+            format,
+            depth_format,
+            &camera_bind_group_layout,
+            &camera_buffer,
+        );
+
         // Initialize new architectural components
         let scene = Scene::new();
         let mesh_manager = MeshManager::new();
@@ -279,6 +288,7 @@ impl Renderer {
             axis_renderer,
             marker_renderer,
             gizmo_renderer,
+            collision_renderer,
             meshes: HashMap::new(),
             selected_part: None,
             show_grid: true,
@@ -715,6 +725,18 @@ impl Renderer {
         self.gizmo_renderer.get_axis_direction(axis)
     }
 
+    // ========== Collision renderer methods ==========
+
+    /// Get mutable reference to collision renderer
+    pub fn collision_renderer_mut(&mut self) -> &mut CollisionRenderer {
+        &mut self.collision_renderer
+    }
+
+    /// Get reference to collision renderer
+    pub fn collision_renderer(&self) -> &CollisionRenderer {
+        &self.collision_renderer
+    }
+
     /// Render the scene.
     pub fn render(
         &self,
@@ -827,6 +849,9 @@ impl Renderer {
         if self.show_markers {
             self.marker_renderer.render(&mut render_pass);
         }
+
+        // Render collision shapes (semi-transparent, after markers)
+        self.collision_renderer.render(&mut render_pass);
 
         // Render gizmo (always on top)
         if self.show_gizmo {
