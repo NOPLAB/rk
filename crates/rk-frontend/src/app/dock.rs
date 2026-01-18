@@ -3,7 +3,9 @@
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
 use crate::config::SharedConfig;
-use crate::panels::{JointListPanel, Panel, PartListPanel, PropertiesPanel, ViewportPanel};
+use crate::panels::{
+    FeatureTreePanel, JointListPanel, Panel, PartListPanel, PropertiesPanel, ViewportPanel,
+};
 use crate::state::{SharedAppState, SharedViewportState};
 
 /// Panel types for the dock system
@@ -11,6 +13,7 @@ pub enum PanelType {
     Viewport(ViewportPanel),
     PartList(PartListPanel),
     JointList(JointListPanel),
+    FeatureTree(FeatureTreePanel),
     Properties(PropertiesPanel),
 }
 
@@ -20,6 +23,7 @@ impl PanelType {
             PanelType::Viewport(p) => p.name(),
             PanelType::PartList(p) => p.name(),
             PanelType::JointList(p) => p.name(),
+            PanelType::FeatureTree(p) => p.name(),
             PanelType::Properties(p) => p.name(),
         }
     }
@@ -59,6 +63,7 @@ impl TabViewer for UrdfTabViewer<'_> {
             }
             PanelType::PartList(panel) => panel.ui(ui, self.app_state),
             PanelType::JointList(panel) => panel.ui(ui, self.app_state),
+            PanelType::FeatureTree(panel) => panel.ui(ui, self.app_state),
             PanelType::Properties(panel) => {
                 if let (Some(render_state), Some(viewport_state)) =
                     (self.render_state, self.viewport_state)
@@ -99,11 +104,14 @@ pub fn create_dock_layout() -> DockState<PanelType> {
         vec![PanelType::PartList(PartListPanel::new())],
     );
 
-    // 3. Split left panel vertically to add joints below parts
+    // 3. Split left panel vertically to add joints and features below parts
     let [_parts, _joints] = surface.split_below(
         left,
-        0.6, // Parts gets 60%, Joints gets 40%
-        vec![PanelType::JointList(JointListPanel::new())],
+        0.6, // Parts gets 60%, bottom tabs get 40%
+        vec![
+            PanelType::JointList(JointListPanel::new()),
+            PanelType::FeatureTree(FeatureTreePanel::new()),
+        ],
     );
 
     dock_state
