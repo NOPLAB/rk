@@ -91,15 +91,15 @@ fn load_stl_from_reader<R: std::io::Read + std::io::Seek>(
     let (vertices, normals, indices) = index_mesh_with_scale(&mesh, scale);
 
     let mut part = Part::new(name.to_string());
-    part.stl_path = stl_path;
-    part.vertices = vertices;
-    part.normals = normals;
-    part.indices = indices;
-    part.calculate_bounding_box();
-
-    // Calculate default inertia from bounding box
-    part.inertia =
-        crate::inertia::InertiaMatrix::from_bounding_box(part.mass, part.bbox_min, part.bbox_max);
+    super::finalize_part(
+        &mut part,
+        stl_path,
+        super::RawMeshData {
+            vertices,
+            normals,
+            indices,
+        },
+    );
 
     Ok(part)
 }

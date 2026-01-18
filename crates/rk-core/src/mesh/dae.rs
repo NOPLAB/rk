@@ -176,21 +176,17 @@ pub fn load_dae_with_unit(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part,
         all_normals = calculate_face_normals(&all_vertices, &all_indices);
     }
 
-    let name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unnamed")
-        .to_string();
-
+    let (name, mesh_path) = super::extract_name_and_path(path);
     let mut part = Part::new(name);
-    part.stl_path = Some(path.to_string_lossy().to_string());
-    part.vertices = all_vertices;
-    part.normals = all_normals;
-    part.indices = all_indices;
-    part.calculate_bounding_box();
-
-    part.inertia =
-        crate::inertia::InertiaMatrix::from_bounding_box(part.mass, part.bbox_min, part.bbox_max);
+    super::finalize_part(
+        &mut part,
+        mesh_path,
+        super::RawMeshData {
+            vertices: all_vertices,
+            normals: all_normals,
+            indices: all_indices,
+        },
+    );
 
     Ok(part)
 }

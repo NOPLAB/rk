@@ -14,6 +14,40 @@ pub use normals::{calculate_face_normals, calculate_triangle_normal};
 pub use obj::{load_obj, load_obj_with_unit};
 pub use stl::{StlError, StlUnit, load_stl, load_stl_from_bytes, load_stl_with_unit, save_stl};
 
+/// Raw mesh data extracted from a file (before Part creation)
+pub(crate) struct RawMeshData {
+    pub vertices: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+}
+
+/// Finalize a Part from raw mesh data
+///
+/// This handles the common post-processing steps:
+/// - Setting the mesh path
+/// - Calculating bounding box
+/// - Calculating default inertia from bounding box
+pub(crate) fn finalize_part(part: &mut Part, mesh_path: Option<String>, mesh_data: RawMeshData) {
+    part.stl_path = mesh_path;
+    part.vertices = mesh_data.vertices;
+    part.normals = mesh_data.normals;
+    part.indices = mesh_data.indices;
+    part.calculate_bounding_box();
+    part.inertia =
+        crate::inertia::InertiaMatrix::from_bounding_box(part.mass, part.bbox_min, part.bbox_max);
+}
+
+/// Extract name and path from a file path for Part creation
+pub(crate) fn extract_name_and_path(path: &Path) -> (String, Option<String>) {
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unnamed")
+        .to_string();
+    let mesh_path = Some(path.to_string_lossy().to_string());
+    (name, mesh_path)
+}
+
 /// Detect mesh format from file extension
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshFormat {

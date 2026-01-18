@@ -8,6 +8,33 @@ use uuid::Uuid;
 use crate::part::JointType;
 
 use super::Assembly;
+use super::joint::Joint;
+
+/// Strategy for computing additional joint transform based on position
+trait JointTransformStrategy {
+    fn compute(&self, joint_id: Uuid, joint: &Joint) -> Mat4;
+}
+
+/// No additional joint transform (origin only)
+struct NoJointTransform;
+
+impl JointTransformStrategy for NoJointTransform {
+    fn compute(&self, _joint_id: Uuid, _joint: &Joint) -> Mat4 {
+        Mat4::IDENTITY
+    }
+}
+
+/// Joint transform with positions from a HashMap
+struct WithPositions<'a> {
+    positions: &'a HashMap<Uuid, f32>,
+}
+
+impl JointTransformStrategy for WithPositions<'_> {
+    fn compute(&self, joint_id: Uuid, joint: &Joint) -> Mat4 {
+        let position = self.positions.get(&joint_id).copied().unwrap_or(0.0);
+        Assembly::compute_joint_transform(&joint.joint_type, joint.axis, position)
+    }
+}
 
 impl Assembly {
     /// Get the world transform of a link
@@ -38,62 +65,43 @@ impl Assembly {
     pub fn update_world_transforms(&mut self) {
         let roots = self.get_root_links();
         for root_id in roots {
-            self.update_transform_recursive(root_id, Mat4::IDENTITY);
-        }
-    }
-
-    fn update_transform_recursive(&mut self, link_id: Uuid, parent_transform: Mat4) {
-        let transform = if let Some((joint_id, _)) = self.parent.get(&link_id) {
-            if let Some(joint) = self.joints.get(joint_id) {
-                parent_transform * joint.origin.to_mat4()
-            } else {
-                parent_transform
-            }
-        } else {
-            parent_transform
-        };
-
-        if let Some(link) = self.links.get_mut(&link_id) {
-            link.world_transform = transform;
-        }
-
-        // Get children IDs first to avoid borrow issues
-        let children: Vec<Uuid> = self
-            .children
-            .get(&link_id)
-            .map(|c| c.iter().map(|(_, child_id)| *child_id).collect())
-            .unwrap_or_default();
-
-        for child_id in children {
-            self.update_transform_recursive(child_id, transform);
+            self.update_transform_recursive_impl(root_id, Mat4::IDENTITY, &NoJointTransform);
         }
     }
 
     /// Update all world transforms with joint positions applied
     pub fn update_world_transforms_with_positions(&mut self, joint_positions: &HashMap<Uuid, f32>) {
         let roots = self.get_root_links();
+        let strategy = WithPositions {
+            positions: joint_positions,
+        };
         for root_id in roots {
-            self.update_transform_recursive_with_positions(
-                root_id,
-                Mat4::IDENTITY,
-                joint_positions,
-            );
+            self.update_transform_recursive_impl(root_id, Mat4::IDENTITY, &strategy);
         }
     }
 
-    fn update_transform_recursive_with_positions(
+    /// Update all world transforms using internal joint positions
+    pub fn update_world_transforms_with_current_positions(&mut self) {
+        let roots = self.get_root_links();
+        let positions = self.joint_positions.clone();
+        let strategy = WithPositions {
+            positions: &positions,
+        };
+        for root_id in roots {
+            self.update_transform_recursive_impl(root_id, Mat4::IDENTITY, &strategy);
+        }
+    }
+
+    /// Internal recursive transform update with strategy pattern
+    fn update_transform_recursive_impl<S: JointTransformStrategy>(
         &mut self,
         link_id: Uuid,
         parent_transform: Mat4,
-        joint_positions: &HashMap<Uuid, f32>,
+        strategy: &S,
     ) {
         let transform = if let Some((joint_id, _)) = self.parent.get(&link_id) {
             if let Some(joint) = self.joints.get(joint_id) {
-                // Get joint position (defaults to 0)
-                let position = joint_positions.get(joint_id).copied().unwrap_or(0.0);
-                // Compute joint transform with position
-                let joint_transform =
-                    Self::compute_joint_transform(&joint.joint_type, joint.axis, position);
+                let joint_transform = strategy.compute(*joint_id, joint);
                 parent_transform * joint.origin.to_mat4() * joint_transform
             } else {
                 parent_transform
@@ -114,7 +122,7 @@ impl Assembly {
             .unwrap_or_default();
 
         for child_id in children {
-            self.update_transform_recursive_with_positions(child_id, transform, joint_positions);
+            self.update_transform_recursive_impl(child_id, transform, strategy);
         }
     }
 
@@ -139,18 +147,6 @@ impl Assembly {
                 // No transform for fixed joints, floating/planar would need more DOFs
                 Mat4::IDENTITY
             }
-        }
-    }
-
-    /// Update all world transforms using internal joint positions
-    pub fn update_world_transforms_with_current_positions(&mut self) {
-        let roots = self.get_root_links();
-        for root_id in roots {
-            self.update_transform_recursive_with_positions(
-                root_id,
-                Mat4::IDENTITY,
-                &self.joint_positions.clone(),
-            );
         }
     }
 }
