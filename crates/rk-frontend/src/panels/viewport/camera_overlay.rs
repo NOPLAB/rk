@@ -681,8 +681,8 @@ fn render_operations_tools(ui: &mut egui::Ui, app_state: &SharedAppState) {
 
 /// Render extrude dialog overlay
 pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &SharedAppState) {
-    let dialog_width = 200.0;
-    let dialog_height = 140.0;
+    let dialog_width = 220.0;
+    let dialog_height = 200.0;
 
     // Center the dialog
     let dialog_pos = egui::pos2(
@@ -705,6 +705,64 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new("Extrude").size(14.0).strong());
                         ui.add_space(8.0);
+
+                        // Get dialog state
+                        let (profile_count, selected_index, error_message) = {
+                            let app = app_state.lock();
+                            app.cad
+                                .editor_mode
+                                .sketch()
+                                .map(|s| {
+                                    (
+                                        s.extrude_dialog.profiles.len(),
+                                        s.extrude_dialog.selected_profile_index,
+                                        s.extrude_dialog.error_message.clone(),
+                                    )
+                                })
+                                .unwrap_or((0, 0, None))
+                        };
+
+                        // Profile selection
+                        if profile_count > 0 {
+                            ui.horizontal(|ui| {
+                                ui.label("Profile:");
+                                if profile_count == 1 {
+                                    ui.label("1 of 1");
+                                } else {
+                                    // Show profile selector
+                                    let selected_text =
+                                        format!("{} of {}", selected_index + 1, profile_count);
+                                    egui::ComboBox::from_id_salt("profile_selector")
+                                        .selected_text(selected_text)
+                                        .show_ui(ui, |ui| {
+                                            for i in 0..profile_count {
+                                                if ui
+                                                    .selectable_label(
+                                                        i == selected_index,
+                                                        format!("Profile {}", i + 1),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    app_state.lock().queue_action(
+                                                        AppAction::SketchAction(
+                                                            SketchAction::SelectExtrudeProfile {
+                                                                profile_index: i,
+                                                            },
+                                                        ),
+                                                    );
+                                                }
+                                            }
+                                        });
+                                }
+                            });
+                            ui.add_space(4.0);
+                        } else {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 150, 100),
+                                "No closed profiles found",
+                            );
+                            ui.add_space(4.0);
+                        }
 
                         // Distance input
                         ui.horizontal(|ui| {
@@ -763,11 +821,22 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                                 });
                         });
 
+                        // Show error message if any
+                        if let Some(error) = error_message {
+                            ui.add_space(4.0);
+                            ui.colored_label(egui::Color32::from_rgb(255, 100, 100), error);
+                        }
+
                         ui.add_space(12.0);
 
                         // OK / Cancel buttons
                         ui.horizontal(|ui| {
-                            if ui.button("OK").clicked() {
+                            // Disable OK button if no profiles
+                            let ok_enabled = profile_count > 0;
+                            if ui
+                                .add_enabled(ok_enabled, egui::Button::new("OK"))
+                                .clicked()
+                            {
                                 app_state.lock().queue_action(AppAction::SketchAction(
                                     SketchAction::ExecuteExtrude,
                                 ));

@@ -106,6 +106,9 @@ pub struct Renderer {
     meshes: HashMap<Uuid, MeshEntry>,
     selected_part: Option<Uuid>,
 
+    // Preview mesh for extrude preview
+    preview_mesh: Option<MeshEntry>,
+
     // Display options
     show_grid: bool,
     show_axes: bool,
@@ -313,6 +316,7 @@ impl Renderer {
             plane_selector_renderer,
             meshes: HashMap::new(),
             selected_part: None,
+            preview_mesh: None,
             show_grid: true,
             show_axes: true,
             show_markers: true,
@@ -665,6 +669,37 @@ impl Renderer {
         self.meshes.len()
     }
 
+    // ========== Preview mesh methods ==========
+
+    /// Set a preview mesh for extrusion preview.
+    ///
+    /// The mesh will be rendered with a semi-transparent appearance.
+    pub fn set_preview_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        vertices: &[[f32; 3]],
+        normals: &[[f32; 3]],
+        indices: &[u32],
+        transform: Mat4,
+    ) {
+        // Semi-transparent blue color for preview
+        let preview_color = [0.4, 0.6, 0.9, 0.5];
+        let data =
+            MeshData::from_arrays(device, vertices, normals, indices, transform, preview_color);
+        let bind_group = self.mesh_renderer.create_instance_bind_group(device, &data);
+        self.preview_mesh = Some(MeshEntry { data, bind_group });
+    }
+
+    /// Clear the preview mesh.
+    pub fn clear_preview_mesh(&mut self) {
+        self.preview_mesh = None;
+    }
+
+    /// Check if there's a preview mesh.
+    pub fn has_preview_mesh(&self) -> bool {
+        self.preview_mesh.is_some()
+    }
+
     /// Update axis display
     pub fn update_axes(&mut self, queue: &wgpu::Queue, instances: &[AxisInstance]) {
         self.axis_renderer.update_instances(queue, instances);
@@ -929,6 +964,16 @@ impl Renderer {
 
         // Render collision shapes (semi-transparent, after markers)
         self.collision_renderer.render(&mut render_pass);
+
+        // Render preview mesh (semi-transparent, for extrude preview)
+        if let Some(entry) = &self.preview_mesh {
+            self.mesh_renderer.render(
+                &mut render_pass,
+                &entry.data,
+                &entry.bind_group,
+                &self.light_bind_group,
+            );
+        }
 
         // Render plane selector (semi-transparent, for sketch plane selection)
         self.plane_selector_renderer.render(&mut render_pass);

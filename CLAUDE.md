@@ -29,9 +29,10 @@ cargo fmt
 # Lint
 cargo clippy
 
-# Build with CAD kernel (optional features)
-cargo build --features rk-cad/truck    # Pure Rust B-Rep kernel
-cargo build --features rk-cad/opencascade  # OpenCASCADE bindings
+# Build with CAD kernel (Truck is default)
+cargo build                              # Uses Truck (default, Pure Rust B-Rep)
+cargo build --features rk-cad/opencascade  # Use OpenCASCADE instead (requires fixing)
+cargo build --no-default-features        # No CAD kernel (NullKernel)
 ```
 
 ## Architecture

@@ -3,7 +3,9 @@
 use glam::{Vec2, Vec3};
 use uuid::Uuid;
 
-use rk_cad::{CadData, Sketch, SketchConstraint, SketchEntity, SketchPlane};
+use rk_cad::{
+    CadData, Sketch, SketchConstraint, SketchEntity, SketchPlane, TessellatedMesh, Wire2D,
+};
 
 /// Reference plane types for sketch creation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,6 +293,14 @@ pub struct ExtrudeDialogState {
     pub distance: f32,
     /// Extrusion direction
     pub direction: ExtrudeDirection,
+    /// Extracted profiles from the sketch
+    pub profiles: Vec<Wire2D>,
+    /// Currently selected profile index
+    pub selected_profile_index: usize,
+    /// Preview mesh for the extrusion (stored for rendering)
+    pub preview_mesh: Option<TessellatedMesh>,
+    /// Error message if preview generation failed
+    pub error_message: Option<String>,
 }
 
 impl Default for ExtrudeDialogState {
@@ -300,22 +310,51 @@ impl Default for ExtrudeDialogState {
             sketch_id: Uuid::nil(),
             distance: 10.0,
             direction: ExtrudeDirection::Positive,
+            profiles: Vec::new(),
+            selected_profile_index: 0,
+            preview_mesh: None,
+            error_message: None,
         }
     }
 }
 
 impl ExtrudeDialogState {
-    /// Open the dialog for a sketch
+    /// Open the dialog for a sketch (basic initialization, profiles set separately)
     pub fn open_for_sketch(&mut self, sketch_id: Uuid) {
         self.open = true;
         self.sketch_id = sketch_id;
         self.distance = 10.0;
         self.direction = ExtrudeDirection::Positive;
+        self.profiles = Vec::new();
+        self.selected_profile_index = 0;
+        self.preview_mesh = None;
+        self.error_message = None;
+    }
+
+    /// Set the profiles extracted from the sketch
+    pub fn set_profiles(&mut self, profiles: Vec<Wire2D>) {
+        self.profiles = profiles;
+        self.selected_profile_index = 0;
+    }
+
+    /// Get the currently selected profile, if any
+    pub fn selected_profile(&self) -> Option<&Wire2D> {
+        self.profiles.get(self.selected_profile_index)
+    }
+
+    /// Select a profile by index
+    pub fn select_profile(&mut self, index: usize) {
+        if index < self.profiles.len() {
+            self.selected_profile_index = index;
+        }
     }
 
     /// Close the dialog
     pub fn close(&mut self) {
         self.open = false;
+        self.profiles.clear();
+        self.preview_mesh = None;
+        self.error_message = None;
     }
 }
 
@@ -410,6 +449,7 @@ impl SketchModeState {
 
 /// Editor mode (3D assembly or 2D sketch)
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::large_enum_variant)]
 pub enum EditorMode {
     /// Normal 3D assembly editing
     #[default]
@@ -503,6 +543,8 @@ pub enum SketchAction {
     UpdateExtrudeDistance { distance: f32 },
     /// Update extrude dialog direction
     UpdateExtrudeDirection { direction: ExtrudeDirection },
+    /// Select a profile in the extrude dialog
+    SelectExtrudeProfile { profile_index: usize },
     /// Cancel the extrude dialog
     CancelExtrudeDialog,
     /// Execute the extrusion with current dialog settings

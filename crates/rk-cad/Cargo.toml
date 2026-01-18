@@ -6,8 +6,8 @@ license.workspace = true
 description = "CAD kernel abstraction and sketch system for RK"
 
 [features]
-default = []
-opencascade = ["opencascade-sys"]
+default = ["truck"]
+opencascade = ["dep:opencascade-sys", "dep:cxx"]
 truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh"]
 
 [dependencies]
@@ -20,6 +20,7 @@ tracing = { workspace = true }
 
 # Optional: OpenCASCADE (C++ bindings)
 opencascade-sys = { version = "0.2", optional = true }
+cxx = { version = "1.0", optional = true }
 
 # Optional: Truck (Pure Rust B-Rep)
 truck-modeling = { version = "0.4", optional = true }

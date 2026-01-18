@@ -168,6 +168,98 @@ impl MeshData {
         }
     }
 
+    /// Create mesh data from vertex/normal/index arrays (for preview meshes)
+    pub fn from_arrays(
+        device: &wgpu::Device,
+        mesh_vertices: &[[f32; 3]],
+        mesh_normals: &[[f32; 3]],
+        mesh_indices: &[u32],
+        transform: Mat4,
+        color: [f32; 4],
+    ) -> Self {
+        // Build vertices with normals
+        let mut vertices = Vec::new();
+
+        for (i, chunk) in mesh_indices.chunks(3).enumerate() {
+            if chunk.len() != 3 {
+                continue;
+            }
+
+            // Get face normal - try per-vertex normals first, then compute from vertices
+            let normal = if i * 3 < mesh_normals.len() {
+                mesh_normals[i * 3]
+            } else if !mesh_normals.is_empty() && (chunk[0] as usize) < mesh_normals.len() {
+                mesh_normals[chunk[0] as usize]
+            } else {
+                // Compute face normal from vertex positions
+                let p0 = mesh_vertices
+                    .get(chunk[0] as usize)
+                    .copied()
+                    .unwrap_or([0.0, 0.0, 0.0]);
+                let p1 = mesh_vertices
+                    .get(chunk[1] as usize)
+                    .copied()
+                    .unwrap_or([0.0, 0.0, 0.0]);
+                let p2 = mesh_vertices
+                    .get(chunk[2] as usize)
+                    .copied()
+                    .unwrap_or([0.0, 0.0, 0.0]);
+                let v0 = glam::Vec3::from(p0);
+                let v1 = glam::Vec3::from(p1);
+                let v2 = glam::Vec3::from(p2);
+                let normal = (v1 - v0).cross(v2 - v0).normalize_or_zero();
+                normal.to_array()
+            };
+
+            for &idx in chunk {
+                let pos = mesh_vertices
+                    .get(idx as usize)
+                    .copied()
+                    .unwrap_or([0.0, 0.0, 0.0]);
+                vertices.push(MeshVertex {
+                    position: pos,
+                    normal,
+                    color,
+                });
+            }
+        }
+
+        let indices: Vec<u32> = (0..vertices.len() as u32).collect();
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Preview Mesh Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Preview Mesh Index Buffer"),
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let instance = MeshInstance {
+            model: transform.to_cols_array_2d(),
+            color,
+            selected: 0,
+            _pad: [0; 3],
+        };
+
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Preview Mesh Instance Buffer"),
+            contents: bytemuck::cast_slice(&[instance]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        Self {
+            vertex_buffer,
+            index_buffer,
+            index_count: indices.len() as u32,
+            instance,
+            instance_buffer,
+        }
+    }
+
     /// Update instance transform
     pub fn update_transform(&mut self, queue: &wgpu::Queue, transform: Mat4) {
         self.instance.model = transform.to_cols_array_2d();

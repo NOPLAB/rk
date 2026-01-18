@@ -10,7 +10,7 @@ use std::sync::Arc;
 use egui_dock::{DockArea, DockState, Style};
 use parking_lot::Mutex;
 
-use crate::actions::{ActionContext, dispatch_action};
+use crate::actions::{ActionContext, SharedKernel, dispatch_action};
 use crate::config::{SharedConfig, create_shared_config};
 use crate::panels::PreferencesPanel;
 use crate::state::{SharedAppState, SharedViewportState, ViewportState, create_shared_state};
@@ -29,6 +29,8 @@ pub struct UrdfEditorApp {
     dock_state: DockState<PanelType>,
     app_state: SharedAppState,
     viewport_state: Option<SharedViewportState>,
+    /// CAD kernel for geometry operations
+    kernel: SharedKernel,
     update_status: SharedUpdateStatus,
     /// Whether the update notification has been dismissed
     update_dismissed: bool,
@@ -45,6 +47,9 @@ pub struct UrdfEditorApp {
 impl UrdfEditorApp {
     /// Create a new app
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Initialize CAD kernel
+        let kernel: SharedKernel = Arc::from(rk_cad::default_kernel());
+
         // Load configuration
         let config = create_shared_config();
 
@@ -97,6 +102,7 @@ impl UrdfEditorApp {
             dock_state,
             app_state,
             viewport_state,
+            kernel,
             update_status,
             update_dismissed: false,
             welcome_dialog: WelcomeDialog::new(is_first_launch),
@@ -109,7 +115,7 @@ impl UrdfEditorApp {
     /// Process pending actions
     fn process_actions(&mut self) {
         let actions = self.app_state.lock().take_pending_actions();
-        let ctx = ActionContext::new(&self.app_state, &self.viewport_state);
+        let ctx = ActionContext::new(&self.app_state, &self.viewport_state, &self.kernel);
 
         for action in actions {
             dispatch_action(action, &ctx);

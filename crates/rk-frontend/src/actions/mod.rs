@@ -11,6 +11,10 @@ mod file_wasm;
 mod part;
 mod sketch;
 
+use std::sync::Arc;
+
+use rk_cad::CadKernel;
+
 use crate::state::{AppAction, SharedAppState, SharedViewportState};
 
 pub use assembly::handle_assembly_action;
@@ -21,20 +25,26 @@ pub use file_wasm::handle_file_action_wasm;
 pub use part::handle_part_action;
 pub use sketch::handle_sketch_action;
 
+/// Shared CAD kernel for geometry operations
+pub type SharedKernel = Arc<dyn CadKernel>;
+
 /// Context for action handlers
 pub struct ActionContext<'a> {
     pub app_state: &'a SharedAppState,
     pub viewport_state: &'a Option<SharedViewportState>,
+    pub kernel: &'a SharedKernel,
 }
 
 impl<'a> ActionContext<'a> {
     pub fn new(
         app_state: &'a SharedAppState,
         viewport_state: &'a Option<SharedViewportState>,
+        kernel: &'a SharedKernel,
     ) -> Self {
         Self {
             app_state,
             viewport_state,
+            kernel,
         }
     }
 }

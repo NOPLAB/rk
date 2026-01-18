@@ -2,7 +2,7 @@
 
 mod camera_overlay;
 
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use rk_cad::{Sketch, SketchEntity, SketchPlane};
 use rk_renderer::{Camera, GizmoAxis, GizmoMode, GizmoSpace, SketchRenderData, plane_ids};
 
@@ -824,6 +824,38 @@ impl Panel for ViewportPanel {
             let device = vp_state.device.clone();
             vp_state.renderer.set_sketch_data(sketch_render_data);
             vp_state.renderer.prepare_sketches(&device);
+
+            // Update preview mesh for extrude preview
+            {
+                let app = app_state.lock();
+                if let Some(sketch_state) = app.cad.editor_mode.sketch() {
+                    if sketch_state.extrude_dialog.open {
+                        if let Some(ref preview_mesh) = sketch_state.extrude_dialog.preview_mesh {
+                            // Get the sketch plane transform
+                            let sketch_id = sketch_state.extrude_dialog.sketch_id;
+                            let transform = app
+                                .cad
+                                .get_sketch(sketch_id)
+                                .map(|s| s.plane.transform())
+                                .unwrap_or(Mat4::IDENTITY);
+
+                            vp_state.renderer.set_preview_mesh(
+                                &device,
+                                &preview_mesh.vertices,
+                                &preview_mesh.normals,
+                                &preview_mesh.indices,
+                                transform,
+                            );
+                        } else {
+                            vp_state.renderer.clear_preview_mesh();
+                        }
+                    } else {
+                        vp_state.renderer.clear_preview_mesh();
+                    }
+                } else {
+                    vp_state.renderer.clear_preview_mesh();
+                }
+            }
 
             vp_state.render();
             tex_id
