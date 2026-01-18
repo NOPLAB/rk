@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+  <!-- Background -->
+  <rect width="400" height="300" fill="none"/>
+
+  <!-- Grid pattern (subtle) -->
+  <defs>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e5e5" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  <rect width="400" height="300" fill="url(#grid)"/>
+
+  <!-- Robot Arm Base -->
+  <g transform="translate(200, 250)">
+    <!-- Base platform -->
+    <rect x="-60" y="-15" width="120" height="15" rx="3" fill="#1a1a1a"/>
+    <ellipse cx="0" cy="-15" rx="50" ry="12" fill="#333333"/>
+
+    <!-- Joint 1 (Base rotation) -->
+    <circle cx="0" cy="-25" r="18" fill="#ffffff" stroke="#1a1a1a" stroke-width="2"/>
+    <circle cx="0" cy="-25" r="6" fill="#1a1a1a"/>
+
+    <!-- Link 1 -->
+    <g transform="rotate(-30)">
+      <rect x="-8" y="-100" width="16" height="75" rx="4" fill="#333333" stroke="#1a1a1a" stroke-width="1"/>
+
+      <!-- Joint 2 -->
+      <circle cx="0" cy="-100" r="14" fill="#ffffff" stroke="#1a1a1a" stroke-width="2"/>
+      <circle cx="0" cy="-100" r="5" fill="#666666"/>
+
+      <!-- Link 2 -->
+      <g transform="translate(0, -100) rotate(60)">
+        <rect x="-6" y="-80" width="12" height="65" rx="3" fill="#4a4a4a" stroke="#1a1a1a" stroke-width="1"/>
+
+        <!-- Joint 3 -->
+        <circle cx="0" cy="-80" r="12" fill="#ffffff" stroke="#1a1a1a" stroke-width="2"/>
+        <circle cx="0" cy="-80" r="4" fill="#666666"/>
+
+        <!-- Link 3 (End effector) -->
+        <g transform="translate(0, -80) rotate(-20)">
+          <rect x="-5" y="-50" width="10" height="40" rx="2" fill="#5a5a5a" stroke="#1a1a1a" stroke-width="1"/>
+
+          <!-- Gripper -->
+          <g transform="translate(0, -50)">
+            <rect x="-12" y="-25" width="8" height="20" rx="2" fill="#1a1a1a"/>
+            <rect x="4" y="-25" width="8" height="20" rx="2" fill="#1a1a1a"/>
+            <rect x="-6" y="-8" width="12" height="8" rx="2" fill="#333333"/>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <!-- Coordinate axes indicator -->
+  <g transform="translate(50, 250)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line x1="0" y1="0" x2="0" y2="-30" stroke="#666666" stroke-width="2"/>
+    <line x1="0" y1="0" x2="-15" y2="15" stroke="#666666" stroke-width="2"/>
+    <text x="35" y="5" font-family="monospace" font-size="10" fill="#666666">X</text>
+    <text x="3" y="-35" font-family="monospace" font-size="10" fill="#666666">Z</text>
+    <text x="-25" y="20" font-family="monospace" font-size="10" fill="#666666">Y</text>
+  </g>
+
+  <!-- Code snippet decoration -->
+  <g transform="translate(300, 30)">
+    <rect x="0" y="0" width="90" height="70" rx="4" fill="#f5f5f5" stroke="#d4d4d4" stroke-width="1"/>
+    <text x="8" y="18" font-family="monospace" font-size="8" fill="#666666">&lt;robot&gt;</text>
+    <text x="16" y="30" font-family="monospace" font-size="8" fill="#1a1a1a">&lt;link/&gt;</text>
+    <text x="16" y="42" font-family="monospace" font-size="8" fill="#1a1a1a">&lt;joint/&gt;</text>
+    <text x="8" y="54" font-family="monospace" font-size="8" fill="#666666">&lt;/robot&gt;</text>
+  </g>
+
+  <!-- RK Logo (small) -->
+  <g transform="translate(350, 270) scale(0.08)">
+    <g stroke="#666666" stroke-width="9" stroke-linecap="square" fill="none">
+      <line x1="-130" y1="-70" x2="-190" y2="-10"/>
+      <line x1="-190" y1="10" x2="-130" y2="70"/>
+    </g>
+    <g stroke="#666666" stroke-width="9" stroke-linecap="square" fill="none">
+      <line x1="130" y1="-70" x2="190" y2="-10"/>
+      <line x1="190" y1="10" x2="130" y2="70"/>
+    </g>
+    <g stroke="#1a1a1a" stroke-width="9" stroke-linecap="square" fill="none" transform="translate(-46, 0)">
+      <line x1="-30" y1="-75" x2="-30" y2="-22"/>
+      <line x1="-30" y1="22" x2="-30" y2="75"/>
+      <line x1="-14" y1="-75" x2="18" y2="-75"/>
+      <line x1="32" y1="-60" x2="32" y2="-25"/>
+      <line x1="-14" y1="-10" x2="18" y2="-10"/>
+      <line x1="6" y1="15" x2="40" y2="75"/>
+    </g>
+    <g stroke="#1a1a1a" stroke-width="9" stroke-linecap="square" fill="none" transform="translate(60, 0)">
+      <line x1="-24" y1="-75" x2="-24" y2="-15"/>
+      <line x1="-24" y1="15" x2="-24" y2="75"/>
+      <line x1="-6" y1="-15" x2="38" y2="-75"/>
+      <line x1="-6" y1="15" x2="38" y2="75"/>
+    </g>
+  </g>
+</svg>
