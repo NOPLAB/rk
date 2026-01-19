@@ -804,6 +804,44 @@ fn handle_select_entity_for_constraint(ctx: &ActionContext, entity_id: uuid::Uui
         }
     } else {
         // First selection
+
+        // Check if selected entity is a Line for dimensional constraint (line length)
+        if is_dimensional_constraint(tool) {
+            let line_endpoints = {
+                let state = ctx.app_state.lock();
+                if let Some(sketch) = state.cad.get_sketch(sketch_id) {
+                    if let Some(SketchEntity::Line { start, end, .. }) =
+                        sketch.get_entity(entity_id)
+                    {
+                        Some((*start, *end))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some((start, end)) = line_endpoints {
+                // Line selected - use its endpoints for distance constraint
+                let initial_value = {
+                    let state = ctx.app_state.lock();
+                    compute_initial_value(tool, &[start, end], &state.cad, sketch_id)
+                };
+
+                let mut state = ctx.app_state.lock();
+                if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                    sketch_state.dimension_dialog.open_for_constraint(
+                        tool,
+                        vec![start, end],
+                        initial_value,
+                    );
+                    sketch_state.constraint_tool_state = None;
+                }
+                return;
+            }
+        }
+
         if is_single_entity_constraint(tool) {
             // Try to create constraint (need immutable access to CadState)
             let constraint = {

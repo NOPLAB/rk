@@ -834,7 +834,10 @@ fn is_valid_entity_for_tool(entity: Option<&SketchEntity>, tool: SketchTool) -> 
         SketchTool::DimensionDistance
         | SketchTool::DimensionHorizontal
         | SketchTool::DimensionVertical => {
-            matches!(entity, SketchEntity::Point { .. })
+            matches!(
+                entity,
+                SketchEntity::Point { .. } | SketchEntity::Line { .. }
+            )
         }
         SketchTool::DimensionAngle => matches!(entity, SketchEntity::Line { .. }),
         SketchTool::DimensionRadius => {
