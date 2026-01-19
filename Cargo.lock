@@ -2250,30 +2250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
-dependencies = [
- "num-bigint",
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
-name = "num-bigint"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
-dependencies = [
- "num-integer",
- "num-traits",
-]
-
-[[package]]
 name = "num-complex"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2297,37 +2273,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "num-integer"
-version = "0.1.46"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-iter"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-rational"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
-dependencies = [
- "num-bigint",
- "num-integer",
- "num-traits",
 ]
 
 [[package]]
@@ -2908,6 +2853,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "version_check",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3237,8 +3206,8 @@ dependencies = [
  "tracing",
  "truck-meshalgo",
  "truck-modeling",
- "truck-polymesh 0.4.0",
- "truck-topology 0.4.0",
+ "truck-polymesh",
+ "truck-topology",
  "uuid",
 ]
 
@@ -3960,17 +3929,6 @@ dependencies = [
 
 [[package]]
 name = "truck-base"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6153347d2e66a813d729ad3f08af700bef20ffe6fac95b3bb66dbf93769fd980"
-dependencies = [
- "cgmath",
- "matext4cgmath",
- "serde",
-]
-
-[[package]]
-name = "truck-base"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c279de9e92e5dc20a188deb0bb9a4bd421a6a185e57e03e19025e84a36c5a05"
@@ -3982,17 +3940,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "truck-geometry"
-version = "0.3.0"
+name = "truck-derivers"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "473f1bf80b2ebf7e3581163e043084da3412c54a202840eb60423a459940c2f4"
+checksum = "421ff1c5a303aed64e295d9b30e8424ee7a2fa251617a59ae4acfd078496009f"
 dependencies = [
- "derive_more",
- "num",
- "serde",
- "thiserror 1.0.69",
- "truck-base 0.3.0",
- "truck-geotrait 0.2.0",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.112",
 ]
 
 [[package]]
@@ -4003,20 +3959,8 @@ checksum = "4d9d85f203fdbc2d206a38b8e7c4417a05a2eb589be8b81ecfe9f98faafc425d"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
- "truck-base 0.5.0",
- "truck-geotrait 0.4.0",
-]
-
-[[package]]
-name = "truck-geotrait"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b881a372c81a2b09eaceb15462e71c21b261e68aa9e7c86355d5d99cbed53580"
-dependencies = [
- "getrandom 0.2.16",
- "rand 0.8.5",
- "thiserror 1.0.69",
- "truck-base 0.3.0",
+ "truck-base",
+ "truck-geotrait",
 ]
 
 [[package]]
@@ -4028,7 +3972,8 @@ dependencies = [
  "getrandom 0.2.16",
  "rand 0.8.5",
  "thiserror 1.0.69",
- "truck-base 0.5.0",
+ "truck-base",
+ "truck-derivers",
 ]
 
 [[package]]
@@ -4043,42 +3988,28 @@ dependencies = [
  "rayon",
  "rustc-hash 2.1.1",
  "spade",
- "truck-base 0.5.0",
- "truck-geometry 0.5.0",
- "truck-polymesh 0.6.0",
- "truck-topology 0.6.0",
+ "truck-base",
+ "truck-geometry",
+ "truck-polymesh",
+ "truck-topology",
  "vtkio",
 ]
 
 [[package]]
 name = "truck-modeling"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd2484b363a52af5ad2755c3dc382115b51f2c531bb63ca95fcec111580e919"
+checksum = "8082c2dfac8c2732a014d81807fb5d24dbac0d72ee4de2a705b7fbc05fa05b18"
 dependencies = [
  "derive_more",
- "rustc-hash 1.1.0",
+ "rustc-hash 2.1.1",
  "serde",
  "thiserror 1.0.69",
- "truck-base 0.3.0",
- "truck-geometry 0.3.0",
- "truck-geotrait 0.2.0",
- "truck-polymesh 0.4.0",
- "truck-topology 0.4.0",
-]
-
-[[package]]
-name = "truck-polymesh"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd23873c4d22dfdfaf17749a373b400209f55e5d2f6d7a8a97cf29f47a19646"
-dependencies = [
- "bytemuck",
- "rustc-hash 1.1.0",
- "serde",
- "thiserror 1.0.69",
- "truck-base 0.3.0",
- "truck-geotrait 0.2.0",
+ "truck-base",
+ "truck-geometry",
+ "truck-geotrait",
+ "truck-polymesh",
+ "truck-topology",
 ]
 
 [[package]]
@@ -4093,21 +4024,8 @@ dependencies = [
  "rustc-hash 2.1.1",
  "serde",
  "thiserror 1.0.69",
- "truck-base 0.5.0",
- "truck-geotrait 0.4.0",
-]
-
-[[package]]
-name = "truck-topology"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51fed1177d2f526487612c09e592f93e26c3a603e14f786e64725c1dce088e97"
-dependencies = [
- "rustc-hash 1.1.0",
- "serde",
- "thiserror 1.0.69",
- "truck-base 0.3.0",
- "truck-geotrait 0.2.0",
+ "truck-base",
+ "truck-geotrait",
 ]
 
 [[package]]
@@ -4122,8 +4040,8 @@ dependencies = [
  "rustc-hash 2.1.1",
  "serde",
  "thiserror 1.0.69",
- "truck-base 0.5.0",
- "truck-geotrait 0.4.0",
+ "truck-base",
+ "truck-geotrait",
 ]
 
 [[package]]

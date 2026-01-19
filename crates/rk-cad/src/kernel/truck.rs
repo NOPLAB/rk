@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
+use truck_meshalgo::prelude::*;
 use truck_modeling::{InnerSpace, Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
 
 use super::{
@@ -201,24 +202,61 @@ impl CadKernel for TruckKernel {
         ))
     }
 
-    fn tessellate(&self, solid: &Solid, _tolerance: f32) -> CadResult<TessellatedMesh> {
-        // Verify the solid exists
+    fn tessellate(&self, solid: &Solid, tolerance: f32) -> CadResult<TessellatedMesh> {
+        // Get the stored solid
         let solids = self.solids.lock().unwrap();
-        if !solids.contains_key(&solid.id) {
-            return Err(CadError::TessellationFailed("Solid not found".into()));
+        let truck_solid = solids
+            .get(&solid.id)
+            .ok_or_else(|| CadError::TessellationFailed("Solid not found".into()))?;
+
+        // Tessellate using truck-meshalgo and convert to polygon mesh
+        let meshed_solid = truck_solid.triangulation(tolerance as f64);
+        let mut mesh = meshed_solid.to_polygon();
+
+        // Add smooth normals for better rendering
+        mesh.add_smooth_normals(0.5, true);
+
+        // Clean up the mesh
+        mesh.put_together_same_attrs(1e-6);
+        mesh.remove_degenerate_faces();
+        mesh.remove_unused_attrs();
+
+        // Extract vertices
+        let vertices: Vec<[f32; 3]> = mesh
+            .positions()
+            .iter()
+            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+            .collect();
+
+        // Extract normals
+        let normals: Vec<[f32; 3]> = mesh
+            .normals()
+            .iter()
+            .map(|n| [n.x as f32, n.y as f32, n.z as f32])
+            .collect();
+
+        // Extract indices from triangle faces
+        let mut indices: Vec<u32> = Vec::new();
+        for tri in mesh.tri_faces() {
+            indices.push(tri[0].pos as u32);
+            indices.push(tri[1].pos as u32);
+            indices.push(tri[2].pos as u32);
+        }
+        // Convert quad faces to triangles
+        for quad in mesh.quad_faces() {
+            indices.push(quad[0].pos as u32);
+            indices.push(quad[1].pos as u32);
+            indices.push(quad[2].pos as u32);
+            indices.push(quad[0].pos as u32);
+            indices.push(quad[2].pos as u32);
+            indices.push(quad[3].pos as u32);
         }
 
-        // Note: Tessellation requires additional integration work due to trait bound
-        // requirements in truck-meshalgo. The MeshableShape trait implementation
-        // requires specific curve/surface types that need version alignment.
-        //
-        // For now, return an error indicating this feature needs implementation.
-        // The solid modeling operations (extrude, revolve, primitives) work correctly.
-        Err(CadError::TessellationFailed(
-            "Tessellation requires additional integration work for Truck kernel. \
-             Use OpenCASCADE kernel for full tessellation support."
-                .into(),
-        ))
+        Ok(TessellatedMesh {
+            vertices,
+            normals,
+            indices,
+        })
     }
 
     fn create_box(&self, center: Vec3, size: Vec3) -> CadResult<Solid> {

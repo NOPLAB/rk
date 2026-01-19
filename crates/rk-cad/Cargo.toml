@@ -23,10 +23,10 @@ opencascade-sys = { version = "0.2", optional = true }
 cxx = { version = "1.0", optional = true }
 
 # Optional: Truck (Pure Rust B-Rep)
-truck-modeling = { version = "0.4", optional = true }
+truck-modeling = { version = "0.6", optional = true }
 truck-meshalgo = { version = "0.4", optional = true }
-truck-topology = { version = "0.4", optional = true }
-truck-polymesh = { version = "0.4", optional = true }
+truck-topology = { version = "0.6", optional = true }
+truck-polymesh = { version = "0.6", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
