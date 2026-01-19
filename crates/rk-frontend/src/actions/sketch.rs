@@ -45,6 +45,7 @@ fn generate_extrude_preview(
             profile,
             sketch.plane.origin,
             sketch.plane.normal,
+            sketch.plane.x_axis,
             extrude_dir,
             extrude_dist,
         )
@@ -57,6 +58,7 @@ fn generate_extrude_preview(
                 profile,
                 sketch.plane.origin,
                 sketch.plane.normal,
+                sketch.plane.x_axis,
                 -extrude_dir,
                 extrude_dist,
             )

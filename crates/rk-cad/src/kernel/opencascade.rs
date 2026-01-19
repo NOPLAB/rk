@@ -66,51 +66,27 @@ impl OpenCascadeKernel {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
     ) -> CadResult<cxx::UniquePtr<ffi::TopoDS_Wire>> {
-        // Calculate plane basis vectors
-        let normal = ffi::gp_Dir_ctor(
-            plane_normal.x as f64,
-            plane_normal.y as f64,
-            plane_normal.z as f64,
-        );
         let origin = ffi::new_point(
             plane_origin.x as f64,
             plane_origin.y as f64,
             plane_origin.z as f64,
         );
 
-        // Create basis vectors for the plane (compute cross products manually)
-        let (up_x, up_y, up_z) = if plane_normal.z.abs() < 0.9 {
-            (0.0, 0.0, 1.0)
-        } else {
-            (1.0, 0.0, 0.0)
-        };
+        // Use the provided x_axis for the plane
+        let ux = plane_x_axis.x as f64;
+        let uy = plane_x_axis.y as f64;
+        let uz = plane_x_axis.z as f64;
 
-        // Cross product: normal x up = u
-        let nx = normal.X();
-        let ny = normal.Y();
-        let nz = normal.Z();
+        // Calculate y_axis as normal cross x_axis
+        let nx = plane_normal.x as f64;
+        let ny = plane_normal.y as f64;
+        let nz = plane_normal.z as f64;
 
-        let ux = ny * up_z - nz * up_y;
-        let uy = nz * up_x - nx * up_z;
-        let uz = nx * up_y - ny * up_x;
-
-        // Normalize u
-        let u_len = (ux * ux + uy * uy + uz * uz).sqrt();
-        let ux = ux / u_len;
-        let uy = uy / u_len;
-        let uz = uz / u_len;
-
-        // Cross product: normal x u = v
         let vx = ny * uz - nz * uy;
         let vy = nz * ux - nx * uz;
         let vz = nx * uy - ny * ux;
-
-        // Normalize v
-        let v_len = (vx * vx + vy * vy + vz * vz).sqrt();
-        let vx = vx / v_len;
-        let vy = vy / v_len;
-        let vz = vz / v_len;
 
         // Build wire from edges
         let mut wire_builder = ffi::BRepBuilderAPI_MakeWire_ctor();
@@ -169,6 +145,7 @@ impl CadKernel for OpenCascadeKernel {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
         direction: Vec3,
         distance: f32,
     ) -> CadResult<Solid> {
@@ -179,7 +156,7 @@ impl CadKernel for OpenCascadeKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal)?;
+        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis)?;
 
         // Create face from wire
         let face_maker = ffi::BRepBuilderAPI_MakeFace_wire(&wire, true);
@@ -207,6 +184,7 @@ impl CadKernel for OpenCascadeKernel {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid> {
@@ -217,7 +195,7 @@ impl CadKernel for OpenCascadeKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal)?;
+        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis)?;
 
         // Create face from wire
         let face_maker = ffi::BRepBuilderAPI_MakeFace_wire(&wire, true);
@@ -668,7 +646,13 @@ impl CadKernel for OpenCascadeKernel {
                 ));
             }
 
-            let wire = self.create_wire(profile, *origin, *normal)?;
+            // Calculate a perpendicular x_axis for the plane
+            let x_axis = if normal.z.abs() < 0.9 {
+                normal.cross(Vec3::Z).normalize()
+            } else {
+                normal.cross(Vec3::X).normalize()
+            };
+            let wire = self.create_wire(profile, *origin, *normal, x_axis)?;
             loft.pin_mut().AddWire(&wire);
         }
 

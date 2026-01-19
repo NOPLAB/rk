@@ -157,16 +157,16 @@ impl Camera {
         self.update_position_from_orbit();
     }
 
-    /// Set to front view
+    /// Set to front view (looking at XZ plane from -Y direction)
     pub fn set_front_view(&mut self) {
-        self.yaw = 0.0;
+        self.yaw = -90.0_f32.to_radians();
         self.pitch = 0.0;
         self.update_position_from_orbit();
     }
 
-    /// Set to side view
+    /// Set to side view (looking at YZ plane from +X direction)
     pub fn set_side_view(&mut self) {
-        self.yaw = 90.0_f32.to_radians();
+        self.yaw = 0.0;
         self.pitch = 0.0;
         self.update_position_from_orbit();
     }

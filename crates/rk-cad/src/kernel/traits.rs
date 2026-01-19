@@ -348,6 +348,7 @@ pub trait CadKernel: Send + Sync {
     /// * `profile` - The 2D wire profile to extrude
     /// * `plane_origin` - The origin of the sketch plane in 3D
     /// * `plane_normal` - The normal of the sketch plane
+    /// * `plane_x_axis` - The X axis of the sketch plane (for 2D to 3D mapping)
     /// * `direction` - The extrusion direction (local to plane)
     /// * `distance` - The extrusion distance
     fn extrude(
@@ -355,6 +356,7 @@ pub trait CadKernel: Send + Sync {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
         direction: Vec3,
         distance: f32,
     ) -> CadResult<Solid>;
@@ -365,6 +367,7 @@ pub trait CadKernel: Send + Sync {
     /// * `profile` - The 2D wire profile to revolve
     /// * `plane_origin` - The origin of the sketch plane in 3D
     /// * `plane_normal` - The normal of the sketch plane
+    /// * `plane_x_axis` - The X axis of the sketch plane (for 2D to 3D mapping)
     /// * `axis` - The rotation axis
     /// * `angle` - The rotation angle in radians
     fn revolve(
@@ -372,6 +375,7 @@ pub trait CadKernel: Send + Sync {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid>;
@@ -540,6 +544,7 @@ impl CadKernel for NullKernel {
         _profile: &Wire2D,
         _plane_origin: Vec3,
         _plane_normal: Vec3,
+        _plane_x_axis: Vec3,
         _direction: Vec3,
         _distance: f32,
     ) -> CadResult<Solid> {
@@ -553,6 +558,7 @@ impl CadKernel for NullKernel {
         _profile: &Wire2D,
         _plane_origin: Vec3,
         _plane_normal: Vec3,
+        _plane_x_axis: Vec3,
         _axis: &Axis3D,
         _angle: f32,
     ) -> CadResult<Solid> {

@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use truck_meshalgo::prelude::*;
-use truck_modeling::{InnerSpace, Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
+use truck_modeling::{Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
 
 use super::{
     Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo, Solid,
@@ -48,26 +48,32 @@ impl TruckKernel {
     }
 
     /// Convert 2D points to 3D points on a plane
-    fn points_to_3d(&self, points: &[Vec2], plane_origin: Vec3, plane_normal: Vec3) -> Vec<Point3> {
-        // Calculate plane basis vectors
-        let normal = Vector3::new(
-            plane_normal.x as f64,
-            plane_normal.y as f64,
-            plane_normal.z as f64,
-        );
+    fn points_to_3d(
+        &self,
+        points: &[Vec2],
+        plane_origin: Vec3,
+        plane_normal: Vec3,
+        plane_x_axis: Vec3,
+    ) -> Vec<Point3> {
         let origin = Point3::new(
             plane_origin.x as f64,
             plane_origin.y as f64,
             plane_origin.z as f64,
         );
 
-        // Create basis vectors for the plane
-        let up = if normal.z.abs() < 0.9 {
-            Vector3::new(0.0, 0.0, 1.0)
-        } else {
-            Vector3::new(1.0, 0.0, 0.0)
-        };
-        let u = normal.cross(up).normalize();
+        // Use the provided x_axis for the plane
+        let u = Vector3::new(
+            plane_x_axis.x as f64,
+            plane_x_axis.y as f64,
+            plane_x_axis.z as f64,
+        );
+
+        // Calculate y_axis as normal cross x_axis
+        let normal = Vector3::new(
+            plane_normal.x as f64,
+            plane_normal.y as f64,
+            plane_normal.z as f64,
+        );
         let v = normal.cross(u);
 
         // Transform 2D points to 3D
@@ -82,8 +88,15 @@ impl TruckKernel {
     }
 
     /// Create a wire from 2D points
-    fn create_wire(&self, profile: &Wire2D, plane_origin: Vec3, plane_normal: Vec3) -> Wire {
-        let points_3d = self.points_to_3d(&profile.points, plane_origin, plane_normal);
+    fn create_wire(
+        &self,
+        profile: &Wire2D,
+        plane_origin: Vec3,
+        plane_normal: Vec3,
+        plane_x_axis: Vec3,
+    ) -> Wire {
+        let points_3d =
+            self.points_to_3d(&profile.points, plane_origin, plane_normal, plane_x_axis);
 
         // Create vertices
         let vertices: Vec<Vertex> = points_3d.iter().map(|p| builder::vertex(*p)).collect();
@@ -122,6 +135,7 @@ impl CadKernel for TruckKernel {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
         direction: Vec3,
         distance: f32,
     ) -> CadResult<Solid> {
@@ -132,7 +146,7 @@ impl CadKernel for TruckKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal);
+        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis);
 
         // Create extrusion direction vector
         let dir = Vector3::new(
@@ -156,6 +170,7 @@ impl CadKernel for TruckKernel {
         profile: &Wire2D,
         plane_origin: Vec3,
         plane_normal: Vec3,
+        plane_x_axis: Vec3,
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid> {
@@ -166,7 +181,7 @@ impl CadKernel for TruckKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal);
+        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis);
 
         // Create axis
         let axis_origin = Point3::new(
@@ -285,7 +300,21 @@ impl CadKernel for TruckKernel {
         // Create circle at base
         let wire = Wire2D::circle(Vec2::ZERO, radius, 32);
 
-        self.extrude(&wire, base_center, axis_normalized, axis_normalized, height)
+        // Calculate a perpendicular x_axis for the plane
+        let x_axis = if axis_normalized.z.abs() < 0.9 {
+            axis_normalized.cross(Vec3::Z).normalize()
+        } else {
+            axis_normalized.cross(Vec3::X).normalize()
+        };
+
+        self.extrude(
+            &wire,
+            base_center,
+            axis_normalized,
+            x_axis,
+            axis_normalized,
+            height,
+        )
     }
 
     fn create_sphere(&self, center: Vec3, radius: f32) -> CadResult<Solid> {
@@ -308,6 +337,7 @@ impl CadKernel for TruckKernel {
             &profile,
             center,
             Vec3::X,
+            Vec3::Y, // x_axis for YZ plane (normal=X)
             &Axis3D::new(center, Vec3::Y),
             std::f32::consts::TAU,
         )

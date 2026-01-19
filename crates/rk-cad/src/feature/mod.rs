@@ -462,6 +462,7 @@ impl Feature {
                     profile,
                     sketch.plane.origin,
                     sketch.plane.normal,
+                    sketch.plane.x_axis,
                     extrude_dir,
                     extrude_dist,
                 )?;
@@ -472,6 +473,7 @@ impl Feature {
                         profile,
                         sketch.plane.origin,
                         sketch.plane.normal,
+                        sketch.plane.x_axis,
                         -extrude_dir,
                         extrude_dist,
                     )?;
@@ -521,6 +523,7 @@ impl Feature {
                     profile,
                     sketch.plane.origin,
                     sketch.plane.normal,
+                    sketch.plane.x_axis,
                     &axis,
                     *angle,
                 )?;
