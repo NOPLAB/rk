@@ -47,6 +47,8 @@ pub struct SketchPlane {
     pub normal: Vec3,
     /// X axis of the plane (for 2D to 3D mapping)
     pub x_axis: Vec3,
+    /// Y axis of the plane (for 2D to 3D mapping)
+    pub y_axis: Vec3,
 }
 
 impl Default for SketchPlane {
@@ -62,6 +64,7 @@ impl SketchPlane {
             origin: Vec3::ZERO,
             normal: Vec3::Z,
             x_axis: Vec3::X,
+            y_axis: Vec3::Y,
         }
     }
 
@@ -71,6 +74,7 @@ impl SketchPlane {
             origin: Vec3::ZERO,
             normal: Vec3::Y,
             x_axis: Vec3::X,
+            y_axis: Vec3::Z,
         }
     }
 
@@ -80,21 +84,26 @@ impl SketchPlane {
             origin: Vec3::ZERO,
             normal: Vec3::X,
             x_axis: Vec3::Y,
+            y_axis: Vec3::Z,
         }
     }
 
     /// Create a custom plane
     pub fn new(origin: Vec3, normal: Vec3, x_axis: Vec3) -> Self {
+        let normal = normal.normalize();
+        let x_axis = x_axis.normalize();
+        let y_axis = normal.cross(x_axis).normalize();
         Self {
             origin,
-            normal: normal.normalize(),
-            x_axis: x_axis.normalize(),
+            normal,
+            x_axis,
+            y_axis,
         }
     }
 
-    /// Get the Y axis of the plane
+    /// Get the Y axis of the plane (for backwards compatibility)
     pub fn y_axis(&self) -> Vec3 {
-        self.normal.cross(self.x_axis).normalize()
+        self.y_axis
     }
 
     /// Convert a 2D point on the sketch to 3D world coordinates

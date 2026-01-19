@@ -65,8 +65,8 @@ impl OpenCascadeKernel {
         &self,
         profile: &Wire2D,
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
     ) -> CadResult<cxx::UniquePtr<ffi::TopoDS_Wire>> {
         let origin = ffi::new_point(
             plane_origin.x as f64,
@@ -74,19 +74,14 @@ impl OpenCascadeKernel {
             plane_origin.z as f64,
         );
 
-        // Use the provided x_axis for the plane
+        // Use the provided x_axis and y_axis for the plane
         let ux = plane_x_axis.x as f64;
         let uy = plane_x_axis.y as f64;
         let uz = plane_x_axis.z as f64;
 
-        // Calculate y_axis as normal cross x_axis
-        let nx = plane_normal.x as f64;
-        let ny = plane_normal.y as f64;
-        let nz = plane_normal.z as f64;
-
-        let vx = ny * uz - nz * uy;
-        let vy = nz * ux - nx * uz;
-        let vz = nx * uy - ny * ux;
+        let vx = plane_y_axis.x as f64;
+        let vy = plane_y_axis.y as f64;
+        let vz = plane_y_axis.z as f64;
 
         // Build wire from edges
         let mut wire_builder = ffi::BRepBuilderAPI_MakeWire_ctor();
@@ -144,8 +139,8 @@ impl CadKernel for OpenCascadeKernel {
         &self,
         profile: &Wire2D,
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
         direction: Vec3,
         distance: f32,
     ) -> CadResult<Solid> {
@@ -156,7 +151,7 @@ impl CadKernel for OpenCascadeKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis)?;
+        let wire = self.create_wire(profile, plane_origin, plane_x_axis, plane_y_axis)?;
 
         // Create face from wire
         let face_maker = ffi::BRepBuilderAPI_MakeFace_wire(&wire, true);
@@ -183,8 +178,8 @@ impl CadKernel for OpenCascadeKernel {
         &self,
         profile: &Wire2D,
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid> {
@@ -195,7 +190,7 @@ impl CadKernel for OpenCascadeKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis)?;
+        let wire = self.create_wire(profile, plane_origin, plane_x_axis, plane_y_axis)?;
 
         // Create face from wire
         let face_maker = ffi::BRepBuilderAPI_MakeFace_wire(&wire, true);

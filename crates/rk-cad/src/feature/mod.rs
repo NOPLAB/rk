@@ -461,8 +461,8 @@ impl Feature {
                 let mut solid = kernel.extrude(
                     profile,
                     sketch.plane.origin,
-                    sketch.plane.normal,
                     sketch.plane.x_axis,
+                    sketch.plane.y_axis,
                     extrude_dir,
                     extrude_dist,
                 )?;
@@ -472,8 +472,8 @@ impl Feature {
                     let solid2 = kernel.extrude(
                         profile,
                         sketch.plane.origin,
-                        sketch.plane.normal,
                         sketch.plane.x_axis,
+                        sketch.plane.y_axis,
                         -extrude_dir,
                         extrude_dist,
                     )?;
@@ -522,8 +522,8 @@ impl Feature {
                 let mut solid = kernel.revolve(
                     profile,
                     sketch.plane.origin,
-                    sketch.plane.normal,
                     sketch.plane.x_axis,
+                    sketch.plane.y_axis,
                     &axis,
                     *angle,
                 )?;

@@ -52,8 +52,8 @@ impl TruckKernel {
         &self,
         points: &[Vec2],
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
     ) -> Vec<Point3> {
         let origin = Point3::new(
             plane_origin.x as f64,
@@ -61,20 +61,17 @@ impl TruckKernel {
             plane_origin.z as f64,
         );
 
-        // Use the provided x_axis for the plane
+        // Use the provided x_axis and y_axis for the plane
         let u = Vector3::new(
             plane_x_axis.x as f64,
             plane_x_axis.y as f64,
             plane_x_axis.z as f64,
         );
-
-        // Calculate y_axis as normal cross x_axis
-        let normal = Vector3::new(
-            plane_normal.x as f64,
-            plane_normal.y as f64,
-            plane_normal.z as f64,
+        let v = Vector3::new(
+            plane_y_axis.x as f64,
+            plane_y_axis.y as f64,
+            plane_y_axis.z as f64,
         );
-        let v = normal.cross(u);
 
         // Transform 2D points to 3D
         points
@@ -92,11 +89,11 @@ impl TruckKernel {
         &self,
         profile: &Wire2D,
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
     ) -> Wire {
         let points_3d =
-            self.points_to_3d(&profile.points, plane_origin, plane_normal, plane_x_axis);
+            self.points_to_3d(&profile.points, plane_origin, plane_x_axis, plane_y_axis);
 
         // Create vertices
         let vertices: Vec<Vertex> = points_3d.iter().map(|p| builder::vertex(*p)).collect();
@@ -134,8 +131,8 @@ impl CadKernel for TruckKernel {
         &self,
         profile: &Wire2D,
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
         direction: Vec3,
         distance: f32,
     ) -> CadResult<Solid> {
@@ -146,7 +143,7 @@ impl CadKernel for TruckKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis);
+        let wire = self.create_wire(profile, plane_origin, plane_x_axis, plane_y_axis);
 
         // Create extrusion direction vector
         let dir = Vector3::new(
@@ -169,8 +166,8 @@ impl CadKernel for TruckKernel {
         &self,
         profile: &Wire2D,
         plane_origin: Vec3,
-        plane_normal: Vec3,
         plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid> {
@@ -181,7 +178,7 @@ impl CadKernel for TruckKernel {
         }
 
         // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_normal, plane_x_axis);
+        let wire = self.create_wire(profile, plane_origin, plane_x_axis, plane_y_axis);
 
         // Create axis
         let axis_origin = Point3::new(
@@ -300,21 +297,15 @@ impl CadKernel for TruckKernel {
         // Create circle at base
         let wire = Wire2D::circle(Vec2::ZERO, radius, 32);
 
-        // Calculate a perpendicular x_axis for the plane
+        // Calculate a perpendicular x_axis and y_axis for the plane
         let x_axis = if axis_normalized.z.abs() < 0.9 {
             axis_normalized.cross(Vec3::Z).normalize()
         } else {
             axis_normalized.cross(Vec3::X).normalize()
         };
+        let y_axis = axis_normalized.cross(x_axis).normalize();
 
-        self.extrude(
-            &wire,
-            base_center,
-            axis_normalized,
-            x_axis,
-            axis_normalized,
-            height,
-        )
+        self.extrude(&wire, base_center, x_axis, y_axis, axis_normalized, height)
     }
 
     fn create_sphere(&self, center: Vec3, radius: f32) -> CadResult<Solid> {
@@ -333,11 +324,12 @@ impl CadKernel for TruckKernel {
 
         let profile = Wire2D::new(points, true);
 
+        // YZ plane: x_axis=Y, y_axis=Z
         self.revolve(
             &profile,
             center,
-            Vec3::X,
-            Vec3::Y, // x_axis for YZ plane (normal=X)
+            Vec3::Y,
+            Vec3::Z,
             &Axis3D::new(center, Vec3::Y),
             std::f32::consts::TAU,
         )
