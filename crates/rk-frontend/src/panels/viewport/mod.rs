@@ -28,7 +28,15 @@ mod sketch_colors {
     pub const ARC: Vec4 = Vec4::new(0.0, 0.7, 1.0, 1.0); // Cyan
     pub const SELECTED: Vec4 = Vec4::new(1.0, 0.5, 0.0, 1.0); // Orange
     pub const PREVIEW: Vec4 = Vec4::new(0.5, 0.5, 1.0, 0.7); // Semi-transparent blue for preview
+
+    // Origin and axis colors
+    pub const ORIGIN: Vec4 = Vec4::new(1.0, 1.0, 0.0, 1.0); // Yellow
+    pub const AXIS_X: Vec4 = Vec4::new(1.0, 0.2, 0.2, 1.0); // Red
+    pub const AXIS_Y: Vec4 = Vec4::new(0.2, 1.0, 0.2, 1.0); // Green
 }
+
+/// Length of the axis lines in sketch coordinate units
+const SKETCH_AXIS_LENGTH: f32 = 100.0;
 
 /// Convert a Sketch to SketchRenderData
 fn sketch_to_render_data(
@@ -39,6 +47,24 @@ fn sketch_to_render_data(
 ) -> SketchRenderData {
     let mut render_data = SketchRenderData::new(sketch.id, sketch.plane.transform());
     render_data.is_active = is_active;
+
+    // Draw origin point and axis lines (always visible as reference)
+    // Origin point
+    render_data.add_point(Vec2::ZERO, sketch_colors::ORIGIN, 0);
+    // X axis (positive direction)
+    render_data.add_line(
+        Vec2::ZERO,
+        Vec2::new(SKETCH_AXIS_LENGTH, 0.0),
+        sketch_colors::AXIS_X,
+        0,
+    );
+    // Y axis (positive direction)
+    render_data.add_line(
+        Vec2::ZERO,
+        Vec2::new(0.0, SKETCH_AXIS_LENGTH),
+        sketch_colors::AXIS_Y,
+        0,
+    );
 
     // First pass: collect all point positions
     let mut point_positions: std::collections::HashMap<uuid::Uuid, Vec2> =
