@@ -679,176 +679,155 @@ fn render_operations_tools(ui: &mut egui::Ui, app_state: &SharedAppState) {
     });
 }
 
-/// Render extrude dialog overlay
+/// Render extrude dialog overlay (movable window on left-center)
 pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &SharedAppState) {
     let dialog_width = 220.0;
-    let dialog_height = 200.0;
+    let panel_margin = 20.0;
 
-    // Center the dialog
-    let dialog_pos = egui::pos2(
-        rect.center().x - dialog_width / 2.0,
-        rect.center().y - dialog_height / 2.0,
-    );
+    // Position at left-center
+    let dialog_pos = egui::pos2(rect.left() + panel_margin, rect.center().y - 100.0);
 
-    egui::Area::new(egui::Id::new("extrude_dialog"))
-        .fixed_pos(dialog_pos)
-        .order(egui::Order::Foreground)
+    egui::Window::new("Extrude")
+        .id(egui::Id::new("extrude_dialog"))
+        .default_pos(dialog_pos)
+        .default_width(dialog_width)
+        .collapsible(false)
+        .resizable(false)
         .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style())
-                .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 245))
-                .corner_radius(6.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
-                .inner_margin(12.0)
-                .show(ui, |ui| {
-                    ui.set_width(dialog_width - 24.0);
+            // Get dialog state
+            let (profile_count, selected_index, error_message) = {
+                let app = app_state.lock();
+                app.cad
+                    .editor_mode
+                    .sketch()
+                    .map(|s| {
+                        (
+                            s.extrude_dialog.profiles.len(),
+                            s.extrude_dialog.selected_profile_index,
+                            s.extrude_dialog.error_message.clone(),
+                        )
+                    })
+                    .unwrap_or((0, 0, None))
+            };
 
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("Extrude").size(14.0).strong());
-                        ui.add_space(8.0);
-
-                        // Get dialog state
-                        let (profile_count, selected_index, error_message) = {
-                            let app = app_state.lock();
-                            app.cad
-                                .editor_mode
-                                .sketch()
-                                .map(|s| {
-                                    (
-                                        s.extrude_dialog.profiles.len(),
-                                        s.extrude_dialog.selected_profile_index,
-                                        s.extrude_dialog.error_message.clone(),
-                                    )
-                                })
-                                .unwrap_or((0, 0, None))
-                        };
-
-                        // Profile selection
-                        if profile_count > 0 {
-                            ui.horizontal(|ui| {
-                                ui.label("Profile:");
-                                if profile_count == 1 {
-                                    ui.label("1 of 1");
-                                } else {
-                                    // Show profile selector
-                                    let selected_text =
-                                        format!("{} of {}", selected_index + 1, profile_count);
-                                    egui::ComboBox::from_id_salt("profile_selector")
-                                        .selected_text(selected_text)
-                                        .show_ui(ui, |ui| {
-                                            for i in 0..profile_count {
-                                                if ui
-                                                    .selectable_label(
-                                                        i == selected_index,
-                                                        format!("Profile {}", i + 1),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    app_state.lock().queue_action(
-                                                        AppAction::SketchAction(
-                                                            SketchAction::SelectExtrudeProfile {
-                                                                profile_index: i,
-                                                            },
-                                                        ),
-                                                    );
-                                                }
-                                            }
-                                        });
+            // Profile selection
+            if profile_count > 0 {
+                ui.horizontal(|ui| {
+                    ui.label("Profile:");
+                    if profile_count == 1 {
+                        ui.label("1 of 1");
+                    } else {
+                        // Show profile selector
+                        let selected_text = format!("{} of {}", selected_index + 1, profile_count);
+                        egui::ComboBox::from_id_salt("profile_selector")
+                            .selected_text(selected_text)
+                            .show_ui(ui, |ui| {
+                                for i in 0..profile_count {
+                                    if ui
+                                        .selectable_label(
+                                            i == selected_index,
+                                            format!("Profile {}", i + 1),
+                                        )
+                                        .clicked()
+                                    {
+                                        app_state.lock().queue_action(AppAction::SketchAction(
+                                            SketchAction::SelectExtrudeProfile { profile_index: i },
+                                        ));
+                                    }
                                 }
                             });
-                            ui.add_space(4.0);
-                        } else {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(255, 150, 100),
-                                "No closed profiles found",
-                            );
-                            ui.add_space(4.0);
-                        }
+                    }
+                });
+                ui.add_space(4.0);
+            } else {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 150, 100),
+                    "No closed profiles found",
+                );
+                ui.add_space(4.0);
+            }
 
-                        // Distance input
-                        ui.horizontal(|ui| {
-                            ui.label("Distance:");
-                            let mut distance = {
-                                let app = app_state.lock();
-                                app.cad
-                                    .editor_mode
-                                    .sketch()
-                                    .map(|s| s.extrude_dialog.distance)
-                                    .unwrap_or(10.0)
-                            };
+            // Distance input
+            ui.horizontal(|ui| {
+                ui.label("Distance:");
+                let mut distance = {
+                    let app = app_state.lock();
+                    app.cad
+                        .editor_mode
+                        .sketch()
+                        .map(|s| s.extrude_dialog.distance)
+                        .unwrap_or(10.0)
+                };
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut distance)
+                            .speed(0.1)
+                            .range(0.001..=10000.0),
+                    )
+                    .changed()
+                {
+                    app_state.lock().queue_action(AppAction::SketchAction(
+                        SketchAction::UpdateExtrudeDistance { distance },
+                    ));
+                }
+            });
+
+            ui.add_space(4.0);
+
+            // Direction selection
+            ui.horizontal(|ui| {
+                ui.label("Direction:");
+                let current_direction = {
+                    let app = app_state.lock();
+                    app.cad
+                        .editor_mode
+                        .sketch()
+                        .map(|s| s.extrude_dialog.direction)
+                        .unwrap_or(ExtrudeDirection::Positive)
+                };
+
+                egui::ComboBox::from_id_salt("extrude_direction")
+                    .selected_text(current_direction.name())
+                    .show_ui(ui, |ui| {
+                        for dir in ExtrudeDirection::all() {
                             if ui
-                                .add(
-                                    egui::DragValue::new(&mut distance)
-                                        .speed(0.1)
-                                        .range(0.001..=10000.0),
-                                )
-                                .changed()
-                            {
-                                app_state.lock().queue_action(AppAction::SketchAction(
-                                    SketchAction::UpdateExtrudeDistance { distance },
-                                ));
-                            }
-                        });
-
-                        ui.add_space(4.0);
-
-                        // Direction selection
-                        ui.horizontal(|ui| {
-                            ui.label("Direction:");
-                            let current_direction = {
-                                let app = app_state.lock();
-                                app.cad
-                                    .editor_mode
-                                    .sketch()
-                                    .map(|s| s.extrude_dialog.direction)
-                                    .unwrap_or(ExtrudeDirection::Positive)
-                            };
-
-                            egui::ComboBox::from_id_salt("extrude_direction")
-                                .selected_text(current_direction.name())
-                                .show_ui(ui, |ui| {
-                                    for dir in ExtrudeDirection::all() {
-                                        if ui
-                                            .selectable_label(dir == current_direction, dir.name())
-                                            .clicked()
-                                        {
-                                            app_state.lock().queue_action(AppAction::SketchAction(
-                                                SketchAction::UpdateExtrudeDirection {
-                                                    direction: dir,
-                                                },
-                                            ));
-                                        }
-                                    }
-                                });
-                        });
-
-                        // Show error message if any
-                        if let Some(error) = error_message {
-                            ui.add_space(4.0);
-                            ui.colored_label(egui::Color32::from_rgb(255, 100, 100), error);
-                        }
-
-                        ui.add_space(12.0);
-
-                        // OK / Cancel buttons
-                        ui.horizontal(|ui| {
-                            // Disable OK button if no profiles
-                            let ok_enabled = profile_count > 0;
-                            if ui
-                                .add_enabled(ok_enabled, egui::Button::new("OK"))
+                                .selectable_label(dir == current_direction, dir.name())
                                 .clicked()
                             {
                                 app_state.lock().queue_action(AppAction::SketchAction(
-                                    SketchAction::ExecuteExtrude,
+                                    SketchAction::UpdateExtrudeDirection { direction: dir },
                                 ));
                             }
-                            if ui.button("Cancel").clicked() {
-                                app_state.lock().queue_action(AppAction::SketchAction(
-                                    SketchAction::CancelExtrudeDialog,
-                                ));
-                            }
-                        });
+                        }
                     });
-                });
+            });
+
+            // Show error message if any
+            if let Some(error) = error_message {
+                ui.add_space(4.0);
+                ui.colored_label(egui::Color32::from_rgb(255, 100, 100), error);
+            }
+
+            ui.add_space(12.0);
+
+            // OK / Cancel buttons
+            ui.horizontal(|ui| {
+                // Disable OK button if no profiles
+                let ok_enabled = profile_count > 0;
+                if ui
+                    .add_enabled(ok_enabled, egui::Button::new("OK"))
+                    .clicked()
+                {
+                    app_state
+                        .lock()
+                        .queue_action(AppAction::SketchAction(SketchAction::ExecuteExtrude));
+                }
+                if ui.button("Cancel").clicked() {
+                    app_state
+                        .lock()
+                        .queue_action(AppAction::SketchAction(SketchAction::CancelExtrudeDialog));
+                }
+            });
         });
 }
 
