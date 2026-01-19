@@ -2,8 +2,8 @@
 //!
 //! Pure Rust B-Rep kernel using the Truck library.
 //!
-//! Note: This implementation provides basic solid modeling capabilities.
-//! Boolean operations and some features may require additional integration work.
+//! Supports basic solid modeling capabilities including extrude, revolve,
+//! and boolean operations (union, intersection).
 
 use glam::{Vec2, Vec3};
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use truck_meshalgo::prelude::*;
 use truck_modeling::{Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
+use truck_shapeops::{and as solid_and, or as solid_or};
 
 use super::{
     Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo, Solid,
@@ -207,11 +208,39 @@ impl CadKernel for TruckKernel {
         Ok(self.store_solid(solid))
     }
 
-    fn boolean(&self, _a: &Solid, _b: &Solid, _op: BooleanType) -> CadResult<Solid> {
-        // Boolean operations require truck-shapeops which is not yet stable
-        Err(CadError::OperationFailed(
-            "Boolean operations are not yet implemented for Truck kernel".into(),
-        ))
+    fn boolean(&self, a: &Solid, b: &Solid, op: BooleanType) -> CadResult<Solid> {
+        // Get the stored solids
+        let solids = self.solids.lock().unwrap();
+        let solid_a = solids
+            .get(&a.id)
+            .ok_or_else(|| CadError::OperationFailed("First solid not found".into()))?
+            .clone();
+        let solid_b = solids
+            .get(&b.id)
+            .ok_or_else(|| CadError::OperationFailed("Second solid not found".into()))?
+            .clone();
+        drop(solids); // Release lock before operation
+
+        // Tolerance for boolean operations
+        let tolerance = 1e-6;
+
+        let result = match op {
+            BooleanType::Union => solid_or(&solid_a, &solid_b, tolerance)
+                .ok_or_else(|| CadError::OperationFailed("Union operation failed".into()))?,
+            BooleanType::Intersect => solid_and(&solid_a, &solid_b, tolerance)
+                .ok_or_else(|| CadError::OperationFailed("Intersection operation failed".into()))?,
+            BooleanType::Subtract => {
+                // Subtract (A - B) is not directly supported by truck-shapeops
+                // It would require A ∩ complement(B), but complement is not available
+                return Err(CadError::OperationFailed(
+                    "Subtract (Cut) operation is not supported by Truck kernel. \
+                    Only Union and Intersection are available."
+                        .into(),
+                ));
+            }
+        };
+
+        Ok(self.store_solid(result))
     }
 
     fn tessellate(&self, solid: &Solid, tolerance: f32) -> CadResult<TessellatedMesh> {

@@ -8,7 +8,7 @@ description = "CAD kernel abstraction and sketch system for RK"
 [features]
 default = ["truck"]
 opencascade = ["dep:opencascade-sys", "dep:cxx"]
-truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh"]
+truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh", "dep:truck-shapeops"]
 
 [dependencies]
 # Workspace dependencies
@@ -27,6 +27,7 @@ truck-modeling = { version = "0.6", optional = true }
 truck-meshalgo = { version = "0.4", optional = true }
 truck-topology = { version = "0.6", optional = true }
 truck-polymesh = { version = "0.6", optional = true }
+truck-shapeops = { version = "0.4", optional = true }
 
 [dev-dependencies]
 approx = "0.5"

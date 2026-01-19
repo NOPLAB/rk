@@ -126,7 +126,7 @@ impl SketchRenderData {
     }
 
     /// Half-size of point quad in sketch units
-    const POINT_HALF_SIZE: f32 = 0.08;
+    const POINT_HALF_SIZE: f32 = 0.008;
 
     /// Add a point to the sketch (as a quad for visibility).
     pub fn add_point(&mut self, position: Vec2, color: Vec4, flags: u32) {
