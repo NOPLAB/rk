@@ -1,5 +1,7 @@
 //! Sketch mode state types
 
+use std::collections::HashSet;
+
 use glam::{Vec2, Vec3};
 use uuid::Uuid;
 
@@ -306,8 +308,8 @@ pub struct ExtrudeDialogState {
     pub direction: ExtrudeDirection,
     /// Extracted profiles from the sketch
     pub profiles: Vec<Wire2D>,
-    /// Currently selected profile index
-    pub selected_profile_index: usize,
+    /// Currently selected profile indices (supports multiple selection)
+    pub selected_profile_indices: HashSet<usize>,
     /// Preview mesh for the extrusion (stored for rendering)
     pub preview_mesh: Option<TessellatedMesh>,
     /// Error message if preview generation failed
@@ -328,7 +330,7 @@ impl Default for ExtrudeDialogState {
             distance: 10.0,
             direction: ExtrudeDirection::Positive,
             profiles: Vec::new(),
-            selected_profile_index: 0,
+            selected_profile_indices: HashSet::new(),
             preview_mesh: None,
             error_message: None,
             boolean_op: BooleanOp::New,
@@ -346,7 +348,7 @@ impl ExtrudeDialogState {
         self.distance = 10.0;
         self.direction = ExtrudeDirection::Positive;
         self.profiles = Vec::new();
-        self.selected_profile_index = 0;
+        self.selected_profile_indices = HashSet::new();
         self.preview_mesh = None;
         self.error_message = None;
         self.boolean_op = BooleanOp::New;
@@ -354,21 +356,35 @@ impl ExtrudeDialogState {
         self.available_bodies = Vec::new();
     }
 
-    /// Set the profiles extracted from the sketch
+    /// Set the profiles extracted from the sketch and select all by default
     pub fn set_profiles(&mut self, profiles: Vec<Wire2D>) {
+        let count = profiles.len();
         self.profiles = profiles;
-        self.selected_profile_index = 0;
+        // Select all profiles by default
+        self.selected_profile_indices = (0..count).collect();
     }
 
-    /// Get the currently selected profile, if any
-    pub fn selected_profile(&self) -> Option<&Wire2D> {
-        self.profiles.get(self.selected_profile_index)
+    /// Get the currently selected profiles
+    pub fn selected_profiles(&self) -> Vec<&Wire2D> {
+        self.selected_profile_indices
+            .iter()
+            .filter_map(|&i| self.profiles.get(i))
+            .collect()
     }
 
-    /// Select a profile by index
-    pub fn select_profile(&mut self, index: usize) {
+    /// Check if a profile is selected
+    pub fn is_profile_selected(&self, index: usize) -> bool {
+        self.selected_profile_indices.contains(&index)
+    }
+
+    /// Toggle profile selection by index
+    pub fn toggle_profile(&mut self, index: usize) {
         if index < self.profiles.len() {
-            self.selected_profile_index = index;
+            if self.selected_profile_indices.contains(&index) {
+                self.selected_profile_indices.remove(&index);
+            } else {
+                self.selected_profile_indices.insert(index);
+            }
         }
     }
 
@@ -376,6 +392,7 @@ impl ExtrudeDialogState {
     pub fn close(&mut self) {
         self.open = false;
         self.profiles.clear();
+        self.selected_profile_indices.clear();
         self.preview_mesh = None;
         self.error_message = None;
     }
@@ -614,8 +631,8 @@ pub enum SketchAction {
     UpdateExtrudeBooleanOp { boolean_op: BooleanOp },
     /// Update extrude dialog target body
     UpdateExtrudeTargetBody { target_body: Option<Uuid> },
-    /// Select a profile in the extrude dialog
-    SelectExtrudeProfile { profile_index: usize },
+    /// Toggle a profile selection in the extrude dialog
+    ToggleExtrudeProfile { profile_index: usize },
     /// Cancel the extrude dialog
     CancelExtrudeDialog,
     /// Execute the extrusion with current dialog settings

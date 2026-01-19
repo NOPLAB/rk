@@ -16,34 +16,62 @@ use crate::state::{
 
 use super::ActionContext;
 
-/// Generate a preview mesh for extrusion.
-///
-/// Returns Some(TessellatedMesh) if successful, None if failed.
-fn generate_extrude_preview(
+/// Generate preview mesh for multiple profiles by extruding each and combining with union.
+fn generate_multi_profile_preview(
+    kernel: &dyn CadKernel,
+    sketch: &Sketch,
+    profiles: &[Wire2D],
+    distance: f32,
+    direction: ExtrudeDirection,
+) -> Result<TessellatedMesh, String> {
+    if profiles.is_empty() {
+        return Err("No profiles selected".to_string());
+    }
+
+    // Generate extrusion for the first profile
+    let first_profile = &profiles[0];
+    let mut combined_solid =
+        generate_extrude_solid(kernel, sketch, first_profile, distance, direction)?;
+
+    // Union with remaining profiles
+    for profile in profiles.iter().skip(1) {
+        let solid = generate_extrude_solid(kernel, sketch, profile, distance, direction)?;
+        combined_solid = kernel
+            .boolean(&combined_solid, &solid, rk_cad::BooleanType::Union)
+            .map_err(|e| format!("Boolean union failed: {}", e))?;
+    }
+
+    // Tessellate for preview
+    let mesh = kernel
+        .tessellate(&combined_solid, 0.1)
+        .map_err(|e| format!("Tessellation failed: {}", e))?;
+
+    Ok(mesh)
+}
+
+/// Generate extrude solid for a single profile (without tessellation).
+fn generate_extrude_solid(
     kernel: &dyn CadKernel,
     sketch: &Sketch,
     profile: &Wire2D,
     distance: f32,
     direction: ExtrudeDirection,
-) -> Result<TessellatedMesh, String> {
+) -> Result<rk_cad::Solid, String> {
     if !kernel.is_available() {
         return Err("CAD kernel not available".to_string());
     }
 
-    // Calculate extrusion direction vector
     let extrude_dir = match direction {
         ExtrudeDirection::Positive => sketch.plane.normal,
         ExtrudeDirection::Negative => -sketch.plane.normal,
         ExtrudeDirection::Symmetric => sketch.plane.normal,
     };
 
-    // For symmetric, we extrude half in each direction
     let extrude_dist = match direction {
         ExtrudeDirection::Symmetric => distance / 2.0,
         _ => distance,
     };
 
-    // Perform extrusion
     let solid = kernel
         .extrude(
             profile,
@@ -55,8 +83,8 @@ fn generate_extrude_preview(
         )
         .map_err(|e| format!("Extrude failed: {}", e))?;
 
-    // For symmetric, extrude in the opposite direction and union
-    let solid = if matches!(direction, ExtrudeDirection::Symmetric) {
+    // For symmetric, extrude in opposite direction and union
+    if matches!(direction, ExtrudeDirection::Symmetric) {
         let solid2 = kernel
             .extrude(
                 profile,
@@ -70,17 +98,10 @@ fn generate_extrude_preview(
 
         kernel
             .boolean(&solid, &solid2, rk_cad::BooleanType::Union)
-            .map_err(|e| format!("Boolean union failed: {}", e))?
+            .map_err(|e| format!("Boolean union failed: {}", e))
     } else {
-        solid
-    };
-
-    // Tessellate for preview
-    let mesh = kernel
-        .tessellate(&solid, 0.1)
-        .map_err(|e| format!("Tessellation failed: {}", e))?;
-
-    Ok(mesh)
+        Ok(solid)
+    }
 }
 
 /// Regenerate preview mesh for the current extrude dialog state.
@@ -99,22 +120,37 @@ fn regenerate_preview(ctx: &ActionContext) {
     let sketch_id = sketch_state.extrude_dialog.sketch_id;
     let distance = sketch_state.extrude_dialog.distance;
     let direction = sketch_state.extrude_dialog.direction;
-    let profile_index = sketch_state.extrude_dialog.selected_profile_index;
 
-    // Get the profile
-    let profile = sketch_state
+    // Get selected profiles
+    let selected_profiles: Vec<Wire2D> = sketch_state
         .extrude_dialog
-        .profiles
-        .get(profile_index)
-        .cloned();
+        .selected_profile_indices
+        .iter()
+        .filter_map(|&i| sketch_state.extrude_dialog.profiles.get(i).cloned())
+        .collect();
 
     // Get the sketch plane info (need to drop state to avoid borrow issues)
     let sketch_info = state.cad.get_sketch(sketch_id).cloned();
 
-    if let (Some(profile), Some(sketch)) = (profile, sketch_info) {
-        // Generate preview
-        match generate_extrude_preview(ctx.kernel.as_ref(), &sketch, &profile, distance, direction)
-        {
+    if let Some(sketch) = sketch_info {
+        if selected_profiles.is_empty() {
+            // No profiles selected
+            if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
+                sketch_state.extrude_dialog.preview_mesh = None;
+                sketch_state.extrude_dialog.error_message =
+                    Some("No profiles selected".to_string());
+            }
+            return;
+        }
+
+        // Generate preview for multiple profiles
+        match generate_multi_profile_preview(
+            ctx.kernel.as_ref(),
+            &sketch,
+            &selected_profiles,
+            distance,
+            direction,
+        ) {
             Ok(mesh) => {
                 if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
                     sketch_state.extrude_dialog.preview_mesh = Some(mesh);
@@ -130,7 +166,7 @@ fn regenerate_preview(ctx: &ActionContext) {
             }
         }
     } else {
-        // No profile selected or sketch not found
+        // Sketch not found
         if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
             sketch_state.extrude_dialog.preview_mesh = None;
             if sketch_state.extrude_dialog.profiles.is_empty() {
@@ -419,15 +455,26 @@ pub fn handle_sketch_action(action: AppAction, ctx: &ActionContext) {
             regenerate_preview(ctx);
         }
 
-        SketchAction::SelectExtrudeProfile { profile_index } => {
+        SketchAction::ToggleExtrudeProfile { profile_index } => {
             {
                 let mut state = ctx.app_state.lock();
                 if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
-                    sketch_state.extrude_dialog.select_profile(profile_index);
-                    info!("Selected profile index: {}", profile_index);
+                    sketch_state.extrude_dialog.toggle_profile(profile_index);
+                    let is_selected = sketch_state
+                        .extrude_dialog
+                        .is_profile_selected(profile_index);
+                    info!(
+                        "Toggled profile index: {} (now {})",
+                        profile_index,
+                        if is_selected {
+                            "selected"
+                        } else {
+                            "deselected"
+                        }
+                    );
                 }
             }
-            // Regenerate preview with new profile
+            // Regenerate preview with new profile selection
             regenerate_preview(ctx);
         }
 
@@ -443,7 +490,7 @@ pub fn handle_sketch_action(action: AppAction, ctx: &ActionContext) {
             let mut state = ctx.app_state.lock();
 
             // Get extrude parameters
-            let (sketch_id, distance, direction, profile_index, boolean_op, target_body) = {
+            let (sketch_id, distance, direction, has_selected_profiles, boolean_op, target_body) = {
                 let Some(sketch_state) = state.cad.editor_mode.sketch() else {
                     return;
                 };
@@ -451,7 +498,10 @@ pub fn handle_sketch_action(action: AppAction, ctx: &ActionContext) {
                     sketch_state.extrude_dialog.sketch_id,
                     sketch_state.extrude_dialog.distance,
                     sketch_state.extrude_dialog.direction,
-                    sketch_state.extrude_dialog.selected_profile_index,
+                    !sketch_state
+                        .extrude_dialog
+                        .selected_profile_indices
+                        .is_empty(),
                     sketch_state.extrude_dialog.boolean_op,
                     sketch_state.extrude_dialog.target_body,
                 )
@@ -462,16 +512,14 @@ pub fn handle_sketch_action(action: AppAction, ctx: &ActionContext) {
                 sketch.solve();
             }
 
-            // Get the profile
-            let profile = {
-                let sketch_state = state.cad.editor_mode.sketch();
-                sketch_state.and_then(|s| s.extrude_dialog.profiles.get(profile_index).cloned())
-            };
+            // Check if any profiles are selected
+            if !has_selected_profiles {
+                tracing::warn!("No profiles selected for extrusion");
+                return;
+            }
 
             // Create and execute the extrude feature
-            if let Some(_profile) = profile
-                && let Some(_sketch) = state.cad.get_sketch(sketch_id).cloned()
-            {
+            if state.cad.get_sketch(sketch_id).is_some() {
                 // Convert ExtrudeDirection from state to feature direction
                 let feature_direction = match direction {
                     ExtrudeDirection::Positive => rk_cad::ExtrudeDirection::Positive,

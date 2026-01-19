@@ -696,7 +696,7 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
         .resizable(false)
         .show(ui.ctx(), |ui| {
             // Get dialog state
-            let (profile_count, selected_index, error_message) = {
+            let (profile_count, selected_indices, error_message) = {
                 let app = app_state.lock();
                 app.cad
                     .editor_mode
@@ -704,41 +704,38 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                     .map(|s| {
                         (
                             s.extrude_dialog.profiles.len(),
-                            s.extrude_dialog.selected_profile_index,
+                            s.extrude_dialog.selected_profile_indices.clone(),
                             s.extrude_dialog.error_message.clone(),
                         )
                     })
-                    .unwrap_or((0, 0, None))
+                    .unwrap_or((0, std::collections::HashSet::new(), None))
             };
 
             // Profile selection
             if profile_count > 0 {
-                ui.horizontal(|ui| {
-                    ui.label("Profile:");
-                    if profile_count == 1 {
-                        ui.label("1 of 1");
-                    } else {
-                        // Show profile selector
-                        let selected_text = format!("{} of {}", selected_index + 1, profile_count);
-                        egui::ComboBox::from_id_salt("profile_selector")
-                            .selected_text(selected_text)
-                            .show_ui(ui, |ui| {
-                                for i in 0..profile_count {
-                                    if ui
-                                        .selectable_label(
-                                            i == selected_index,
-                                            format!("Profile {}", i + 1),
-                                        )
-                                        .clicked()
-                                    {
-                                        app_state.lock().queue_action(AppAction::SketchAction(
-                                            SketchAction::SelectExtrudeProfile { profile_index: i },
-                                        ));
-                                    }
-                                }
-                            });
+                ui.label("Profiles:");
+                // Show profile checkboxes
+                for i in 0..profile_count {
+                    let is_selected = selected_indices.contains(&i);
+                    let mut checked = is_selected;
+                    if ui
+                        .checkbox(&mut checked, format!("Profile {}", i + 1))
+                        .clicked()
+                    {
+                        app_state.lock().queue_action(AppAction::SketchAction(
+                            SketchAction::ToggleExtrudeProfile { profile_index: i },
+                        ));
                     }
-                });
+                }
+                let selected_count = selected_indices.len();
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} of {} selected",
+                        selected_count, profile_count
+                    ))
+                    .small()
+                    .color(egui::Color32::GRAY),
+                );
                 ui.add_space(4.0);
             } else {
                 ui.colored_label(
