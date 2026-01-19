@@ -1,11 +1,11 @@
 //! Application state module
 
 mod editor;
-mod sketch_mode;
+mod sketch;
 mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
-pub use sketch_mode::{
+pub use sketch::{
     CadState, ConstraintToolState, DimensionDialogState, EditorMode, ExtrudeDialogState,
     ExtrudeDirection, InProgressEntity, PlaneSelectionState, ReferencePlane, SketchAction,
     SketchModeState, SketchTool,
