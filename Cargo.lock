@@ -2635,15 +2635,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "occt-sys"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7acaa7d857f483c1d7c5c9391e470b990f6e52fa5f2d4353eeee6be208390899"
-dependencies = [
- "cmake",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2663,13 +2654,11 @@ dependencies = [
 [[package]]
 name = "opencascade-sys"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5363b69779640dfb178c061f0ec6f26a7799a5e79982b95f1e4e5c4be96fd9c"
+source = "git+https://github.com/bschwind/opencascade-rs#14fca36e77b52aac4c4c5e75314f79e84b086053"
 dependencies = [
  "cmake",
  "cxx",
  "cxx-build",
- "occt-sys",
 ]
 
 [[package]]
