@@ -5,6 +5,7 @@
 pub mod actions;
 pub mod app;
 pub mod config;
+pub mod fonts;
 pub mod panels;
 pub mod state;
 pub mod update;

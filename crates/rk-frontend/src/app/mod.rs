@@ -12,6 +12,7 @@ use parking_lot::Mutex;
 
 use crate::actions::{ActionContext, SharedKernel, dispatch_action};
 use crate::config::{SharedConfig, create_shared_config};
+use crate::fonts::configure_fonts;
 use crate::panels::PreferencesPanel;
 use crate::state::{SharedAppState, SharedViewportState, ViewportState, create_shared_state};
 use crate::update::{SharedUpdateStatus, UpdateStatus, check_for_updates, create_update_status};
@@ -47,6 +48,9 @@ pub struct UrdfEditorApp {
 impl UrdfEditorApp {
     /// Create a new app
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Configure fonts with Noto Sans as default
+        configure_fonts(&cc.egui_ctx);
+
         // Initialize CAD kernel
         let kernel: SharedKernel = Arc::from(rk_cad::default_kernel());
 
