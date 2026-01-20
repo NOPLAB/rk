@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   build-windows:
@@ -16,6 +18,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -23,6 +28,9 @@ jobs:
 
       - name: Build release
         run: cargo build --release --package rk-frontend --features rk-cad/opencascade-builtin
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -42,6 +50,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Install build dependencies
         run: brew install cmake
 
@@ -52,6 +63,9 @@ jobs:
 
       - name: Build release
         run: cargo build --release --package rk-frontend --features rk-cad/opencascade-builtin
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -70,6 +84,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
 
       - name: Install dependencies
         run: |
@@ -92,6 +109,9 @@ jobs:
 
       - name: Build release
         run: cargo build --release --package rk-frontend --features rk-cad/opencascade-builtin
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
