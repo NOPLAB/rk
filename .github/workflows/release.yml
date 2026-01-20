@@ -21,7 +21,9 @@ jobs:
       - name: Install OpenCASCADE via vcpkg
         run: |
           vcpkg install opencascade
-          echo "DEP_OCCT_ROOT=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
+          $OCCT_ROOT = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+          echo "DEP_OCCT_ROOT=$OCCT_ROOT" >> $env:GITHUB_ENV
+          echo "OpenCASCADE_DIR=$OCCT_ROOT\share\opencascade" >> $env:GITHUB_ENV
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -52,7 +54,9 @@ jobs:
       - name: Install OpenCASCADE
         run: |
           brew install opencascade cmake
-          echo "DEP_OCCT_ROOT=$(brew --prefix opencascade)" >> $GITHUB_ENV
+          OCCT_PREFIX=$(brew --prefix opencascade)
+          echo "DEP_OCCT_ROOT=$OCCT_PREFIX" >> $GITHUB_ENV
+          echo "OpenCASCADE_DIR=$OCCT_PREFIX/lib/cmake/opencascade" >> $GITHUB_ENV
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -113,6 +117,7 @@ jobs:
             libocct-ocaf-dev \
             libocct-visualization-dev
           echo "DEP_OCCT_ROOT=/usr" >> $GITHUB_ENV
+          echo "OpenCASCADE_DIR=/usr/lib/x86_64-linux-gnu/cmake/opencascade" >> $GITHUB_ENV
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
