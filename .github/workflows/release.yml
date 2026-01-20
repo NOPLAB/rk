@@ -115,9 +115,10 @@ jobs:
             libocct-modeling-algorithms-dev \
             libocct-modeling-data-dev \
             libocct-ocaf-dev \
-            libocct-visualization-dev
+            libocct-visualization-dev \
+            occt-misc
           echo "DEP_OCCT_ROOT=/usr" >> $GITHUB_ENV
-          echo "OpenCASCADE_DIR=/usr/lib/x86_64-linux-gnu/cmake/opencascade" >> $GITHUB_ENV
+          echo "OpenCASCADE_DIR=/usr/lib/cmake/opencascade" >> $GITHUB_ENV
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
