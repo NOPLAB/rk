@@ -171,6 +171,9 @@ impl ViewportState {
         self.renderer.update_markers(&self.queue, &[]);
         self.renderer.update_selected_markers(&self.queue, &[]);
         self.renderer.hide_gizmo();
+        // Clear gizmo state to prevent stale hit testing
+        self.gizmo.part_id = None;
+        self.gizmo.editing_collision = None;
     }
 
     /// Show gizmo for a part
