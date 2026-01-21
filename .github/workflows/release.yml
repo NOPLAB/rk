@@ -66,6 +66,7 @@ jobs:
         env:
           CMAKE_C_COMPILER_LAUNCHER: sccache
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
