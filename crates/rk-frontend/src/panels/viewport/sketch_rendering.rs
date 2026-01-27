@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 use rk_cad::{Sketch, SketchConstraint, SketchEntity};
-use rk_renderer::{ConstraintIconData, SketchRenderData};
+use rk_renderer::{ArcData, ConstraintIconData, DimensionLine, SketchRenderData};
 
 use crate::state::InProgressEntity;
 
@@ -239,11 +239,14 @@ fn generate_constraint_icons(
 
     for constraint in sketch.constraints().values() {
         if let Some(position) = calculate_constraint_position(constraint, sketch, point_positions) {
+            let dimension_line =
+                calculate_dimension_line(constraint, sketch, point_positions, position);
             icons.push(ConstraintIconData {
                 id: constraint.id(),
                 position,
                 constraint_type: constraint.type_name().to_string(),
                 value: constraint.value(),
+                dimension_line,
             });
         }
     }
@@ -416,4 +419,204 @@ fn entity_center(
         }
         _ => point_positions.get(&entity_id).copied(),
     }
+}
+
+/// Offset from geometry to dimension line (in sketch coordinates)
+const DIMENSION_LINE_OFFSET: f32 = 0.04;
+
+/// Calculate dimension line data for dimensional constraints
+fn calculate_dimension_line(
+    constraint: &SketchConstraint,
+    sketch: &Sketch,
+    point_positions: &std::collections::HashMap<uuid::Uuid, Vec2>,
+    text_position: Vec2,
+) -> Option<DimensionLine> {
+    match constraint {
+        SketchConstraint::Distance {
+            entity1, entity2, ..
+        } => {
+            let c1 = entity_center(sketch, *entity1, point_positions)?;
+            let c2 = entity_center(sketch, *entity2, point_positions)?;
+
+            let dir = (c2 - c1).normalize_or_zero();
+            let perp = Vec2::new(-dir.y, dir.x);
+            let offset = perp * DIMENSION_LINE_OFFSET;
+
+            let start = c1 + offset;
+            let end = c2 + offset;
+
+            Some(DimensionLine {
+                start,
+                end,
+                extension_start: Some(c1),
+                extension_end: Some(c2),
+                arc_data: None,
+            })
+        }
+
+        SketchConstraint::HorizontalDistance { point1, point2, .. } => {
+            let p1 = point_positions.get(point1)?;
+            let p2 = point_positions.get(point2)?;
+
+            let y_offset = p1.y.max(p2.y) + DIMENSION_LINE_OFFSET;
+            let start = Vec2::new(p1.x, y_offset);
+            let end = Vec2::new(p2.x, y_offset);
+
+            Some(DimensionLine {
+                start,
+                end,
+                extension_start: Some(*p1),
+                extension_end: Some(*p2),
+                arc_data: None,
+            })
+        }
+
+        SketchConstraint::VerticalDistance { point1, point2, .. } => {
+            let p1 = point_positions.get(point1)?;
+            let p2 = point_positions.get(point2)?;
+
+            let x_offset = p1.x.max(p2.x) + DIMENSION_LINE_OFFSET;
+            let start = Vec2::new(x_offset, p1.y);
+            let end = Vec2::new(x_offset, p2.y);
+
+            Some(DimensionLine {
+                start,
+                end,
+                extension_start: Some(*p1),
+                extension_end: Some(*p2),
+                arc_data: None,
+            })
+        }
+
+        SketchConstraint::Angle { line1, line2, .. } => {
+            let (l1_start, l1_end) = get_line_endpoints(sketch, *line1, point_positions)?;
+            let (l2_start, l2_end) = get_line_endpoints(sketch, *line2, point_positions)?;
+
+            let intersection = line_intersection(l1_start, l1_end, l2_start, l2_end)?;
+
+            let dir1 = (l1_end - l1_start).normalize_or_zero();
+            let dir2 = (l2_end - l2_start).normalize_or_zero();
+            let angle1 = dir1.y.atan2(dir1.x);
+            let angle2 = dir2.y.atan2(dir2.x);
+
+            let arc_radius = (text_position - intersection).length().max(0.02);
+
+            Some(DimensionLine {
+                start: intersection,
+                end: intersection,
+                extension_start: None,
+                extension_end: None,
+                arc_data: Some(ArcData {
+                    center: intersection,
+                    radius: arc_radius,
+                    start_angle: angle1,
+                    end_angle: angle2,
+                }),
+            })
+        }
+
+        SketchConstraint::Length { line, .. } => {
+            let (start, end) = get_line_endpoints(sketch, *line, point_positions)?;
+
+            let dir = (end - start).normalize_or_zero();
+            let perp = Vec2::new(-dir.y, dir.x);
+            let offset = perp * DIMENSION_LINE_OFFSET;
+
+            let dim_start = start + offset;
+            let dim_end = end + offset;
+
+            Some(DimensionLine {
+                start: dim_start,
+                end: dim_end,
+                extension_start: Some(start),
+                extension_end: Some(end),
+                arc_data: None,
+            })
+        }
+
+        SketchConstraint::Radius { circle, .. } => {
+            let entity = sketch.get_entity(*circle)?;
+            if let SketchEntity::Circle { center, radius, .. } = entity {
+                let center_pos = point_positions.get(center)?;
+                let direction = Vec2::new(1.0, 1.0).normalize();
+                let edge_point = *center_pos + direction * *radius;
+
+                Some(DimensionLine {
+                    start: *center_pos,
+                    end: edge_point,
+                    extension_start: None,
+                    extension_end: None,
+                    arc_data: None,
+                })
+            } else if let SketchEntity::Arc { center, radius, .. } = entity {
+                let center_pos = point_positions.get(center)?;
+                let direction = Vec2::new(1.0, 1.0).normalize();
+                let edge_point = *center_pos + direction * *radius;
+
+                Some(DimensionLine {
+                    start: *center_pos,
+                    end: edge_point,
+                    extension_start: None,
+                    extension_end: None,
+                    arc_data: None,
+                })
+            } else {
+                None
+            }
+        }
+
+        SketchConstraint::Diameter { circle, .. } => {
+            let entity = sketch.get_entity(*circle)?;
+            if let SketchEntity::Circle { center, radius, .. } = entity {
+                let center_pos = point_positions.get(center)?;
+                let direction = Vec2::new(1.0, 0.0);
+                let start = *center_pos - direction * *radius;
+                let end = *center_pos + direction * *radius;
+
+                Some(DimensionLine {
+                    start,
+                    end,
+                    extension_start: None,
+                    extension_end: None,
+                    arc_data: None,
+                })
+            } else {
+                None
+            }
+        }
+
+        _ => None,
+    }
+}
+
+/// Get the start and end points of a line entity
+fn get_line_endpoints(
+    sketch: &Sketch,
+    line_id: uuid::Uuid,
+    point_positions: &std::collections::HashMap<uuid::Uuid, Vec2>,
+) -> Option<(Vec2, Vec2)> {
+    let entity = sketch.get_entity(line_id)?;
+    if let SketchEntity::Line { start, end, .. } = entity {
+        let p1 = point_positions.get(start)?;
+        let p2 = point_positions.get(end)?;
+        Some((*p1, *p2))
+    } else {
+        None
+    }
+}
+
+/// Calculate the intersection point of two lines
+fn line_intersection(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2) -> Option<Vec2> {
+    let d1 = p2 - p1;
+    let d2 = p4 - p3;
+
+    let cross = d1.x * d2.y - d1.y * d2.x;
+    if cross.abs() < 1e-10 {
+        return None;
+    }
+
+    let d = p3 - p1;
+    let t = (d.x * d2.y - d.y * d2.x) / cross;
+
+    Some(p1 + d1 * t)
 }

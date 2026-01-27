@@ -5,7 +5,10 @@ use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::constants::{collision as constants, instances};
+use crate::context::RenderContext;
 use crate::pipeline::{PipelineConfig, create_camera_bind_group};
+use crate::scene::Scene;
+use crate::traits::SubRenderer;
 
 /// Vertex with position and normal for collision geometry
 #[repr(C)]
@@ -129,49 +132,83 @@ pub enum CollisionGeometry {
 
 /// Collision renderer for visualizing collision shapes
 pub struct CollisionRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
+    enabled: bool,
+    initialized: bool,
+    pipeline: Option<wgpu::RenderPipeline>,
+    bind_group: Option<wgpu::BindGroup>,
 
     // Box geometry
-    box_vertex_buffer: wgpu::Buffer,
-    box_index_buffer: wgpu::Buffer,
+    box_vertex_buffer: Option<wgpu::Buffer>,
+    box_index_buffer: Option<wgpu::Buffer>,
     box_index_count: u32,
-    box_instance_buffer: wgpu::Buffer,
+    box_instance_buffer: Option<wgpu::Buffer>,
     box_instances: Vec<CollisionInstance>,
 
     // Sphere geometry
-    sphere_vertex_buffer: wgpu::Buffer,
-    sphere_index_buffer: wgpu::Buffer,
+    sphere_vertex_buffer: Option<wgpu::Buffer>,
+    sphere_index_buffer: Option<wgpu::Buffer>,
     sphere_index_count: u32,
-    sphere_instance_buffer: wgpu::Buffer,
+    sphere_instance_buffer: Option<wgpu::Buffer>,
     sphere_instances: Vec<CollisionInstance>,
 
     // Cylinder geometry
-    cylinder_vertex_buffer: wgpu::Buffer,
-    cylinder_index_buffer: wgpu::Buffer,
+    cylinder_vertex_buffer: Option<wgpu::Buffer>,
+    cylinder_index_buffer: Option<wgpu::Buffer>,
     cylinder_index_count: u32,
-    cylinder_instance_buffer: wgpu::Buffer,
+    cylinder_instance_buffer: Option<wgpu::Buffer>,
     cylinder_instances: Vec<CollisionInstance>,
 
     // Capsule geometry
-    capsule_vertex_buffer: wgpu::Buffer,
-    capsule_index_buffer: wgpu::Buffer,
+    capsule_vertex_buffer: Option<wgpu::Buffer>,
+    capsule_index_buffer: Option<wgpu::Buffer>,
     capsule_index_count: u32,
-    capsule_instance_buffer: wgpu::Buffer,
+    capsule_instance_buffer: Option<wgpu::Buffer>,
     capsule_instances: Vec<CollisionInstance>,
 
     visible: bool,
 }
 
 impl CollisionRenderer {
-    /// Creates a new collision renderer.
-    pub fn new(
+    /// Creates a new collision renderer (uninitialized).
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            initialized: false,
+            pipeline: None,
+            bind_group: None,
+            box_vertex_buffer: None,
+            box_index_buffer: None,
+            box_index_count: 0,
+            box_instance_buffer: None,
+            box_instances: Vec::new(),
+            sphere_vertex_buffer: None,
+            sphere_index_buffer: None,
+            sphere_index_count: 0,
+            sphere_instance_buffer: None,
+            sphere_instances: Vec::new(),
+            cylinder_vertex_buffer: None,
+            cylinder_index_buffer: None,
+            cylinder_index_count: 0,
+            cylinder_instance_buffer: None,
+            cylinder_instances: Vec::new(),
+            capsule_vertex_buffer: None,
+            capsule_index_buffer: None,
+            capsule_index_count: 0,
+            capsule_instance_buffer: None,
+            capsule_instances: Vec::new(),
+            visible: true,
+        }
+    }
+
+    /// Initialize the collision renderer with GPU resources.
+    pub fn init(
+        &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         camera_buffer: &wgpu::Buffer,
-    ) -> Self {
+    ) {
         let bind_group =
             create_camera_bind_group(device, camera_bind_group_layout, camera_buffer, "Collision");
 
@@ -212,31 +249,25 @@ impl CollisionRenderer {
         let capsule_index_buffer = create_index_buffer(device, "Capsule", &capsule_indices);
         let capsule_instance_buffer = create_instance_buffer(device, "Capsule");
 
-        Self {
-            pipeline,
-            bind_group,
-            box_vertex_buffer,
-            box_index_buffer,
-            box_index_count: box_indices.len() as u32,
-            box_instance_buffer,
-            box_instances: Vec::new(),
-            sphere_vertex_buffer,
-            sphere_index_buffer,
-            sphere_index_count: sphere_indices.len() as u32,
-            sphere_instance_buffer,
-            sphere_instances: Vec::new(),
-            cylinder_vertex_buffer,
-            cylinder_index_buffer,
-            cylinder_index_count: cylinder_indices.len() as u32,
-            cylinder_instance_buffer,
-            cylinder_instances: Vec::new(),
-            capsule_vertex_buffer,
-            capsule_index_buffer,
-            capsule_index_count: capsule_indices.len() as u32,
-            capsule_instance_buffer,
-            capsule_instances: Vec::new(),
-            visible: true,
-        }
+        self.pipeline = Some(pipeline);
+        self.bind_group = Some(bind_group);
+        self.box_vertex_buffer = Some(box_vertex_buffer);
+        self.box_index_buffer = Some(box_index_buffer);
+        self.box_index_count = box_indices.len() as u32;
+        self.box_instance_buffer = Some(box_instance_buffer);
+        self.sphere_vertex_buffer = Some(sphere_vertex_buffer);
+        self.sphere_index_buffer = Some(sphere_index_buffer);
+        self.sphere_index_count = sphere_indices.len() as u32;
+        self.sphere_instance_buffer = Some(sphere_instance_buffer);
+        self.cylinder_vertex_buffer = Some(cylinder_vertex_buffer);
+        self.cylinder_index_buffer = Some(cylinder_index_buffer);
+        self.cylinder_index_count = cylinder_indices.len() as u32;
+        self.cylinder_instance_buffer = Some(cylinder_instance_buffer);
+        self.capsule_vertex_buffer = Some(capsule_vertex_buffer);
+        self.capsule_index_buffer = Some(capsule_index_buffer);
+        self.capsule_index_count = capsule_indices.len() as u32;
+        self.capsule_instance_buffer = Some(capsule_instance_buffer);
+        self.initialized = true;
     }
 
     /// Set visibility
@@ -289,30 +320,33 @@ impl CollisionRenderer {
 
     /// Upload instances to GPU
     pub fn upload(&self, queue: &wgpu::Queue) {
+        if !self.initialized {
+            return;
+        }
         if !self.box_instances.is_empty() {
             queue.write_buffer(
-                &self.box_instance_buffer,
+                self.box_instance_buffer.as_ref().unwrap(),
                 0,
                 bytemuck::cast_slice(&self.box_instances),
             );
         }
         if !self.sphere_instances.is_empty() {
             queue.write_buffer(
-                &self.sphere_instance_buffer,
+                self.sphere_instance_buffer.as_ref().unwrap(),
                 0,
                 bytemuck::cast_slice(&self.sphere_instances),
             );
         }
         if !self.cylinder_instances.is_empty() {
             queue.write_buffer(
-                &self.cylinder_instance_buffer,
+                self.cylinder_instance_buffer.as_ref().unwrap(),
                 0,
                 bytemuck::cast_slice(&self.cylinder_instances),
             );
         }
         if !self.capsule_instances.is_empty() {
             queue.write_buffer(
-                &self.capsule_instance_buffer,
+                self.capsule_instance_buffer.as_ref().unwrap(),
                 0,
                 bytemuck::cast_slice(&self.capsule_instances),
             );
@@ -321,19 +355,24 @@ impl CollisionRenderer {
 
     /// Render all collision instances
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        if !self.visible {
+        if !self.visible || !self.initialized {
             return;
         }
 
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.bind_group, &[]);
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let bind_group = self.bind_group.as_ref().unwrap();
+
+        render_pass.set_pipeline(pipeline);
+        render_pass.set_bind_group(0, bind_group, &[]);
 
         // Render boxes
         if !self.box_instances.is_empty() {
-            render_pass.set_vertex_buffer(0, self.box_vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.box_instance_buffer.slice(..));
-            render_pass
-                .set_index_buffer(self.box_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            let vb = self.box_vertex_buffer.as_ref().unwrap();
+            let ib = self.box_index_buffer.as_ref().unwrap();
+            let inst = self.box_instance_buffer.as_ref().unwrap();
+            render_pass.set_vertex_buffer(0, vb.slice(..));
+            render_pass.set_vertex_buffer(1, inst.slice(..));
+            render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(
                 0..self.box_index_count,
                 0,
@@ -343,12 +382,12 @@ impl CollisionRenderer {
 
         // Render spheres
         if !self.sphere_instances.is_empty() {
-            render_pass.set_vertex_buffer(0, self.sphere_vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.sphere_instance_buffer.slice(..));
-            render_pass.set_index_buffer(
-                self.sphere_index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
+            let vb = self.sphere_vertex_buffer.as_ref().unwrap();
+            let ib = self.sphere_index_buffer.as_ref().unwrap();
+            let inst = self.sphere_instance_buffer.as_ref().unwrap();
+            render_pass.set_vertex_buffer(0, vb.slice(..));
+            render_pass.set_vertex_buffer(1, inst.slice(..));
+            render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(
                 0..self.sphere_index_count,
                 0,
@@ -358,12 +397,12 @@ impl CollisionRenderer {
 
         // Render cylinders
         if !self.cylinder_instances.is_empty() {
-            render_pass.set_vertex_buffer(0, self.cylinder_vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.cylinder_instance_buffer.slice(..));
-            render_pass.set_index_buffer(
-                self.cylinder_index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
+            let vb = self.cylinder_vertex_buffer.as_ref().unwrap();
+            let ib = self.cylinder_index_buffer.as_ref().unwrap();
+            let inst = self.cylinder_instance_buffer.as_ref().unwrap();
+            render_pass.set_vertex_buffer(0, vb.slice(..));
+            render_pass.set_vertex_buffer(1, inst.slice(..));
+            render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(
                 0..self.cylinder_index_count,
                 0,
@@ -373,18 +412,64 @@ impl CollisionRenderer {
 
         // Render capsules
         if !self.capsule_instances.is_empty() {
-            render_pass.set_vertex_buffer(0, self.capsule_vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.capsule_instance_buffer.slice(..));
-            render_pass.set_index_buffer(
-                self.capsule_index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
+            let vb = self.capsule_vertex_buffer.as_ref().unwrap();
+            let ib = self.capsule_index_buffer.as_ref().unwrap();
+            let inst = self.capsule_instance_buffer.as_ref().unwrap();
+            render_pass.set_vertex_buffer(0, vb.slice(..));
+            render_pass.set_vertex_buffer(1, inst.slice(..));
+            render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(
                 0..self.capsule_index_count,
                 0,
                 0..self.capsule_instances.len() as u32,
             );
         }
+    }
+}
+
+impl Default for CollisionRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SubRenderer for CollisionRenderer {
+    fn name(&self) -> &str {
+        "collision"
+    }
+
+    fn priority(&self) -> i32 {
+        super::priorities::COLLISION
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    fn on_init(&mut self, ctx: &RenderContext) {
+        self.init(
+            ctx.device(),
+            ctx.surface_format(),
+            ctx.depth_format(),
+            ctx.camera_bind_group_layout(),
+            ctx.camera_buffer(),
+        );
+    }
+
+    fn on_resize(&mut self, _ctx: &RenderContext, _width: u32, _height: u32) {
+        // Collision renderer doesn't need to respond to resize
+    }
+
+    fn prepare(&mut self, _ctx: &RenderContext, _scene: &Scene) {
+        // Collision data is updated externally
+    }
+
+    fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, _scene: &Scene) {
+        CollisionRenderer::render(self, pass);
     }
 }
 

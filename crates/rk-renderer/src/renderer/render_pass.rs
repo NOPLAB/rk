@@ -3,7 +3,7 @@
 //! This module provides functions for executing shadow and main render passes.
 
 use crate::sub_renderers::{
-    AxisRenderer, CollisionRenderer, GizmoRenderer, GridRenderer, MarkerRenderer, MeshRenderer,
+    AxisRenderer, CollisionRenderer, GizmoRenderer, GridSubRenderer, MarkerRenderer, MeshRenderer,
     PlaneSelectorRenderer, SketchRenderer,
 };
 
@@ -82,7 +82,7 @@ pub struct MainPassParams<'a> {
     /// Preview manager.
     pub preview: &'a PreviewManager,
     /// Grid renderer.
-    pub grid_renderer: &'a GridRenderer,
+    pub grid_renderer: &'a GridSubRenderer,
     /// Mesh renderer.
     pub mesh_renderer: &'a MeshRenderer,
     /// Axis renderer.
@@ -153,7 +153,7 @@ pub fn render_main_pass(
 
     // Render grid
     if params.display_options.show_grid {
-        params.grid_renderer.render(&mut render_pass);
+        params.grid_renderer.render_legacy(&mut render_pass);
     }
 
     // Render meshes with lighting and shadows

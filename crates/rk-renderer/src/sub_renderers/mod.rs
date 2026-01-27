@@ -2,44 +2,44 @@
 //!
 //! This module contains all rendering components organized by functionality:
 //!
-//! ## New Architecture (SubRenderer trait)
-//! - [`GridSubRenderer`]: Grid sub-renderer implementing the new trait
+//! ## SubRenderer trait implementations
+//! - [`GridSubRenderer`]: Ground grid renderer
 //! - [`SketchRenderer`]: 2D sketch visualization on 3D planes
 //! - [`PlaneSelectorRenderer`]: Reference plane selection for sketch creation
+//! - [`AxisRenderer`]: Coordinate frame indicators
+//! - [`MarkerRenderer`]: Joint point visualization
+//! - [`CollisionRenderer`]: Collision shape visualization
+//! - [`GizmoRenderer`]: Transform manipulation tool
 //!
-//! ## Legacy Renderers (being migrated)
-//! - [`grid_legacy::GridRenderer`]: Legacy grid implementation
-//! - [`mesh::MeshRenderer`]: 3D geometry rendering
-//! - [`axis::AxisRenderer`]: Coordinate frame indicators
-//! - [`marker::MarkerRenderer`]: Joint point visualization
-//! - [`gizmo::GizmoRenderer`]: Transform manipulation tool
-//! - [`collision::CollisionRenderer`]: Collision shape visualization
+//! ## Special renderers
+//! - [`MeshRenderer`]: 3D geometry rendering (supports shadow pass)
 
-// New trait-based implementations
-mod grid;
-pub mod plane_selector;
-pub mod sketch;
-
-// Legacy implementations (to be migrated to SubRenderer trait)
+// Sub-renderer implementations
 pub mod axis;
 pub mod collision;
 pub mod gizmo;
-pub mod grid_legacy;
+pub mod grid;
 pub mod marker;
 pub mod mesh;
+pub mod plane_selector;
+pub mod sketch;
 
 // Re-exports for new architecture
 pub use grid::GridSubRenderer;
 pub use plane_selector::{PlaneSelectorRenderer, PlaneSelectorVertex, plane_ids};
-pub use sketch::{ConstraintIconData, SketchRenderData, SketchRenderer, SketchVertex};
+pub use sketch::{
+    ArcData, ConstraintIconData, DimensionLine, SketchRenderData, SketchRenderer, SketchVertex,
+};
 
 // Re-exports for legacy code
 pub use axis::{AxisInstance, AxisRenderer};
 pub use collision::{CollisionInstance, CollisionRenderer};
 pub use gizmo::{GizmoAxis, GizmoMode, GizmoRenderer, GizmoSpace};
-pub use grid_legacy::GridRenderer;
 pub use marker::{MarkerInstance, MarkerRenderer};
 pub use mesh::{MeshData, MeshRenderer, MeshVertex};
+
+/// Grid renderer alias for backward compatibility (uses GridSubRenderer).
+pub type GridRenderer = GridSubRenderer;
 
 /// Render priorities for sub-renderers.
 ///
@@ -56,6 +56,10 @@ pub mod priorities {
     pub const AXIS: i32 = 200;
     /// Markers are rendered on top of axes
     pub const MARKER: i32 = 300;
+    /// Collision shapes are rendered semi-transparent
+    pub const COLLISION: i32 = 350;
+    /// Plane selector for sketch plane selection
+    pub const PLANE_SELECTOR: i32 = 400;
     /// Gizmo is always on top
     pub const GIZMO: i32 = 1000;
 }

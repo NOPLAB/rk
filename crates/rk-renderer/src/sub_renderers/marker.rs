@@ -5,8 +5,11 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 use crate::constants::{instances, marker as constants};
+use crate::context::RenderContext;
 use crate::instanced::InstanceBuffer;
 use crate::pipeline::{PipelineConfig, create_camera_bind_group};
+use crate::scene::Scene;
+use crate::traits::SubRenderer;
 use crate::vertex::PositionVertex;
 
 /// Marker instance data - passed as vertex instance
@@ -44,27 +47,46 @@ impl Default for MarkerInstance {
 
 /// Marker renderer for joint points
 pub struct MarkerRenderer {
-    pipeline: wgpu::RenderPipeline,
+    enabled: bool,
+    initialized: bool,
+    pipeline: Option<wgpu::RenderPipeline>,
     /// Pipeline for selected markers (always on top, no depth test)
-    selected_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
+    selected_pipeline: Option<wgpu::RenderPipeline>,
+    vertex_buffer: Option<wgpu::Buffer>,
+    index_buffer: Option<wgpu::Buffer>,
     index_count: u32,
-    instances: InstanceBuffer<MarkerInstance>,
+    instances: Option<InstanceBuffer<MarkerInstance>>,
     /// Selected marker instances (rendered on top)
-    selected_instances: InstanceBuffer<MarkerInstance>,
-    bind_group: wgpu::BindGroup,
+    selected_instances: Option<InstanceBuffer<MarkerInstance>>,
+    bind_group: Option<wgpu::BindGroup>,
 }
 
 impl MarkerRenderer {
-    /// Creates a new marker renderer.
-    pub fn new(
+    /// Creates a new marker renderer (uninitialized).
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            initialized: false,
+            pipeline: None,
+            selected_pipeline: None,
+            vertex_buffer: None,
+            index_buffer: None,
+            index_count: 0,
+            instances: None,
+            selected_instances: None,
+            bind_group: None,
+        }
+    }
+
+    /// Initialize the marker renderer with GPU resources.
+    pub fn init(
+        &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         camera_buffer: &wgpu::Buffer,
-    ) -> Self {
+    ) {
         let bind_group =
             create_camera_bind_group(device, camera_bind_group_layout, camera_buffer, "Marker");
 
@@ -129,7 +151,7 @@ impl MarkerRenderer {
 
         // Generate sphere mesh
         let (vertices, indices) = generate_sphere(constants::SEGMENTS, constants::RINGS);
-        let index_count = indices.len() as u32;
+        self.index_count = indices.len() as u32;
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Marker Vertex Buffer"),
@@ -143,59 +165,122 @@ impl MarkerRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let instances = InstanceBuffer::new(device, "Marker", instances::MAX_MARKERS);
-        let selected_instances =
-            InstanceBuffer::new(device, "Selected Marker", instances::MAX_MARKERS);
+        let inst = InstanceBuffer::new(device, "Marker", instances::MAX_MARKERS);
+        let selected_inst = InstanceBuffer::new(device, "Selected Marker", instances::MAX_MARKERS);
 
-        Self {
-            pipeline,
-            selected_pipeline,
-            vertex_buffer,
-            index_buffer,
-            index_count,
-            instances,
-            selected_instances,
-            bind_group,
-        }
+        self.pipeline = Some(pipeline);
+        self.selected_pipeline = Some(selected_pipeline);
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
+        self.instances = Some(inst);
+        self.selected_instances = Some(selected_inst);
+        self.bind_group = Some(bind_group);
+        self.initialized = true;
     }
 
     /// Update marker instances
     pub fn update_instances(&mut self, queue: &wgpu::Queue, instances: &[MarkerInstance]) {
-        self.instances.update(queue, instances);
+        if let Some(ref mut inst) = self.instances {
+            inst.update(queue, instances);
+        }
     }
 
     /// Update selected marker instances (rendered on top)
     pub fn update_selected_instances(&mut self, queue: &wgpu::Queue, instances: &[MarkerInstance]) {
-        self.selected_instances.update(queue, instances);
+        if let Some(ref mut inst) = self.selected_instances {
+            inst.update(queue, instances);
+        }
     }
 
     /// Clear all markers
     pub fn clear(&mut self) {
-        self.instances.clear();
-        self.selected_instances.clear();
+        if let Some(ref mut inst) = self.instances {
+            inst.clear();
+        }
+        if let Some(ref mut inst) = self.selected_instances {
+            inst.clear();
+        }
     }
 
     /// Renders all marker instances.
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
+        if !self.initialized {
+            return;
+        }
+
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let selected_pipeline = self.selected_pipeline.as_ref().unwrap();
+        let vertex_buffer = self.vertex_buffer.as_ref().unwrap();
+        let index_buffer = self.index_buffer.as_ref().unwrap();
+        let bind_group = self.bind_group.as_ref().unwrap();
+        let instances = self.instances.as_ref().unwrap();
+        let selected_instances = self.selected_instances.as_ref().unwrap();
+
         // Render normal markers first (with depth test)
-        if !self.instances.is_empty() {
-            render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instances.slice());
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..self.index_count, 0, 0..self.instances.count());
+        if !instances.is_empty() {
+            render_pass.set_pipeline(pipeline);
+            render_pass.set_bind_group(0, bind_group, &[]);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, instances.slice());
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..self.index_count, 0, 0..instances.count());
         }
 
         // Render selected markers on top (no depth test)
-        if !self.selected_instances.is_empty() {
-            render_pass.set_pipeline(&self.selected_pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.selected_instances.slice());
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..self.index_count, 0, 0..self.selected_instances.count());
+        if !selected_instances.is_empty() {
+            render_pass.set_pipeline(selected_pipeline);
+            render_pass.set_bind_group(0, bind_group, &[]);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, selected_instances.slice());
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..self.index_count, 0, 0..selected_instances.count());
         }
+    }
+}
+
+impl Default for MarkerRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SubRenderer for MarkerRenderer {
+    fn name(&self) -> &str {
+        "marker"
+    }
+
+    fn priority(&self) -> i32 {
+        super::priorities::MARKER
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    fn on_init(&mut self, ctx: &RenderContext) {
+        self.init(
+            ctx.device(),
+            ctx.surface_format(),
+            ctx.depth_format(),
+            ctx.camera_bind_group_layout(),
+            ctx.camera_buffer(),
+        );
+    }
+
+    fn on_resize(&mut self, _ctx: &RenderContext, _width: u32, _height: u32) {
+        // Marker renderer doesn't need to respond to resize
+    }
+
+    fn prepare(&mut self, _ctx: &RenderContext, _scene: &Scene) {
+        // Marker data is updated externally via update_instances
+    }
+
+    fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, _scene: &Scene) {
+        MarkerRenderer::render(self, pass);
     }
 }
 

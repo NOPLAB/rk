@@ -47,7 +47,7 @@ use crate::resources::MeshManager;
 use crate::scene::Scene;
 use crate::sub_renderers::{
     AxisInstance, AxisRenderer, CollisionRenderer, GizmoAxis, GizmoMode, GizmoRenderer, GizmoSpace,
-    GridRenderer, MarkerInstance, MarkerRenderer, MeshData, MeshRenderer, PlaneSelectorRenderer,
+    GridSubRenderer, MarkerInstance, MarkerRenderer, MeshData, MeshRenderer, PlaneSelectorRenderer,
     SketchRenderData, SketchRenderer,
 };
 
@@ -99,7 +99,7 @@ pub struct Renderer {
     msaa_view: Option<wgpu::TextureView>,
 
     // Sub-renderers
-    grid_renderer: GridRenderer,
+    grid_renderer: GridSubRenderer,
     mesh_renderer: MeshRenderer,
     axis_renderer: AxisRenderer,
     marker_renderer: MarkerRenderer,
@@ -139,7 +139,8 @@ impl Renderer {
         };
 
         // Initialize sub-renderers
-        let grid_renderer = GridRenderer::new(
+        let mut grid_renderer = GridSubRenderer::new();
+        grid_renderer.init(
             device,
             format,
             depth_format,
@@ -158,7 +159,8 @@ impl Renderer {
         // Initialize lighting system (needs mesh_renderer for bind group layout)
         let lighting_system = LightingSystem::new(device, &mesh_renderer);
 
-        let axis_renderer = AxisRenderer::new(
+        let mut axis_renderer = AxisRenderer::new();
+        axis_renderer.init(
             device,
             format,
             depth_format,
@@ -166,7 +168,8 @@ impl Renderer {
             camera_controller.buffer(),
         );
 
-        let marker_renderer = MarkerRenderer::new(
+        let mut marker_renderer = MarkerRenderer::new();
+        marker_renderer.init(
             device,
             format,
             depth_format,
@@ -182,7 +185,8 @@ impl Renderer {
             camera_controller.buffer(),
         );
 
-        let collision_renderer = CollisionRenderer::new(
+        let mut collision_renderer = CollisionRenderer::new();
+        collision_renderer.init(
             device,
             format,
             depth_format,
@@ -199,7 +203,8 @@ impl Renderer {
             camera_controller.buffer(),
         );
 
-        let plane_selector_renderer = PlaneSelectorRenderer::new(
+        let mut plane_selector_renderer = PlaneSelectorRenderer::new();
+        plane_selector_renderer.init(
             device,
             format,
             depth_format,
