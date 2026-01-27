@@ -88,6 +88,17 @@ pub const PLANE_XZ: Color32 = Color32::from_rgb(77, 230, 128);
 pub const PLANE_YZ: Color32 = Color32::from_rgb(230, 128, 77);
 
 // =============================================================================
+// Constraint icon colors
+// =============================================================================
+
+/// Geometric constraint color (cyan-ish)
+pub const CONSTRAINT_GEOMETRIC: Color32 = Color32::from_rgb(100, 200, 220);
+/// Dimensional constraint color (orange)
+pub const CONSTRAINT_DIMENSION: Color32 = Color32::from_rgb(255, 180, 80);
+/// Fixed constraint color (green)
+pub const CONSTRAINT_FIXED: Color32 = Color32::from_rgb(120, 220, 120);
+
+// =============================================================================
 // Light theme colors
 // =============================================================================
 

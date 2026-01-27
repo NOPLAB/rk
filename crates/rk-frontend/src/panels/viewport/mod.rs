@@ -17,8 +17,9 @@ use crate::state::{
 use crate::theme::palette;
 
 use overlays::{
-    render_axes_indicator, render_camera_settings, render_dimension_dialog, render_extrude_dialog,
-    render_gizmo_toggle, render_plane_selection_hint, render_sketch_toolbar,
+    render_axes_indicator, render_camera_settings, render_constraint_icons,
+    render_dimension_dialog, render_extrude_dialog, render_gizmo_toggle,
+    render_plane_selection_hint, render_sketch_toolbar,
 };
 use plane_picking::pick_reference_plane;
 use sketch_input::handle_sketch_mode_input;
@@ -145,7 +146,10 @@ impl Panel for ViewportPanel {
         }
 
         // Ensure texture and render
-        let texture_id = {
+        let (texture_id, constraint_overlay_data): (
+            egui::TextureId,
+            Option<(Vec<rk_renderer::ConstraintIconData>, Mat4)>,
+        ) = {
             let mut vp_state = viewport_state.lock();
             let mut egui_renderer = render_state.renderer.write();
             let tex_id = vp_state.ensure_texture(width, height, &mut egui_renderer);
@@ -162,7 +166,10 @@ impl Panel for ViewportPanel {
                 .set_plane_selector_visible(is_plane_selection_mode);
 
             // Update sketch data for rendering
-            let sketch_render_data: Vec<SketchRenderData> = {
+            let (sketch_render_data, constraint_icons_data): (
+                Vec<SketchRenderData>,
+                Option<(Vec<rk_renderer::ConstraintIconData>, Mat4)>,
+            ) = {
                 let app = app_state.lock();
                 let cad = &app.cad;
 
@@ -179,7 +186,8 @@ impl Panel for ViewportPanel {
                     };
 
                 // Convert all sketches to render data
-                cad.data
+                let render_data: Vec<SketchRenderData> = cad
+                    .data
                     .history
                     .sketches()
                     .values()
@@ -192,7 +200,15 @@ impl Panel for ViewportPanel {
                         };
                         sketch_to_render_data(sketch, &selected_entities, is_active, in_prog_ref)
                     })
-                    .collect()
+                    .collect();
+
+                // Extract constraint icons from active sketch for overlay rendering
+                let icons_data = render_data
+                    .iter()
+                    .find(|s| s.is_active)
+                    .map(|s| (s.constraint_icons.clone(), s.transform));
+
+                (render_data, icons_data)
             };
 
             // Set sketch data and prepare GPU resources
@@ -235,7 +251,7 @@ impl Panel for ViewportPanel {
             }
 
             vp_state.render();
-            tex_id
+            (tex_id, constraint_icons_data)
         };
 
         // Display the rendered texture
@@ -749,6 +765,20 @@ impl Panel for ViewportPanel {
                 let dimension_dialog_open = sketch_state.dimension_dialog.open;
                 drop(app); // Release lock before calling render
                 render_sketch_toolbar(ui, response.rect, app_state, current_tool);
+
+                // Draw constraint icons overlay
+                if let Some((icons, transform)) = &constraint_overlay_data {
+                    let vp_state = viewport_state.lock();
+                    let camera = vp_state.renderer.camera();
+                    render_constraint_icons(
+                        ui,
+                        response.rect,
+                        icons,
+                        *transform,
+                        camera,
+                        available_size,
+                    );
+                }
 
                 // Draw extrude dialog if open
                 if extrude_dialog_open {

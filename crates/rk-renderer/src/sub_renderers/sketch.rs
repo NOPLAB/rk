@@ -86,6 +86,19 @@ struct SketchUniform {
     plane_color: [f32; 4],
 }
 
+/// Data for a constraint icon to be rendered as egui overlay.
+#[derive(Debug, Clone)]
+pub struct ConstraintIconData {
+    /// Constraint ID.
+    pub id: Uuid,
+    /// Position in sketch coordinate space.
+    pub position: Vec2,
+    /// Constraint type name (e.g., "Coincident", "Horizontal").
+    pub constraint_type: String,
+    /// Dimensional value (if applicable).
+    pub value: Option<f32>,
+}
+
 /// Data for a single sketch to be rendered.
 #[derive(Debug, Clone)]
 pub struct SketchRenderData {
@@ -99,6 +112,8 @@ pub struct SketchRenderData {
     pub point_vertices: Vec<SketchVertex>,
     /// Whether this sketch is currently being edited.
     pub is_active: bool,
+    /// Constraint icons to be rendered as egui overlay.
+    pub constraint_icons: Vec<ConstraintIconData>,
 }
 
 impl Default for SketchRenderData {
@@ -109,6 +124,7 @@ impl Default for SketchRenderData {
             line_vertices: Vec::new(),
             point_vertices: Vec::new(),
             is_active: false,
+            constraint_icons: Vec::new(),
         }
     }
 }
@@ -122,6 +138,7 @@ impl SketchRenderData {
             line_vertices: Vec::new(),
             point_vertices: Vec::new(),
             is_active: false,
+            constraint_icons: Vec::new(),
         }
     }
 

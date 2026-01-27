@@ -31,7 +31,7 @@ pub mod mesh;
 // Re-exports for new architecture
 pub use grid::GridSubRenderer;
 pub use plane_selector::{PlaneSelectorRenderer, PlaneSelectorVertex, plane_ids};
-pub use sketch::{SketchRenderData, SketchRenderer, SketchVertex};
+pub use sketch::{ConstraintIconData, SketchRenderData, SketchRenderer, SketchVertex};
 
 // Re-exports for legacy code
 pub use axis::{AxisInstance, AxisRenderer};
