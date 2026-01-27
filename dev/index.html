@@ -7,59 +7,6 @@
     <base href="/rk/dev/" />
     <link rel="icon" href="/rk/dev/rk-af09696097b2f00c.svg" integrity="sha384-vknUggaqqTHLaYlVRScx/yhqvKU5zwmU1ISv3Xd+VUJBV6MDfLa6rSaIVkuR7mb8"/>
     
-    <script>
-        // Override fetch BEFORE Trunk's WASM loader runs
-        (function() {
-            const originalFetch = window.fetch;
-            window.fetch = async function(url, options) {
-                const urlStr = typeof url === 'string' ? url : url.url || '';
-
-                if (urlStr.endsWith('.wasm')) {
-                    const progressBar = document.getElementById('progress-bar');
-                    const progressPercent = document.getElementById('progress-percent');
-                    const loadingText = document.getElementById('loading-text');
-
-                    function updateProgress(percent, text) {
-                        if (progressBar) progressBar.style.width = percent + '%';
-                        if (progressPercent) progressPercent.textContent = Math.round(percent) + '%';
-                        if (text && loadingText) loadingText.textContent = text;
-                    }
-
-                    updateProgress(0, 'Downloading WebAssembly...');
-
-                    const response = await originalFetch(url, options);
-                    const contentLength = response.headers.get('Content-Length');
-
-                    if (contentLength && response.body) {
-                        const total = parseInt(contentLength, 10);
-                        const reader = response.body.getReader();
-                        let loaded = 0;
-                        const chunks = [];
-
-                        while (true) {
-                            const {done, value} = await reader.read();
-                            if (done) break;
-                            chunks.push(value);
-                            loaded += value.length;
-                            updateProgress((loaded / total) * 90, 'Downloading WebAssembly...');
-                        }
-
-                        updateProgress(90, 'Initializing...');
-
-                        const blob = new Blob(chunks, { type: 'application/wasm' });
-                        const arrayBuffer = await blob.arrayBuffer();
-
-                        return new Response(arrayBuffer, {
-                            status: response.status,
-                            statusText: response.statusText,
-                            headers: response.headers
-                        });
-                    }
-                }
-                return originalFetch(url, options);
-            };
-        })();
-    </script>
     
 <script type="module">
 import init, * as bindings from '/rk/dev/rk-b80582e8a755c0cd.js';
@@ -99,36 +46,69 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
         #loading h1 {
             font-size: 2rem;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
             font-weight: 300;
         }
 
         .progress-container {
             width: 300px;
-            height: 6px;
+            height: 4px;
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
+            border-radius: 2px;
             overflow: hidden;
+            position: relative;
         }
 
         .progress-bar {
-            width: 0%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 30%;
             height: 100%;
             background: linear-gradient(90deg, #4a9eff, #6bb3ff);
-            border-radius: 3px;
-            transition: width 0.1s ease-out;
+            border-radius: 2px;
+            animation: loading-slide 1.2s ease-in-out infinite;
+        }
+
+        @keyframes loading-slide {
+            0% {
+                left: -30%;
+            }
+            100% {
+                left: 100%;
+            }
         }
 
         .loading-text {
-            margin-top: 1rem;
-            font-size: 0.9rem;
+            margin-top: 1.5rem;
+            font-size: 0.85rem;
             color: #888;
         }
 
-        .progress-percent {
-            margin-top: 0.5rem;
-            font-size: 0.8rem;
-            color: #666;
+        /* Spinner for initialization phase */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #4a9eff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        #loading.initializing .spinner {
+            display: block;
+        }
+
+        #loading.initializing .progress-container {
+            display: none;
         }
 
         canvas {
@@ -137,36 +117,42 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             display: block;
         }
     </style>
-<link rel="modulepreload" href="/rk/dev/rk-b80582e8a755c0cd.js" crossorigin="anonymous" integrity="sha384-M3bOG8W8YdlhSfWpzPL1QVfY2KN4b4qcP4Ys344nm/AKw15ZkCi6uOZyieptAY25"><link rel="preload" href="/rk/dev/rk-b80582e8a755c0cd_bg.wasm" crossorigin="anonymous" integrity="sha384-P+jHqEcEqrZoy7Ma6BrwLje7bBMH1Lf2IDevExqzFKFDc+yDAJMQIyG4Ak2TihI/" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/rk/dev/rk-b80582e8a755c0cd.js" crossorigin="anonymous" integrity="sha384-+JNbIKD8LsUY4efjXdVa2iysKNbfQ2fZ10QzvsXsnTS1XtnQtxWAFq3EyXoIqwPz"><link rel="preload" href="/rk/dev/rk-b80582e8a755c0cd_bg.wasm" crossorigin="anonymous" integrity="sha384-mU4TaNyFbmtAODFqColqZlY5cuuoVe7IvEZOPy81ehfKzj4Qcnm1wJFStieRtJPN" as="fetch" type="application/wasm"></head>
 <body>
     <div id="loading">
         <h1>RK</h1>
         <div class="progress-container">
             <div class="progress-bar" id="progress-bar"></div>
         </div>
-        <p class="loading-text" id="loading-text">Loading WebAssembly...</p>
-        <p class="progress-percent" id="progress-percent">0%</p>
+        <div class="spinner"></div>
+        <p class="loading-text" id="loading-text">Loading...</p>
     </div>
     <canvas id="urdf-editor-canvas"></canvas>
     <script>
-        // Detect when WASM is fully initialized
         (function() {
-            const observer = new MutationObserver(function(mutations) {
-                const loading = document.getElementById('loading');
-                const canvas = document.getElementById('urdf-editor-canvas');
-                const progressBar = document.getElementById('progress-bar');
-                const progressPercent = document.getElementById('progress-percent');
-                const loadingText = document.getElementById('loading-text');
+            const loading = document.getElementById('loading');
+            const loadingText = document.getElementById('loading-text');
 
+            // Listen for Trunk's application started event
+            window.addEventListener('TrunkApplicationStarted', function() {
+                if (loadingText) loadingText.textContent = 'Initializing...';
+                if (loading) loading.classList.add('initializing');
+            });
+
+            // Detect when WASM is fully initialized (canvas is rendered)
+            const observer = new MutationObserver(function(mutations) {
+                const canvas = document.getElementById('urdf-editor-canvas');
                 if (canvas && canvas.width > 0 && canvas.height > 0) {
-                    if (progressBar) progressBar.style.width = '100%';
-                    if (progressPercent) progressPercent.textContent = '100%';
                     if (loadingText) loadingText.textContent = 'Ready!';
                     setTimeout(function() {
                         if (loading) {
-                            loading.style.display = 'none';
+                            loading.style.opacity = '0';
+                            loading.style.transition = 'opacity 0.2s ease-out';
+                            setTimeout(function() {
+                                loading.style.display = 'none';
+                            }, 200);
                         }
-                    }, 200);
+                    }, 100);
                     observer.disconnect();
                 }
             });
