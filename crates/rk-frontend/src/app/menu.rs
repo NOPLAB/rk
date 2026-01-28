@@ -289,6 +289,26 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
             });
 
             ui.menu_button("Edit", |ui| {
+                let can_undo = app_state.lock().history.can_undo();
+                if ui
+                    .add_enabled(can_undo, egui::Button::new("Undo  Ctrl+Z"))
+                    .clicked()
+                {
+                    app_state.lock().queue_action(AppAction::Undo);
+                    ui.close();
+                }
+
+                let can_redo = app_state.lock().history.can_redo();
+                if ui
+                    .add_enabled(can_redo, egui::Button::new("Redo  Ctrl+Y"))
+                    .clicked()
+                {
+                    app_state.lock().queue_action(AppAction::Redo);
+                    ui.close();
+                }
+
+                ui.separator();
+
                 if ui.button("Delete Selected").clicked() {
                     app_state.lock().queue_action(AppAction::DeleteSelectedPart);
                     ui.close();

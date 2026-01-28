@@ -1,10 +1,12 @@
 //! Application state module
 
 mod editor;
+mod history;
 mod sketch;
 mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
+pub use history::UndoHistory;
 pub use sketch::{
     CadState, ConstraintToolState, DimensionDialogState, EditorMode, ExtrudeDialogState,
     ExtrudeDirection, InProgressEntity, PlaneSelectionState, ReferencePlane, SketchAction,
@@ -122,6 +124,12 @@ pub enum AppAction {
     // Sketch/CAD actions
     /// Execute a sketch action
     SketchAction(SketchAction),
+
+    // History actions
+    /// Undo the last action
+    Undo,
+    /// Redo the last undone action
+    Redo,
 }
 
 /// Angle display mode for joint sliders
@@ -138,6 +146,8 @@ pub struct AppState {
     pub project: Project,
     /// CAD state (sketches, features, editor mode)
     pub cad: CadState,
+    /// Undo/redo history
+    pub history: UndoHistory,
     /// Currently selected part
     pub selected_part: Option<Uuid>,
     /// Currently selected collision element (link_id, collision_index)
@@ -171,6 +181,7 @@ impl Default for AppState {
         Self {
             project: Project::default(),
             cad: CadState::default(),
+            history: UndoHistory::default(),
             selected_part: None,
             selected_collision: None,
             editing_joint_id: None,
@@ -272,6 +283,7 @@ impl AppState {
     pub fn new_project(&mut self) {
         self.project = Project::default();
         self.cad = CadState::default();
+        self.history.clear();
         self.selected_part = None;
         self.selected_collision = None;
         self.editing_joint_id = None;
@@ -283,6 +295,7 @@ impl AppState {
     pub fn load_project(&mut self, project: Project, path: PathBuf) {
         self.project = project;
         self.cad = CadState::default(); // TODO: Load CAD data from project
+        self.history.clear();
         self.project_path = Some(path);
         self.selected_part = None;
         self.selected_collision = None;

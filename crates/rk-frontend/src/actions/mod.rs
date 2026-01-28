@@ -8,6 +8,7 @@ mod assembly;
 mod file;
 #[cfg(target_arch = "wasm32")]
 mod file_wasm;
+mod history;
 mod part;
 mod sketch;
 
@@ -22,6 +23,7 @@ pub use assembly::handle_assembly_action;
 pub use file::handle_file_action;
 #[cfg(target_arch = "wasm32")]
 pub use file_wasm::handle_file_action_wasm;
+pub use history::{handle_redo, handle_undo};
 pub use part::handle_part_action;
 pub use sketch::handle_sketch_action;
 
@@ -51,6 +53,15 @@ impl<'a> ActionContext<'a> {
 
 /// Dispatch an action to the appropriate handler
 pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
+    // Save state before undoable actions
+    if action.is_undoable() {
+        let mut state = ctx.app_state.lock();
+        let project = state.project.clone();
+        let cad = state.cad.clone();
+        let description = action.description();
+        state.history.save_state(&project, &cad, description);
+    }
+
     match action {
         // File actions (native only)
         #[cfg(not(target_arch = "wasm32"))]
@@ -130,6 +141,14 @@ pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
         // Sketch/CAD actions
         AppAction::SketchAction(_) => {
             handle_sketch_action(action, ctx);
+        }
+
+        // History actions
+        AppAction::Undo => {
+            handle_undo(ctx);
+        }
+        AppAction::Redo => {
+            handle_redo(ctx);
         }
     }
 }
