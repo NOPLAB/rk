@@ -402,6 +402,23 @@ fn handle_update_joint_type(joint_id: Uuid, joint_type: JointType, ctx: &ActionC
 fn handle_update_joint_origin(joint_id: Uuid, origin: Pose, ctx: &ActionContext) {
     let mut state = ctx.app_state.lock();
 
+    // Get child link info before modifying joint
+    let child_link_id = state
+        .project
+        .assembly
+        .get_joint(joint_id)
+        .map(|j| j.child_link);
+
+    // Get child link's old world transform and part info
+    let child_part_info = child_link_id.and_then(|child_id| {
+        state.project.assembly.get_link(child_id).and_then(|link| {
+            link.part_id.map(|part_id| {
+                let old_world = link.world_transform;
+                (child_id, part_id, old_world)
+            })
+        })
+    });
+
     if let Some(joint) = state.project.assembly.get_joint_mut(joint_id) {
         joint.origin = origin;
         state.modified = true;
@@ -412,6 +429,20 @@ fn handle_update_joint_origin(joint_id: Uuid, origin: Pose, ctx: &ActionContext)
             .project
             .assembly
             .update_world_transforms_with_current_positions();
+
+        // Compensate child link's part origin_transform to maintain its world position
+        // This makes only the joint move, not the mesh
+        if let Some((child_id, part_id, old_child_world)) = child_part_info
+            && let Some(new_child_link) = state.project.assembly.get_link(child_id)
+        {
+            let new_child_world = new_child_link.world_transform;
+            // Calculate compensation: new_origin = new_world^-1 * old_world * old_origin
+            // This keeps the part's world position unchanged
+            let compensation = new_child_world.inverse() * old_child_world;
+            if let Some(part) = state.project.get_part_mut(part_id) {
+                part.origin_transform = compensation * part.origin_transform;
+            }
+        }
 
         // Update renderer transforms
         sync_renderer_transforms(&state, ctx);
