@@ -2,6 +2,7 @@
 
 use crate::state::SharedViewportState;
 use crate::theme::palette;
+use rk_renderer::ProjectionMode;
 
 /// Render camera settings overlay in the top-right corner (Unity-style)
 pub fn render_camera_settings(
@@ -131,6 +132,24 @@ pub fn render_camera_settings(
                         ui.separator();
                         ui.add_space(4.0);
 
+                        // Projection mode toggle button
+                        {
+                            let mut vp = viewport_state.lock();
+                            let current_mode = vp.renderer.camera().projection_mode();
+                            let (icon, tooltip) = match current_mode {
+                                ProjectionMode::Perspective => {
+                                    ("🎥", "Perspective (click for Ortho)")
+                                }
+                                ProjectionMode::Orthographic => {
+                                    ("📐", "Orthographic (click for Persp)")
+                                }
+                            };
+                            let button = egui::Button::new(icon).min_size(egui::vec2(24.0, 24.0));
+                            if ui.add(button).on_hover_text(tooltip).clicked() {
+                                vp.renderer.camera_mut().toggle_projection_mode();
+                            }
+                        }
+
                         // Camera button
                         let button = egui::Button::new("📷")
                             .selected(*show_camera_settings)
@@ -172,9 +191,41 @@ pub fn render_camera_settings(
 
                     let mut vp = viewport_state.lock();
 
-                    // FOV slider
+                    // Projection mode
                     ui.horizontal(|ui| {
-                        ui.label("FOV");
+                        ui.label("Projection");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let current_mode = vp.renderer.camera().projection_mode();
+                            let is_perspective = current_mode == ProjectionMode::Perspective;
+
+                            if ui
+                                .selectable_label(!is_perspective, "Ortho")
+                                .on_hover_text("Orthographic projection")
+                                .clicked()
+                            {
+                                vp.renderer
+                                    .camera_mut()
+                                    .set_projection_mode(ProjectionMode::Orthographic);
+                            }
+                            if ui
+                                .selectable_label(is_perspective, "Persp")
+                                .on_hover_text("Perspective projection")
+                                .clicked()
+                            {
+                                vp.renderer
+                                    .camera_mut()
+                                    .set_projection_mode(ProjectionMode::Perspective);
+                            }
+                        });
+                    });
+
+                    // FOV slider (only affects perspective, but also affects ortho scale)
+                    ui.horizontal(|ui| {
+                        let label = match vp.renderer.camera().projection_mode() {
+                            ProjectionMode::Perspective => "FOV",
+                            ProjectionMode::Orthographic => "FOV",
+                        };
+                        ui.label(label);
                         ui.add_space(ui.available_width() - 100.0);
                         let mut fov = vp.renderer.camera().fov_degrees();
                         if ui
