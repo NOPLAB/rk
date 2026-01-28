@@ -262,35 +262,120 @@ impl CadKernel for TruckKernel {
         mesh.remove_degenerate_faces();
         mesh.remove_unused_attrs();
 
-        // Extract vertices
-        let vertices: Vec<[f32; 3]> = mesh
-            .positions()
-            .iter()
-            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
-            .collect();
+        // Get position and normal arrays from the mesh
+        let positions = mesh.positions();
+        let mesh_normals = mesh.normals();
 
-        // Extract normals
-        let normals: Vec<[f32; 3]> = mesh
-            .normals()
-            .iter()
-            .map(|n| [n.x as f32, n.y as f32, n.z as f32])
-            .collect();
-
-        // Extract indices from triangle faces
+        // Expand vertices: each triangle vertex gets its own entry with correct normal
+        // This is necessary because Truck uses separate indices for positions and normals
+        let mut vertices: Vec<[f32; 3]> = Vec::new();
+        let mut normals: Vec<[f32; 3]> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
+
+        // Helper to calculate face normal as fallback
+        let calc_face_normal = |p0: &[f32; 3], p1: &[f32; 3], p2: &[f32; 3]| -> [f32; 3] {
+            let v0 = glam::Vec3::from(*p0);
+            let v1 = glam::Vec3::from(*p1);
+            let v2 = glam::Vec3::from(*p2);
+            (v1 - v0).cross(v2 - v0).normalize_or_zero().to_array()
+        };
+
+        // Process triangle faces
         for tri in mesh.tri_faces() {
-            indices.push(tri[0].pos as u32);
-            indices.push(tri[1].pos as u32);
-            indices.push(tri[2].pos as u32);
+            let base_idx = vertices.len() as u32;
+
+            // Get positions for this triangle
+            let pos0 = [
+                positions[tri[0].pos].x as f32,
+                positions[tri[0].pos].y as f32,
+                positions[tri[0].pos].z as f32,
+            ];
+            let pos1 = [
+                positions[tri[1].pos].x as f32,
+                positions[tri[1].pos].y as f32,
+                positions[tri[1].pos].z as f32,
+            ];
+            let pos2 = [
+                positions[tri[2].pos].x as f32,
+                positions[tri[2].pos].y as f32,
+                positions[tri[2].pos].z as f32,
+            ];
+
+            // Fallback normal if per-vertex normals are not available
+            let fallback_normal = calc_face_normal(&pos0, &pos1, &pos2);
+
+            // Add vertices with their corresponding normals
+            for (i, v) in tri.iter().enumerate() {
+                let pos = match i {
+                    0 => pos0,
+                    1 => pos1,
+                    _ => pos2,
+                };
+                vertices.push(pos);
+
+                // Get normal using the normal index, with fallback to face normal
+                let normal = if let Some(nor_idx) = v.nor {
+                    if nor_idx < mesh_normals.len() {
+                        let n = &mesh_normals[nor_idx];
+                        [n.x as f32, n.y as f32, n.z as f32]
+                    } else {
+                        fallback_normal
+                    }
+                } else {
+                    fallback_normal
+                };
+                normals.push(normal);
+            }
+
+            indices.push(base_idx);
+            indices.push(base_idx + 1);
+            indices.push(base_idx + 2);
         }
-        // Convert quad faces to triangles
+
+        // Process quad faces (convert to triangles)
         for quad in mesh.quad_faces() {
-            indices.push(quad[0].pos as u32);
-            indices.push(quad[1].pos as u32);
-            indices.push(quad[2].pos as u32);
-            indices.push(quad[0].pos as u32);
-            indices.push(quad[2].pos as u32);
-            indices.push(quad[3].pos as u32);
+            let base_idx = vertices.len() as u32;
+
+            // Get positions for this quad
+            let pos: Vec<[f32; 3]> = quad
+                .iter()
+                .map(|v| {
+                    [
+                        positions[v.pos].x as f32,
+                        positions[v.pos].y as f32,
+                        positions[v.pos].z as f32,
+                    ]
+                })
+                .collect();
+
+            // Fallback normal using first triangle of quad
+            let fallback_normal = calc_face_normal(&pos[0], &pos[1], &pos[2]);
+
+            // Add all 4 vertices with their normals
+            for (i, v) in quad.iter().enumerate() {
+                vertices.push(pos[i]);
+
+                let normal = if let Some(nor_idx) = v.nor {
+                    if nor_idx < mesh_normals.len() {
+                        let n = &mesh_normals[nor_idx];
+                        [n.x as f32, n.y as f32, n.z as f32]
+                    } else {
+                        fallback_normal
+                    }
+                } else {
+                    fallback_normal
+                };
+                normals.push(normal);
+            }
+
+            // First triangle: 0, 1, 2
+            indices.push(base_idx);
+            indices.push(base_idx + 1);
+            indices.push(base_idx + 2);
+            // Second triangle: 0, 2, 3
+            indices.push(base_idx);
+            indices.push(base_idx + 2);
+            indices.push(base_idx + 3);
         }
 
         Ok(TessellatedMesh {
