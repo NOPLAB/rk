@@ -20,6 +20,12 @@ cargo test
 # Run tests for a specific crate
 cargo test -p rk-core
 
+# Run a single test by name
+cargo test -p rk-core test_name
+
+# Run tests with output
+cargo test -- --nocapture
+
 # Check without building
 cargo check
 
@@ -54,8 +60,9 @@ Core data structures and logic:
 
 - `Part`: Mesh with metadata and joint points
 - `Assembly`: Scene graph for hierarchical structure
-- `Project`: Serializable project file (RON format)
-- Mesh import/export (STL, OBJ, DAE, URDF)
+- `Project`: Serializable project file (RON format, `.rk` extension)
+- Import formats: STL, OBJ, DAE (Collada), URDF
+- Export formats: URDF
 
 ### rk-cad
 
@@ -76,8 +83,8 @@ WGPU-based 3D renderer with plugin architecture:
 - `RenderContext`: GPU context abstraction
 - `Scene` / `RenderObject`: Scene management
 - `MeshManager`: GPU mesh resource management
-- Built-in sub-renderers: Grid, Mesh, Axis, Marker, Gizmo, Collision, Sketch
-- Render priorities defined in `sub_renderers::priorities`
+- Built-in sub-renderers: Grid, Mesh, Axis, Marker, Gizmo, Collision, Sketch, PlaneSelector
+- Render priorities in `sub_renderers::priorities`: GRID(0) → SKETCH(50) → MESH(100) → AXIS(200) → MARKER(300) → COLLISION(350) → PLANE_SELECTOR(400) → GIZMO(1000)
 
 ### rk-frontend
 
@@ -96,7 +103,8 @@ egui-based GUI application:
 - **Plugin Renderer**: New rendering features implement `SubRenderer` trait and register with `RendererRegistry`
 - **Shared State**: `SharedAppState` (`Arc<Mutex<AppState>>`) is passed to panels and the renderer
 - **Editor Modes**: `EditorMode::Assembly` for 3D editing, `EditorMode::Sketch` for 2D sketch editing
-- **CAD Kernel Abstraction**: `CadKernel` trait allows switching between geometry backends via feature flags
+- **CAD Kernel Abstraction**: `CadKernel` trait allows switching between geometry backends via feature flags. `SharedKernel` (`Arc<dyn CadKernel>`) is passed to action handlers
+- **WASM Conditional Compilation**: Platform-specific code uses `cfg(target_arch = "wasm32")`. File I/O actions have separate native/WASM implementations (`file.rs` vs `file_wasm.rs`)
 
 ## Platform Support
 
