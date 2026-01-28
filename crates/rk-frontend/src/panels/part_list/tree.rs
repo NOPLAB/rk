@@ -60,7 +60,10 @@ pub fn build_tree_structure(
         .filter_map(|link_id| link_to_part.get(link_id).copied())
         .collect();
 
-    // Root parts: parts with a link but no parent (top of their hierarchy)
+    // Root parts: parts with no parent in the hierarchy
+    // This includes:
+    // 1. Parts with a link but no parent (top of their hierarchy)
+    // 2. Parts without a link (newly imported, not yet connected)
     let root_parts: Vec<Uuid> = state
         .project
         .parts()
@@ -70,7 +73,8 @@ pub fn build_tree_structure(
                 // Part has a link - it's a root if it has no parent
                 !assembly.parent.contains_key(&link_id)
             } else {
-                false // No link = not a root (it's unconnected)
+                // No link = show as root (unconnected part)
+                true
             }
         })
         .copied()
