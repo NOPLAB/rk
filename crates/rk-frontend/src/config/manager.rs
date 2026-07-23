@@ -57,16 +57,10 @@ impl ConfigManager {
     }
 
     /// Get the OS-standard configuration directory
-    #[cfg(not(target_arch = "wasm32"))]
     fn config_dir() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("rk-editor")
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn config_dir() -> PathBuf {
-        PathBuf::from(".")
     }
 
     /// Get the configuration file path
@@ -75,7 +69,6 @@ impl ConfigManager {
     }
 
     /// Load configuration from a file path
-    #[cfg(not(target_arch = "wasm32"))]
     fn load_from_path(path: &PathBuf) -> Option<AppConfig> {
         let content = std::fs::read_to_string(path).ok()?;
         match ron::from_str(&content) {
@@ -88,12 +81,6 @@ impl ConfigManager {
                 None
             }
         }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn load_from_path(_path: &PathBuf) -> Option<AppConfig> {
-        // WASM uses localStorage via eframe, not filesystem
-        None
     }
 
     /// Get a reference to the current configuration
@@ -113,7 +100,6 @@ impl ConfigManager {
     }
 
     /// Save the configuration to disk
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&mut self) -> Result<(), ConfigError> {
         if !self.dirty {
             return Ok(());
@@ -130,13 +116,6 @@ impl ConfigManager {
         std::fs::write(&self.config_path, &content).map_err(|e| ConfigError::Io(e.to_string()))?;
 
         tracing::info!("Saved config to {:?}", self.config_path);
-        self.dirty = false;
-        Ok(())
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn save(&mut self) -> Result<(), ConfigError> {
-        // WASM uses localStorage via eframe
         self.dirty = false;
         Ok(())
     }

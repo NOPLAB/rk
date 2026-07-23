@@ -29,7 +29,7 @@ use rk_core::{GeometryType, JointLimits, JointType, Part, Pose, Project, StlUnit
 /// Actions that can be performed on the app state
 #[derive(Debug, Clone)]
 pub enum AppAction {
-    // File actions (path-based, native only)
+    // File actions (path-based)
     /// Import a mesh file (STL, OBJ, DAE)
     ImportMesh(PathBuf),
     /// Import a URDF file
@@ -42,12 +42,6 @@ pub enum AppAction {
     ExportUrdf { path: PathBuf, robot_name: String },
     /// New project
     NewProject,
-
-    // File actions (bytes-based, for WASM)
-    /// Import a mesh from bytes (STL, OBJ, DAE - format detected from filename)
-    ImportMeshBytes { name: String, data: Vec<u8> },
-    /// Load project from bytes
-    LoadProjectBytes { name: String, data: Vec<u8> },
 
     // Part actions
     /// Create a primitive shape

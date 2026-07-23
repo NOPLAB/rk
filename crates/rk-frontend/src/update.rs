@@ -40,8 +40,7 @@ pub fn create_update_status() -> SharedUpdateStatus {
     Arc::new(Mutex::new(UpdateStatus::Checking))
 }
 
-/// Check for updates in the background (native only)
-#[cfg(not(target_arch = "wasm32"))]
+/// Check for updates in the background
 pub fn check_for_updates(status: SharedUpdateStatus) {
     std::thread::spawn(move || {
         let result = check_latest_release();
@@ -50,7 +49,6 @@ pub fn check_for_updates(status: SharedUpdateStatus) {
 }
 
 /// Check the latest release from GitHub
-#[cfg(not(target_arch = "wasm32"))]
 fn check_latest_release() -> UpdateStatus {
     use semver::Version;
 
@@ -138,10 +136,4 @@ fn check_latest_release() -> UpdateStatus {
         );
         UpdateStatus::UpToDate
     }
-}
-
-/// No-op for WASM builds
-#[cfg(target_arch = "wasm32")]
-pub fn check_for_updates(_status: SharedUpdateStatus) {
-    // WASM builds don't check for updates
 }

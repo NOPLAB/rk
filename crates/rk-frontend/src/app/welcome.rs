@@ -132,17 +132,7 @@ impl WelcomeDialog {
 
 /// Open a URL in the default browser
 fn open_url(url: &str) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        if let Err(e) = open::that(url) {
-            tracing::warn!("Failed to open URL: {}", e);
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(window) = web_sys::window() {
-            let _ = window.open_with_url_and_target(url, "_blank");
-        }
+    if let Err(e) = open::that(url) {
+        tracing::warn!("Failed to open URL: {}", e);
     }
 }

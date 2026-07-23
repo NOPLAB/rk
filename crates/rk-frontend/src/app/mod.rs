@@ -168,11 +168,10 @@ impl UrdfEditorApp {
                         ),
                     );
 
-                    if ui.hyperlink_to("Download", &release_url).clicked() {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        if let Err(e) = open::that(&release_url) {
-                            tracing::warn!("Failed to open URL: {}", e);
-                        }
+                    if ui.hyperlink_to("Download", &release_url).clicked()
+                        && let Err(e) = open::that(&release_url)
+                    {
+                        tracing::warn!("Failed to open URL: {}", e);
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

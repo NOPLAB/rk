@@ -14,9 +14,7 @@ impl AppAction {
             | AppAction::SetEditingJoint(_) => false,
 
             // File operations that reset state are not undoable
-            AppAction::NewProject
-            | AppAction::LoadProject(_)
-            | AppAction::LoadProjectBytes { .. } => false,
+            AppAction::NewProject | AppAction::LoadProject(_) => false,
 
             // Real-time operations that fire frequently are not undoable
             AppAction::UpdateJointPosition { .. } => false,
@@ -33,10 +31,10 @@ impl AppAction {
     pub fn description(&self) -> &'static str {
         match self {
             // File actions
-            AppAction::ImportMesh(_) | AppAction::ImportMeshBytes { .. } => "Import Mesh",
+            AppAction::ImportMesh(_) => "Import Mesh",
             AppAction::ImportUrdf(_) => "Import URDF",
             AppAction::SaveProject(_) => "Save Project",
-            AppAction::LoadProject(_) | AppAction::LoadProjectBytes { .. } => "Load Project",
+            AppAction::LoadProject(_) => "Load Project",
             AppAction::ExportUrdf { .. } => "Export URDF",
             AppAction::NewProject => "New Project",
 
