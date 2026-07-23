@@ -166,7 +166,7 @@ impl TessellatedMesh {
 }
 
 /// A 2D wire (closed loop of edges) for extrusion profiles
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Wire2D {
     /// Unique identifier
     pub id: Uuid,

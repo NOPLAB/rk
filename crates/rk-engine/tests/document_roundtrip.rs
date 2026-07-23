@@ -4,7 +4,7 @@
 use glam::Vec2;
 use rk_cad::{ExtrudeDirection, Feature, Sketch, SketchPlane, default_kernel};
 use rk_core::{Part, Project};
-use rk_engine::{DOCUMENT_VERSION, Document, DocumentError};
+use rk_engine::{Document, DocumentError};
 use uuid::Uuid;
 
 /// Pins the top-level v1 field names. If this test breaks, a rename in
@@ -98,7 +98,6 @@ fn newer_version_is_rejected() {
         Err(DocumentError::UnsupportedVersion(v)) => assert_eq!(v, 99),
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
-    assert!(99 > DOCUMENT_VERSION);
 }
 
 /// Bodies are not stored in the file; after load a rebuild must restore

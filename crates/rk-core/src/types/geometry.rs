@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Geometry type for visual/collision elements
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GeometryType {
     /// Mesh geometry with optional path and scale
     Mesh {

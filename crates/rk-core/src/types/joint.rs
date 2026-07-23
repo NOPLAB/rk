@@ -69,7 +69,7 @@ impl From<&urdf_rs::JointType> for JointType {
 }
 
 /// Joint limits
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct JointLimits {
     /// Lower position limit (rad or m)
     pub lower: f32,
