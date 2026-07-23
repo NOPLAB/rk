@@ -2,7 +2,7 @@
 
 use rk_cad::BooleanOp;
 
-use crate::state::{AppAction, ExtrudeDirection, SharedAppState, SketchAction};
+use crate::state::{AppAction, CompositeAction, ExtrudeDirection, SharedAppState, SketchUiAction};
 use crate::theme::palette;
 
 /// Render extrude dialog overlay (movable window on left-center)
@@ -23,8 +23,7 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
             // Get dialog state
             let (profile_count, selected_indices, error_message) = {
                 let app = app_state.lock();
-                app.cad
-                    .editor_mode
+                app.editor_mode
                     .sketch()
                     .map(|s| {
                         (
@@ -47,8 +46,8 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                         .checkbox(&mut checked, format!("Profile {}", i + 1))
                         .clicked()
                     {
-                        app_state.lock().queue_action(AppAction::SketchAction(
-                            SketchAction::ToggleExtrudeProfile { profile_index: i },
+                        app_state.lock().queue_action(AppAction::SketchUi(
+                            SketchUiAction::ToggleExtrudeProfile { profile_index: i },
                         ));
                     }
                 }
@@ -72,8 +71,7 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                 ui.label("Distance:");
                 let mut distance = {
                     let app = app_state.lock();
-                    app.cad
-                        .editor_mode
+                    app.editor_mode
                         .sketch()
                         .map(|s| s.extrude_dialog.distance)
                         .unwrap_or(10.0)
@@ -86,8 +84,8 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                     )
                     .changed()
                 {
-                    app_state.lock().queue_action(AppAction::SketchAction(
-                        SketchAction::UpdateExtrudeDistance { distance },
+                    app_state.lock().queue_action(AppAction::SketchUi(
+                        SketchUiAction::UpdateExtrudeDistance { distance },
                     ));
                 }
             });
@@ -99,8 +97,7 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                 ui.label("Direction:");
                 let current_direction = {
                     let app = app_state.lock();
-                    app.cad
-                        .editor_mode
+                    app.editor_mode
                         .sketch()
                         .map(|s| s.extrude_dialog.direction)
                         .unwrap_or(ExtrudeDirection::Positive)
@@ -114,8 +111,8 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                                 .selectable_label(dir == current_direction, dir.name())
                                 .clicked()
                             {
-                                app_state.lock().queue_action(AppAction::SketchAction(
-                                    SketchAction::UpdateExtrudeDirection { direction: dir },
+                                app_state.lock().queue_action(AppAction::SketchUi(
+                                    SketchUiAction::UpdateExtrudeDirection { direction: dir },
                                 ));
                             }
                         }
@@ -129,8 +126,7 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                 ui.label("Operation:");
                 let current_op = {
                     let app = app_state.lock();
-                    app.cad
-                        .editor_mode
+                    app.editor_mode
                         .sketch()
                         .map(|s| s.extrude_dialog.boolean_op)
                         .unwrap_or(BooleanOp::New)
@@ -149,8 +145,8 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                                 .selectable_label(op == current_op, boolean_op_name(op))
                                 .clicked()
                             {
-                                app_state.lock().queue_action(AppAction::SketchAction(
-                                    SketchAction::UpdateExtrudeBooleanOp { boolean_op: op },
+                                app_state.lock().queue_action(AppAction::SketchUi(
+                                    SketchUiAction::UpdateExtrudeBooleanOp { boolean_op: op },
                                 ));
                             }
                         }
@@ -160,8 +156,7 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
             // Target body selection (only when boolean op is not New)
             let (current_op, current_target, available_bodies) = {
                 let app = app_state.lock();
-                app.cad
-                    .editor_mode
+                app.editor_mode
                     .sketch()
                     .map(|s| {
                         (
@@ -195,8 +190,8 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                                     .selectable_label(current_target == Some(*body_id), body_name)
                                     .clicked()
                                 {
-                                    app_state.lock().queue_action(AppAction::SketchAction(
-                                        SketchAction::UpdateExtrudeTargetBody {
+                                    app_state.lock().queue_action(AppAction::SketchUi(
+                                        SketchUiAction::UpdateExtrudeTargetBody {
                                             target_body: Some(*body_id),
                                         },
                                     ));
@@ -228,12 +223,12 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                 {
                     app_state
                         .lock()
-                        .queue_action(AppAction::SketchAction(SketchAction::ExecuteExtrude));
+                        .queue_action(AppAction::Composite(CompositeAction::ExecuteExtrude));
                 }
                 if ui.button("Cancel").clicked() {
                     app_state
                         .lock()
-                        .queue_action(AppAction::SketchAction(SketchAction::CancelExtrudeDialog));
+                        .queue_action(AppAction::SketchUi(SketchUiAction::CancelExtrudeDialog));
                 }
             });
         });
@@ -257,8 +252,7 @@ pub fn render_dimension_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &
             // Get dialog state
             let (tool_name, current_value) = {
                 let app = app_state.lock();
-                app.cad
-                    .editor_mode
+                app.editor_mode
                     .sketch()
                     .map(|s| {
                         (
@@ -287,8 +281,8 @@ pub fn render_dimension_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &
                     )
                     .changed()
                 {
-                    app_state.lock().queue_action(AppAction::SketchAction(
-                        SketchAction::UpdateDimensionValue { value },
+                    app_state.lock().queue_action(AppAction::SketchUi(
+                        SketchUiAction::UpdateDimensionValue { value },
                     ));
                 }
             });
@@ -298,14 +292,14 @@ pub fn render_dimension_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &
             // OK / Cancel buttons
             ui.horizontal(|ui| {
                 if ui.button("OK").clicked() {
-                    app_state.lock().queue_action(AppAction::SketchAction(
-                        SketchAction::ConfirmDimensionConstraint,
+                    app_state.lock().queue_action(AppAction::Composite(
+                        CompositeAction::ConfirmDimensionConstraint,
                     ));
                 }
                 if ui.button("Cancel").clicked() {
                     app_state
                         .lock()
-                        .queue_action(AppAction::SketchAction(SketchAction::CancelDimensionDialog));
+                        .queue_action(AppAction::SketchUi(SketchUiAction::CancelDimensionDialog));
                 }
             });
         });

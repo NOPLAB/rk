@@ -1,12 +1,10 @@
 //! Sketch mode state types
 
-mod cad_state;
 mod dialogs;
 mod entities;
 mod mode_state;
 mod tools;
 
-pub use cad_state::CadState;
 pub use dialogs::{DimensionDialogState, ExtrudeDialogState, ExtrudeDirection};
 pub use entities::{ConstraintToolState, InProgressEntity};
 pub use mode_state::SketchModeState;
@@ -15,7 +13,7 @@ pub use tools::SketchTool;
 use glam::Vec3;
 use uuid::Uuid;
 
-use rk_cad::{BooleanOp, SketchConstraint, SketchEntity, SketchPlane};
+use rk_cad::{BooleanOp, SketchPlane};
 
 /// Reference plane types for sketch creation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,35 +124,21 @@ impl EditorMode {
     }
 }
 
-/// Actions related to sketch mode
+/// UI-only sketch actions (mode transitions, tools, dialog state).
+/// Domain changes (entities, constraints, features) go through
+/// `rk_engine::Command` instead.
 #[derive(Debug, Clone)]
-pub enum SketchAction {
+pub enum SketchUiAction {
     /// Begin plane selection mode (before creating a sketch)
     BeginPlaneSelection,
     /// Cancel plane selection and return to assembly mode
     CancelPlaneSelection,
-    /// Select a plane and create a new sketch on it
-    SelectPlaneAndCreateSketch { plane: ReferencePlane },
     /// Update hovered plane during plane selection
     SetHoveredPlane { plane: Option<ReferencePlane> },
-    /// Create a new sketch on a plane (direct, without plane selection)
-    CreateSketch { plane: SketchPlane },
-    /// Enter sketch editing mode
+    /// Enter sketch editing mode for an existing sketch
     EditSketch { sketch_id: Uuid },
-    /// Exit sketch editing mode
-    ExitSketchMode,
     /// Set the current tool
     SetTool { tool: SketchTool },
-    /// Add an entity to the sketch
-    AddEntity { entity: SketchEntity },
-    /// Delete selected entities
-    DeleteSelected,
-    /// Add a constraint
-    AddConstraint { constraint: SketchConstraint },
-    /// Delete a constraint
-    DeleteConstraint { constraint_id: Uuid },
-    /// Solve the sketch
-    SolveSketch,
     /// Toggle grid snapping
     ToggleSnap,
     /// Set grid spacing
@@ -173,8 +157,6 @@ pub enum SketchAction {
     ToggleExtrudeProfile { profile_index: usize },
     /// Cancel the extrude dialog
     CancelExtrudeDialog,
-    /// Execute the extrusion with current dialog settings
-    ExecuteExtrude,
     /// Select an entity for constraint tool
     SelectEntityForConstraint { entity_id: Uuid },
     /// Cancel constraint tool selection
@@ -187,14 +169,6 @@ pub enum SketchAction {
     },
     /// Update dimension dialog value
     UpdateDimensionValue { value: f32 },
-    /// Confirm dimension and add constraint
-    ConfirmDimensionConstraint,
     /// Cancel dimension dialog
     CancelDimensionDialog,
-    /// Delete a sketch
-    DeleteSketch { sketch_id: Uuid },
-    /// Delete a feature
-    DeleteFeature { feature_id: Uuid },
-    /// Toggle feature suppression
-    ToggleFeatureSuppression { feature_id: Uuid },
 }

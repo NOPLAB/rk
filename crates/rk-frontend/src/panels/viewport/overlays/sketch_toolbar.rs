@@ -1,6 +1,6 @@
 //! Sketch toolbar and plane selection overlay for the viewport
 
-use crate::state::{AppAction, SharedAppState, SketchAction, SketchTool};
+use crate::state::{AppAction, CompositeAction, SharedAppState, SketchTool, SketchUiAction};
 use crate::theme::palette;
 
 /// Render plane selection hint at the top-center of the viewport
@@ -174,7 +174,7 @@ fn tool_button(
     if ui.add(btn).on_hover_text(tool.name()).clicked() {
         app_state
             .lock()
-            .queue_action(AppAction::SketchAction(SketchAction::SetTool { tool }));
+            .queue_action(AppAction::SketchUi(SketchUiAction::SetTool { tool }));
     }
 }
 
@@ -284,7 +284,7 @@ fn render_operations_tools(ui: &mut egui::Ui, app_state: &SharedAppState) {
         {
             app_state
                 .lock()
-                .queue_action(AppAction::SketchAction(SketchAction::ShowExtrudeDialog));
+                .queue_action(AppAction::SketchUi(SketchUiAction::ShowExtrudeDialog));
         }
 
         // Exit sketch mode button
@@ -292,7 +292,7 @@ fn render_operations_tools(ui: &mut egui::Ui, app_state: &SharedAppState) {
         if ui.add(exit_btn).on_hover_text("Exit sketch mode").clicked() {
             app_state
                 .lock()
-                .queue_action(AppAction::SketchAction(SketchAction::ExitSketchMode));
+                .queue_action(AppAction::Composite(CompositeAction::ExitSketchMode));
         }
     });
 }

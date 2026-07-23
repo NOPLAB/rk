@@ -3,6 +3,7 @@
 use egui::Ui;
 
 use rk_core::JointType;
+use rk_engine::Command;
 
 use crate::panels::Panel;
 use crate::state::{AngleDisplayMode, AppAction, SharedAppState};
@@ -30,11 +31,18 @@ impl Panel for JointListPanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, app_state: &SharedAppState) {
-        let state = app_state.lock();
-        let joints: Vec<_> = state.project.assembly.joints.values().cloned().collect();
-        let joint_positions = state.project.assembly.joint_positions.clone();
-        let angle_mode = state.angle_display_mode;
-        drop(state);
+        let (engine, angle_mode) = {
+            let state = app_state.lock();
+            (state.engine.clone(), state.angle_display_mode)
+        };
+        let (joints, joint_positions) = {
+            let eng = engine.lock();
+            let assembly = eng.assembly();
+            (
+                assembly.joints.values().cloned().collect::<Vec<_>>(),
+                assembly.joint_positions.clone(),
+            )
+        };
 
         if joints.is_empty() {
             ui.weak("No joints in assembly.\nConnect parts to create joints.");
@@ -46,7 +54,7 @@ impl Panel for JointListPanel {
             if ui.button("Reset All").clicked() {
                 app_state
                     .lock()
-                    .queue_action(AppAction::ResetAllJointPositions);
+                    .queue_action(AppAction::Cmd(Command::ResetAllJointPositions));
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -128,15 +136,17 @@ impl JointListPanel {
                             let new_rad = angle_mode.to_radians(display_value);
                             app_state
                                 .lock()
-                                .queue_action(AppAction::UpdateJointPosition {
+                                .queue_action(AppAction::Cmd(Command::SetJointPosition {
                                     joint_id: joint.id,
                                     position: new_rad,
-                                });
+                                }));
                         }
                         if ui.button("R").on_hover_text("Reset to 0").clicked() {
                             app_state
                                 .lock()
-                                .queue_action(AppAction::ResetJointPosition { joint_id: joint.id });
+                                .queue_action(AppAction::Cmd(Command::ResetJointPosition {
+                                    joint_id: joint.id,
+                                }));
                         }
                     });
                 }
@@ -160,15 +170,17 @@ impl JointListPanel {
                             let new_rad = angle_mode.to_radians(display_value);
                             app_state
                                 .lock()
-                                .queue_action(AppAction::UpdateJointPosition {
+                                .queue_action(AppAction::Cmd(Command::SetJointPosition {
                                     joint_id: joint.id,
                                     position: new_rad,
-                                });
+                                }));
                         }
                         if ui.button("R").on_hover_text("Reset to 0").clicked() {
                             app_state
                                 .lock()
-                                .queue_action(AppAction::ResetJointPosition { joint_id: joint.id });
+                                .queue_action(AppAction::Cmd(Command::ResetJointPosition {
+                                    joint_id: joint.id,
+                                }));
                         }
                     });
                 }
@@ -187,15 +199,17 @@ impl JointListPanel {
                         if ui.add(slider).changed() {
                             app_state
                                 .lock()
-                                .queue_action(AppAction::UpdateJointPosition {
+                                .queue_action(AppAction::Cmd(Command::SetJointPosition {
                                     joint_id: joint.id,
                                     position: value,
-                                });
+                                }));
                         }
                         if ui.button("R").on_hover_text("Reset to 0").clicked() {
                             app_state
                                 .lock()
-                                .queue_action(AppAction::ResetJointPosition { joint_id: joint.id });
+                                .queue_action(AppAction::Cmd(Command::ResetJointPosition {
+                                    joint_id: joint.id,
+                                }));
                         }
                     });
                 }

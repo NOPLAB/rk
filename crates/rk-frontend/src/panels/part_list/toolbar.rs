@@ -1,6 +1,7 @@
 //! Toolbar and context menus for part list
 
 use rk_core::StlUnit;
+use rk_engine::Command;
 
 use crate::state::{AppAction, PrimitiveType, SharedAppState};
 
@@ -23,32 +24,22 @@ pub fn render_unit_selector(ui: &mut egui::Ui, app_state: &SharedAppState) {
 /// Show context menu for creating new objects
 pub fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
     ui.menu_button("Import Parts", |ui| {
-        if ui.button("STL...").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("STL files", &["stl", "STL"])
-                .pick_file()
-            {
-                app_state.lock().queue_action(AppAction::ImportMesh(path));
+        for (label, filter_name, exts) in [
+            ("STL...", "STL files", &["stl", "STL"][..]),
+            ("OBJ...", "OBJ files", &["obj", "OBJ"][..]),
+            ("DAE (COLLADA)...", "DAE files", &["dae", "DAE"][..]),
+        ] {
+            if ui.button(label).clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter(filter_name, exts)
+                    .pick_file()
+                {
+                    let mut state = app_state.lock();
+                    let unit = state.stl_import_unit;
+                    state.queue_action(AppAction::Cmd(Command::ImportMesh { path, unit }));
+                }
+                ui.close();
             }
-            ui.close();
-        }
-        if ui.button("OBJ...").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("OBJ files", &["obj", "OBJ"])
-                .pick_file()
-            {
-                app_state.lock().queue_action(AppAction::ImportMesh(path));
-            }
-            ui.close();
-        }
-        if ui.button("DAE (COLLADA)...").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("DAE files", &["dae", "DAE"])
-                .pick_file()
-            {
-                app_state.lock().queue_action(AppAction::ImportMesh(path));
-            }
-            ui.close();
         }
     });
 
@@ -56,26 +47,21 @@ pub fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
 
     // Create Primitives submenu
     ui.menu_button("Create Primitives", |ui| {
-        if ui.button("Box").clicked() {
-            app_state.lock().queue_action(AppAction::CreatePrimitive {
-                primitive_type: PrimitiveType::Box,
-                name: None,
-            });
-            ui.close();
-        }
-        if ui.button("Cylinder").clicked() {
-            app_state.lock().queue_action(AppAction::CreatePrimitive {
-                primitive_type: PrimitiveType::Cylinder,
-                name: None,
-            });
-            ui.close();
-        }
-        if ui.button("Sphere").clicked() {
-            app_state.lock().queue_action(AppAction::CreatePrimitive {
-                primitive_type: PrimitiveType::Sphere,
-                name: None,
-            });
-            ui.close();
+        for primitive_type in [
+            PrimitiveType::Box,
+            PrimitiveType::Cylinder,
+            PrimitiveType::Sphere,
+        ] {
+            if ui.button(primitive_type.name()).clicked() {
+                app_state
+                    .lock()
+                    .queue_action(AppAction::Cmd(Command::CreatePrimitive {
+                        id: None,
+                        primitive: primitive_type.to_spec(),
+                        name: None,
+                    }));
+                ui.close();
+            }
         }
     });
 
@@ -83,7 +69,10 @@ pub fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
     if ui.button("Create Empty...").clicked() {
         app_state
             .lock()
-            .queue_action(AppAction::CreateEmpty { name: None });
+            .queue_action(AppAction::Cmd(Command::CreateEmptyPart {
+                id: None,
+                name: None,
+            }));
         ui.close();
     }
 }

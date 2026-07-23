@@ -1,11 +1,17 @@
 //! Sketch input handling for the viewport
+//!
+//! Drawing keeps its preview state (`InProgressEntity`) purely in UI
+//! state; the finished shape is committed to the engine as a single
+//! `AddSketchEntities` command (one undo step, no orphan points on
+//! cancel).
 
 use glam::Vec2;
 use rk_cad::{Sketch, SketchEntity, SketchPlane};
+use rk_engine::Command;
 use rk_renderer::Camera;
 
 use crate::state::{
-    AppAction, InProgressEntity, SharedAppState, SketchAction, SketchTool, ViewportState,
+    AppAction, InProgressEntity, SharedAppState, SketchTool, SketchUiAction, ViewportState,
 };
 
 /// Convert screen coordinates to sketch 2D coordinates.
@@ -137,23 +143,22 @@ pub fn handle_sketch_mode_input(
         return false;
     };
 
-    // Get sketch info from app state
-    let (sketch_plane, current_tool, snap_to_grid, grid_spacing, active_sketch_id) = {
+    // Get tool state from the UI and the plane from the engine
+    let (engine, current_tool, snap_to_grid, grid_spacing, active_sketch_id) = {
         let app = app_state.lock();
-        let Some(sketch_state) = app.cad.editor_mode.sketch() else {
-            return false;
-        };
-        let sketch_id = sketch_state.active_sketch;
-        let Some(sketch) = app.cad.get_sketch(sketch_id) else {
+        let Some(sketch_state) = app.editor_mode.sketch() else {
             return false;
         };
         (
-            sketch.plane,
+            app.engine.clone(),
             sketch_state.current_tool,
             sketch_state.snap_to_grid,
             sketch_state.grid_spacing,
-            sketch_id,
+            sketch_state.active_sketch,
         )
+    };
+    let Some(sketch_plane) = engine.lock().sketch(active_sketch_id).map(|s| s.plane) else {
+        return false;
     };
 
     // Convert screen position to sketch coordinates
@@ -182,38 +187,16 @@ pub fn handle_sketch_mode_input(
     // Handle mouse move (update preview position for in-progress entities)
     {
         let mut app = app_state.lock();
-
-        // First, collect all the point positions from the sketch
-        let point_positions: std::collections::HashMap<uuid::Uuid, Vec2> =
-            if let Some(sketch) = app.cad.get_sketch(active_sketch_id) {
-                sketch
-                    .entities()
-                    .values()
-                    .filter_map(|entity| {
-                        if let SketchEntity::Point { id, position } = entity {
-                            Some((*id, *position))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            } else {
-                std::collections::HashMap::new()
-            };
-
-        // Now update the in_progress state
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
+        if let Some(sketch_state) = app.editor_mode.sketch_mut() {
             match &mut sketch_state.in_progress {
                 Some(InProgressEntity::Line { preview_end, .. }) => {
                     *preview_end = snapped_pos;
                 }
                 Some(InProgressEntity::Circle {
-                    center_point,
+                    center,
                     preview_radius,
                 }) => {
-                    if let Some(&center_pos) = point_positions.get(center_point) {
-                        *preview_radius = (center_pos - snapped_pos).length();
-                    }
+                    *preview_radius = (*center - snapped_pos).length();
                 }
                 Some(InProgressEntity::Arc { preview_end, .. }) => {
                     *preview_end = snapped_pos;
@@ -228,21 +211,13 @@ pub fn handle_sketch_mode_input(
         }
     }
 
-    // Handle Escape key to cancel in-progress drawing
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Escape or right-click cancels the in-progress drawing (nothing was
+    // committed to the engine, so nothing is left behind)
+    let cancel_requested = ui.input(|i| i.key_pressed(egui::Key::Escape))
+        || response.clicked_by(egui::PointerButton::Secondary);
+    if cancel_requested {
         let mut app = app_state.lock();
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut()
-            && sketch_state.in_progress.is_some()
-        {
-            sketch_state.cancel_drawing();
-            return true;
-        }
-    }
-
-    // Handle right-click to cancel in-progress drawing
-    if response.clicked_by(egui::PointerButton::Secondary) {
-        let mut app = app_state.lock();
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut()
+        if let Some(sketch_state) = app.editor_mode.sketch_mut()
             && sketch_state.in_progress.is_some()
         {
             sketch_state.cancel_drawing();
@@ -254,23 +229,21 @@ pub fn handle_sketch_mode_input(
     if response.clicked_by(egui::PointerButton::Primary) {
         match current_tool {
             SketchTool::Point => {
-                // Create a point at the clicked position
-                let point = SketchEntity::point(snapped_pos);
-                app_state
-                    .lock()
-                    .queue_action(AppAction::SketchAction(SketchAction::AddEntity {
-                        entity: point,
-                    }));
+                commit_entities(
+                    app_state,
+                    active_sketch_id,
+                    vec![SketchEntity::point(snapped_pos)],
+                );
                 return true;
             }
             SketchTool::Line => {
-                return handle_line_tool_click(app_state, snapped_pos);
+                return handle_line_tool_click(app_state, active_sketch_id, snapped_pos);
             }
             SketchTool::RectangleCorner => {
-                return handle_rectangle_tool_click(app_state, snapped_pos);
+                return handle_rectangle_tool_click(app_state, active_sketch_id, snapped_pos);
             }
             SketchTool::CircleCenterRadius => {
-                return handle_circle_tool_click(app_state, snapped_pos);
+                return handle_circle_tool_click(app_state, active_sketch_id, snapped_pos);
             }
             SketchTool::Select => {
                 // TODO: Implement entity selection
@@ -295,200 +268,165 @@ pub fn handle_sketch_mode_input(
     false
 }
 
-/// Handle line tool click.
-/// First click creates start point and starts line preview.
-/// Second click creates end point and the line.
-fn handle_line_tool_click(app_state: &SharedAppState, snapped_pos: Vec2) -> bool {
+/// Queue an atomic add of the given entities to the sketch
+fn commit_entities(
+    app_state: &SharedAppState,
+    sketch_id: uuid::Uuid,
+    entities: Vec<SketchEntity>,
+) {
+    app_state
+        .lock()
+        .queue_action(AppAction::Cmd(Command::AddSketchEntities {
+            sketch_id,
+            entities,
+        }));
+}
+
+/// Run a closure over the in-progress state (if in sketch mode)
+fn with_in_progress(
+    app_state: &SharedAppState,
+    f: impl FnOnce(&mut Option<InProgressEntity>),
+) {
     let mut app = app_state.lock();
-
-    let Some(sketch_state) = app.cad.editor_mode.sketch_mut() else {
-        return false;
-    };
-
-    let active_sketch_id = sketch_state.active_sketch;
-
-    if sketch_state.in_progress.is_none() {
-        // First click: create start point and start line preview
-        let start_point = SketchEntity::point(snapped_pos);
-        let start_id = start_point.id();
-
-        // Add the start point to the sketch
-        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
-            sketch.add_entity(start_point);
-        }
-
-        // Start the line preview
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
-            sketch_state.in_progress = Some(InProgressEntity::Line {
-                start_point: start_id,
-                preview_end: snapped_pos,
-            });
-        }
-
-        true
-    } else if let Some(InProgressEntity::Line { start_point, .. }) =
-        sketch_state.in_progress.clone()
-    {
-        // Second click: create end point and line
-        let end_point = SketchEntity::point(snapped_pos);
-        let end_id = end_point.id();
-
-        let line = SketchEntity::line(start_point, end_id);
-
-        // Add entities to sketch
-        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
-            sketch.add_entity(end_point);
-            sketch.add_entity(line);
-        }
-
-        // Clear in-progress
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
-            sketch_state.in_progress = None;
-        }
-
-        true
-    } else {
-        false
+    if let Some(sketch_state) = app.editor_mode.sketch_mut() {
+        f(&mut sketch_state.in_progress);
     }
 }
 
-/// Handle rectangle tool click (corner mode).
-/// First click sets the first corner.
-/// Second click creates the rectangle.
-fn handle_rectangle_tool_click(app_state: &SharedAppState, snapped_pos: Vec2) -> bool {
-    let mut app = app_state.lock();
-
-    let Some(sketch_state) = app.cad.editor_mode.sketch_mut() else {
-        return false;
+/// Line tool: first click starts the preview, second click commits
+/// start point + end point + line as one command.
+fn handle_line_tool_click(
+    app_state: &SharedAppState,
+    sketch_id: uuid::Uuid,
+    snapped_pos: Vec2,
+) -> bool {
+    let in_progress = {
+        let app = app_state.lock();
+        app.editor_mode.sketch().and_then(|s| s.in_progress.clone())
     };
 
-    let active_sketch_id = sketch_state.active_sketch;
-
-    if sketch_state.in_progress.is_none() {
-        // First click: start rectangle preview
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
-            sketch_state.in_progress = Some(InProgressEntity::Rectangle {
-                corner1: snapped_pos,
-                preview_corner2: snapped_pos,
+    match in_progress {
+        None => {
+            with_in_progress(app_state, |in_progress| {
+                *in_progress = Some(InProgressEntity::Line {
+                    start: snapped_pos,
+                    preview_end: snapped_pos,
+                });
             });
+            true
         }
-        true
-    } else if let Some(InProgressEntity::Rectangle { corner1, .. }) =
-        sketch_state.in_progress.clone()
-    {
-        // Second click: create rectangle
-        let c1 = corner1;
-        let c2 = snapped_pos;
-
-        // Create four corner points
-        let p1 = SketchEntity::point(c1); // bottom-left
-        let p2 = SketchEntity::point(Vec2::new(c2.x, c1.y)); // bottom-right
-        let p3 = SketchEntity::point(c2); // top-right
-        let p4 = SketchEntity::point(Vec2::new(c1.x, c2.y)); // top-left
-
-        let p1_id = p1.id();
-        let p2_id = p2.id();
-        let p3_id = p3.id();
-        let p4_id = p4.id();
-
-        // Create four lines
-        let line1 = SketchEntity::line(p1_id, p2_id);
-        let line2 = SketchEntity::line(p2_id, p3_id);
-        let line3 = SketchEntity::line(p3_id, p4_id);
-        let line4 = SketchEntity::line(p4_id, p1_id);
-
-        // Add all entities
-        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
-            sketch.add_entity(p1);
-            sketch.add_entity(p2);
-            sketch.add_entity(p3);
-            sketch.add_entity(p4);
-            sketch.add_entity(line1);
-            sketch.add_entity(line2);
-            sketch.add_entity(line3);
-            sketch.add_entity(line4);
+        Some(InProgressEntity::Line { start, .. }) => {
+            let start_point = SketchEntity::point(start);
+            let end_point = SketchEntity::point(snapped_pos);
+            let line = SketchEntity::line(start_point.id(), end_point.id());
+            commit_entities(app_state, sketch_id, vec![start_point, end_point, line]);
+            with_in_progress(app_state, |in_progress| *in_progress = None);
+            true
         }
-
-        // Clear in-progress
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
-            sketch_state.in_progress = None;
-        }
-
-        true
-    } else {
-        false
+        Some(_) => false,
     }
 }
 
-/// Handle circle tool click (center-radius mode).
-/// First click sets the center.
-/// Second click sets the radius and creates the circle.
-fn handle_circle_tool_click(app_state: &SharedAppState, snapped_pos: Vec2) -> bool {
-    let mut app = app_state.lock();
-
-    let Some(sketch_state) = app.cad.editor_mode.sketch_mut() else {
-        return false;
+/// Rectangle tool: first click sets the corner, second click commits
+/// 4 points + 4 lines as one command.
+fn handle_rectangle_tool_click(
+    app_state: &SharedAppState,
+    sketch_id: uuid::Uuid,
+    snapped_pos: Vec2,
+) -> bool {
+    let in_progress = {
+        let app = app_state.lock();
+        app.editor_mode.sketch().and_then(|s| s.in_progress.clone())
     };
 
-    let active_sketch_id = sketch_state.active_sketch;
-
-    if sketch_state.in_progress.is_none() {
-        // First click: create center point and start circle preview
-        let center_point = SketchEntity::point(snapped_pos);
-        let center_id = center_point.id();
-
-        // Add center point to sketch
-        if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
-            sketch.add_entity(center_point);
-        }
-
-        // Start circle preview
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
-            sketch_state.in_progress = Some(InProgressEntity::Circle {
-                center_point: center_id,
-                preview_radius: 0.0,
+    match in_progress {
+        None => {
+            with_in_progress(app_state, |in_progress| {
+                *in_progress = Some(InProgressEntity::Rectangle {
+                    corner1: snapped_pos,
+                    preview_corner2: snapped_pos,
+                });
             });
+            true
         }
+        Some(InProgressEntity::Rectangle { corner1, .. }) => {
+            let c1 = corner1;
+            let c2 = snapped_pos;
 
-        true
-    } else if let Some(InProgressEntity::Circle {
-        center_point,
-        preview_radius,
-    }) = sketch_state.in_progress.clone()
-    {
-        // Second click: create circle
-        if preview_radius > 0.001 {
-            let circle = SketchEntity::circle(center_point, preview_radius);
+            let p1 = SketchEntity::point(c1); // bottom-left
+            let p2 = SketchEntity::point(Vec2::new(c2.x, c1.y)); // bottom-right
+            let p3 = SketchEntity::point(c2); // top-right
+            let p4 = SketchEntity::point(Vec2::new(c1.x, c2.y)); // top-left
 
-            if let Some(sketch) = app.cad.get_sketch_mut(active_sketch_id) {
-                sketch.add_entity(circle);
+            let (p1_id, p2_id, p3_id, p4_id) = (p1.id(), p2.id(), p3.id(), p4.id());
+
+            let entities = vec![
+                p1,
+                p2,
+                p3,
+                p4,
+                SketchEntity::line(p1_id, p2_id),
+                SketchEntity::line(p2_id, p3_id),
+                SketchEntity::line(p3_id, p4_id),
+                SketchEntity::line(p4_id, p1_id),
+            ];
+            commit_entities(app_state, sketch_id, entities);
+            with_in_progress(app_state, |in_progress| *in_progress = None);
+            true
+        }
+        Some(_) => false,
+    }
+}
+
+/// Circle tool: first click sets the center, second click commits
+/// center point + circle as one command.
+fn handle_circle_tool_click(
+    app_state: &SharedAppState,
+    sketch_id: uuid::Uuid,
+    snapped_pos: Vec2,
+) -> bool {
+    let in_progress = {
+        let app = app_state.lock();
+        app.editor_mode.sketch().and_then(|s| s.in_progress.clone())
+    };
+
+    match in_progress {
+        None => {
+            with_in_progress(app_state, |in_progress| {
+                *in_progress = Some(InProgressEntity::Circle {
+                    center: snapped_pos,
+                    preview_radius: 0.0,
+                });
+            });
+            true
+        }
+        Some(InProgressEntity::Circle {
+            center,
+            preview_radius,
+        }) => {
+            if preview_radius > 0.001 {
+                let center_point = SketchEntity::point(center);
+                let circle = SketchEntity::circle(center_point.id(), preview_radius);
+                commit_entities(app_state, sketch_id, vec![center_point, circle]);
             }
+            with_in_progress(app_state, |in_progress| *in_progress = None);
+            true
         }
-
-        // Clear in-progress
-        if let Some(sketch_state) = app.cad.editor_mode.sketch_mut() {
-            sketch_state.in_progress = None;
-        }
-
-        true
-    } else {
-        false
+        Some(_) => false,
     }
 }
 
 /// Handle constraint tool click.
-/// Picks entity at click position and queues SelectEntityForConstraint action.
+/// Picks entity at click position and queues SelectEntityForConstraint.
 fn handle_constraint_tool_click(
     app_state: &SharedAppState,
     sketch_pos: Vec2,
     sketch_id: uuid::Uuid,
     tool: SketchTool,
 ) -> bool {
-    // Get sketch for entity picking
-    let sketch = {
-        let app = app_state.lock();
-        app.cad.get_sketch(sketch_id).cloned()
-    };
+    // Snapshot the sketch for entity picking
+    let engine = app_state.lock().engine.clone();
+    let sketch = engine.lock().sketch(sketch_id).cloned();
 
     let Some(sketch) = sketch else {
         return false;
@@ -508,8 +446,8 @@ fn handle_constraint_tool_click(
     }
 
     // Queue the action to process the entity selection
-    app_state.lock().queue_action(AppAction::SketchAction(
-        SketchAction::SelectEntityForConstraint { entity_id },
+    app_state.lock().queue_action(AppAction::SketchUi(
+        SketchUiAction::SelectEntityForConstraint { entity_id },
     ));
 
     true

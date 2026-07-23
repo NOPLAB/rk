@@ -1,129 +1,78 @@
 //! Application state module
+//!
+//! Domain state (project, CAD data, undo history) lives in the engine
+//! (`rk_engine::Engine`); this module holds only UI state — selection,
+//! editor mode, tools, dialogs — plus the action queue.
 
 mod editor;
-mod history;
 mod sketch;
 mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
-pub use history::UndoHistory;
 pub use sketch::{
-    CadState, ConstraintToolState, DimensionDialogState, EditorMode, ExtrudeDialogState,
-    ExtrudeDirection, InProgressEntity, PlaneSelectionState, ReferencePlane, SketchAction,
-    SketchModeState, SketchTool,
+    ConstraintToolState, DimensionDialogState, EditorMode, ExtrudeDialogState, ExtrudeDirection,
+    InProgressEntity, PlaneSelectionState, ReferencePlane, SketchModeState, SketchTool,
+    SketchUiAction,
 };
 pub use viewport::{
     GizmoInteraction, GizmoTransform, PickablePartData, SharedViewportState, ViewportState,
     pick_object,
 };
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use glam::Mat4;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use rk_core::{GeometryType, JointLimits, JointType, Part, Pose, Project, StlUnit};
+use rk_core::StlUnit;
+use rk_engine::{Command, InteractionId, SharedEngine};
 
-/// Actions that can be performed on the app state
+/// Actions queued by UI panels and processed once per frame
 #[derive(Debug, Clone)]
 pub enum AppAction {
-    // File actions (path-based)
-    /// Import a mesh file (STL, OBJ, DAE)
-    ImportMesh(PathBuf),
-    /// Import a URDF file
-    ImportUrdf(PathBuf),
-    /// Save project
-    SaveProject(Option<PathBuf>),
-    /// Load project
-    LoadProject(PathBuf),
-    /// Export URDF with path and robot name
-    ExportUrdf { path: PathBuf, robot_name: String },
-    /// New project
-    NewProject,
-
-    // Part actions
-    /// Create a primitive shape
-    CreatePrimitive {
-        primitive_type: PrimitiveType,
-        name: Option<String>,
-    },
-    /// Create an empty part (no geometry)
-    CreateEmpty { name: Option<String> },
+    // ---- UI-only (no engine involvement) ----
     /// Select a part
     SelectPart(Option<Uuid>),
-    /// Delete selected part
-    DeleteSelectedPart,
-    /// Update part transform
-    UpdatePartTransform { part_id: Uuid, transform: Mat4 },
-
-    // Assembly actions
-    /// Connect two parts
-    ConnectParts { parent: Uuid, child: Uuid },
-    /// Disconnect a part from its parent
-    DisconnectPart { child: Uuid },
-
-    // Joint position actions
-    /// Update a joint position (value in radians for revolute, meters for prismatic)
-    UpdateJointPosition { joint_id: Uuid, position: f32 },
-    /// Reset a joint position to 0
-    ResetJointPosition { joint_id: Uuid },
-    /// Reset all joint positions to 0
-    ResetAllJointPositions,
-
-    // Joint configuration actions
-    /// Update joint type
-    UpdateJointType {
-        joint_id: Uuid,
-        joint_type: JointType,
-    },
-    /// Update joint origin (position/rotation relative to parent)
-    UpdateJointOrigin { joint_id: Uuid, origin: Pose },
-    /// Update joint axis (for revolute/prismatic/continuous)
-    UpdateJointAxis { joint_id: Uuid, axis: glam::Vec3 },
-    /// Update joint limits
-    UpdateJointLimits {
-        joint_id: Uuid,
-        limits: Option<JointLimits>,
-    },
-
-    // Joint editing actions
-    /// Set the joint being edited (for gizmo display)
-    SetEditingJoint(Option<Uuid>),
-
-    // Collision actions
     /// Select a collision element (link_id, collision_index)
     SelectCollision(Option<(Uuid, usize)>),
-    /// Add a collision element to a link
-    AddCollision {
-        link_id: Uuid,
-        geometry: GeometryType,
+    /// Set the joint being edited (for gizmo display)
+    SetEditingJoint(Option<Uuid>),
+    /// Sketch-mode UI actions (tools, dialogs, mode transitions)
+    SketchUi(SketchUiAction),
+
+    // ---- Engine ----
+    /// Forward a command to the engine
+    Cmd(Command),
+    /// Apply a command as part of a drag/edit session (coalesced undo)
+    Interactive {
+        session: InteractionId,
+        cmd: Command,
     },
-    /// Remove a collision element from a link
-    RemoveCollision { link_id: Uuid, index: usize },
-    /// Update collision origin (position/rotation)
-    UpdateCollisionOrigin {
-        link_id: Uuid,
-        index: usize,
-        origin: Pose,
-    },
-    /// Update collision geometry type
-    UpdateCollisionGeometry {
-        link_id: Uuid,
-        index: usize,
-        geometry: GeometryType,
+    /// End a drag/edit session
+    EndInteraction {
+        session: InteractionId,
+        cancel: bool,
     },
 
-    // Sketch/CAD actions
-    /// Execute a sketch action
-    SketchAction(SketchAction),
+    // ---- Mixed UI + engine operations ----
+    Composite(CompositeAction),
+}
 
-    // History actions
-    /// Undo the last action
-    Undo,
-    /// Redo the last undone action
-    Redo,
+/// Operations that combine engine commands with UI state changes
+#[derive(Debug, Clone)]
+pub enum CompositeAction {
+    /// Move camera, create a sketch on the plane, and enter sketch mode
+    SelectPlaneAndCreateSketch { plane: ReferencePlane },
+    /// Solve the active sketch and return to assembly mode
+    ExitSketchMode,
+    /// Delete the selected sketch entities and clear the selection
+    DeleteSelectedSketchEntities,
+    /// Run the extrusion configured in the extrude dialog
+    ExecuteExtrude,
+    /// Add the dimension constraint configured in the dimension dialog
+    ConfirmDimensionConstraint,
+    /// Exit sketch mode if needed, then delete the sketch
+    DeleteSketch { sketch_id: Uuid },
 }
 
 /// Angle display mode for joint sliders
@@ -134,14 +83,13 @@ pub enum AngleDisplayMode {
     Radians,
 }
 
-/// Application state
+/// UI state (the engine owns all domain state)
 pub struct AppState {
-    /// Current project (contains parts, assembly, materials)
-    pub project: Project,
-    /// CAD state (sketches, features, editor mode)
-    pub cad: CadState,
-    /// Undo/redo history
-    pub history: UndoHistory,
+    /// Handle to the engine. Lock briefly, copy what you need, release —
+    /// never hold this guard while locking the viewport.
+    pub engine: SharedEngine,
+    /// Editor mode (assembly / plane selection / sketch)
+    pub editor_mode: EditorMode,
     /// Currently selected part
     pub selected_part: Option<Uuid>,
     /// Currently selected collision element (link_id, collision_index)
@@ -154,10 +102,6 @@ pub struct AppState {
     pub current_tool: EditorTool,
     /// Symmetry mode enabled
     pub symmetry_mode: bool,
-    /// Project file path
-    pub project_path: Option<PathBuf>,
-    /// Has unsaved changes
-    pub modified: bool,
     /// Pending actions
     pending_actions: Vec<AppAction>,
     /// Show axes on selected part
@@ -168,29 +112,6 @@ pub struct AppState {
     pub stl_import_unit: StlUnit,
     /// Angle display mode for joint sliders
     pub angle_display_mode: AngleDisplayMode,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            project: Project::default(),
-            cad: CadState::default(),
-            history: UndoHistory::default(),
-            selected_part: None,
-            selected_collision: None,
-            editing_joint_id: None,
-            hovered_part: None,
-            current_tool: EditorTool::default(),
-            symmetry_mode: false,
-            project_path: None,
-            modified: false,
-            pending_actions: Vec::new(),
-            show_part_axes: true,
-            show_joint_markers: true,
-            stl_import_unit: StlUnit::Millimeters,
-            angle_display_mode: AngleDisplayMode::default(),
-        }
-    }
 }
 
 impl AngleDisplayMode {
@@ -228,32 +149,23 @@ impl AngleDisplayMode {
 }
 
 impl AppState {
-    /// Create a new app state
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add a part (delegates to project)
-    pub fn add_part(&mut self, part: Part) {
-        self.project.add_part(part);
-        self.modified = true;
-    }
-
-    /// Get a part by ID (delegates to project)
-    pub fn get_part(&self, id: Uuid) -> Option<&Part> {
-        self.project.get_part(id)
-    }
-
-    /// Get a mutable part by ID (delegates to project)
-    pub fn get_part_mut(&mut self, id: Uuid) -> Option<&mut Part> {
-        self.modified = true;
-        self.project.get_part_mut(id)
-    }
-
-    /// Remove a part (delegates to project)
-    pub fn remove_part(&mut self, id: Uuid) -> Option<Part> {
-        self.modified = true;
-        self.project.remove_part(id)
+    /// Create a new UI state bound to an engine
+    pub fn new(engine: SharedEngine) -> Self {
+        Self {
+            engine,
+            editor_mode: EditorMode::default(),
+            selected_part: None,
+            selected_collision: None,
+            editing_joint_id: None,
+            hovered_part: None,
+            current_tool: EditorTool::default(),
+            symmetry_mode: false,
+            pending_actions: Vec::new(),
+            show_part_axes: true,
+            show_joint_markers: true,
+            stl_import_unit: StlUnit::Millimeters,
+            angle_display_mode: AngleDisplayMode::default(),
+        }
     }
 
     /// Select a part
@@ -261,6 +173,14 @@ impl AppState {
         self.selected_part = id;
         // Clear joint editing when selecting a part
         self.editing_joint_id = None;
+    }
+
+    /// Clear all selections (after a document reset)
+    pub fn clear_selections(&mut self) {
+        self.selected_part = None;
+        self.selected_collision = None;
+        self.editing_joint_id = None;
+        self.hovered_part = None;
     }
 
     /// Queue an action
@@ -272,35 +192,11 @@ impl AppState {
     pub fn take_pending_actions(&mut self) -> Vec<AppAction> {
         std::mem::take(&mut self.pending_actions)
     }
-
-    /// Reset to a new project
-    pub fn new_project(&mut self) {
-        self.project = Project::default();
-        self.cad = CadState::default();
-        self.history.clear();
-        self.selected_part = None;
-        self.selected_collision = None;
-        self.editing_joint_id = None;
-        self.project_path = None;
-        self.modified = false;
-    }
-
-    /// Load a project
-    pub fn load_project(&mut self, project: Project, path: PathBuf) {
-        self.project = project;
-        self.cad = CadState::default(); // TODO: Load CAD data from project
-        self.history.clear();
-        self.project_path = Some(path);
-        self.selected_part = None;
-        self.selected_collision = None;
-        self.editing_joint_id = None;
-        self.modified = false;
-    }
 }
 
 pub type SharedAppState = Arc<Mutex<AppState>>;
 
-/// Create a new shared app state
-pub fn create_shared_state() -> SharedAppState {
-    Arc::new(Mutex::new(AppState::new()))
+/// Create a new shared app state bound to an engine
+pub fn create_shared_state(engine: SharedEngine) -> SharedAppState {
+    Arc::new(Mutex::new(AppState::new(engine)))
 }

@@ -37,6 +37,15 @@ impl ExtrudeDirection {
             ExtrudeDirection::Symmetric,
         ]
     }
+
+    /// Convert to the engine/CAD representation
+    pub fn to_cad(self) -> rk_cad::ExtrudeDirection {
+        match self {
+            ExtrudeDirection::Positive => rk_cad::ExtrudeDirection::Positive,
+            ExtrudeDirection::Negative => rk_cad::ExtrudeDirection::Negative,
+            ExtrudeDirection::Symmetric => rk_cad::ExtrudeDirection::Symmetric,
+        }
+    }
 }
 
 /// State for the extrude dialog

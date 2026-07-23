@@ -6,8 +6,10 @@
 use egui::{CollapsingHeader, Ui};
 use uuid::Uuid;
 
+use rk_engine::Command;
+
 use crate::panels::Panel;
-use crate::state::{AppAction, SharedAppState, SketchAction};
+use crate::state::{AppAction, CompositeAction, SharedAppState, SketchUiAction};
 use crate::theme::palette;
 
 /// Feature tree panel for CAD modeling
@@ -73,11 +75,16 @@ impl Panel for FeatureTreePanel {
             features,
         ) = {
             let state = app_state.lock();
-            let cad = &state.cad;
+            let engine = state.engine.clone();
+            let is_sketch_mode = state.editor_mode.is_sketch();
+            let is_plane_selection_mode = state.editor_mode.is_plane_selection();
+            let active_sketch = state.editor_mode.sketch().map(|s| s.active_sketch);
+            drop(state);
 
-            let sketches: Vec<SketchInfo> = cad
-                .data
-                .history
+            let eng = engine.lock();
+            let history = &eng.document().cad.history;
+
+            let sketches: Vec<SketchInfo> = history
                 .sketches()
                 .values()
                 .map(|s| SketchInfo {
@@ -88,9 +95,7 @@ impl Panel for FeatureTreePanel {
                 })
                 .collect();
 
-            let features: Vec<FeatureInfo> = cad
-                .data
-                .history
+            let features: Vec<FeatureInfo> = history
                 .features()
                 .map(|f| FeatureInfo {
                     id: f.id(),
@@ -101,9 +106,6 @@ impl Panel for FeatureTreePanel {
                 .collect();
 
             let has_sketches = !sketches.is_empty();
-            let is_sketch_mode = cad.is_sketch_mode();
-            let is_plane_selection_mode = cad.editor_mode.is_plane_selection();
-            let active_sketch = cad.editor_mode.sketch().map(|s| s.active_sketch);
 
             (
                 has_sketches,
@@ -126,7 +128,7 @@ impl Panel for FeatureTreePanel {
             {
                 app_state
                     .lock()
-                    .queue_action(AppAction::SketchAction(SketchAction::BeginPlaneSelection));
+                    .queue_action(AppAction::SketchUi(SketchUiAction::BeginPlaneSelection));
             }
 
             ui.separator();
@@ -151,7 +153,7 @@ impl Panel for FeatureTreePanel {
             if ui.button("Cancel").clicked() {
                 app_state
                     .lock()
-                    .queue_action(AppAction::SketchAction(SketchAction::CancelPlaneSelection));
+                    .queue_action(AppAction::SketchUi(SketchUiAction::CancelPlaneSelection));
             }
         }
 
@@ -188,8 +190,8 @@ impl Panel for FeatureTreePanel {
                                 }
 
                                 if response.double_clicked() && !is_active {
-                                    app_state.lock().queue_action(AppAction::SketchAction(
-                                        SketchAction::EditSketch {
+                                    app_state.lock().queue_action(AppAction::SketchUi(
+                                        SketchUiAction::EditSketch {
                                             sketch_id: sketch.id,
                                         },
                                     ));
@@ -199,14 +201,14 @@ impl Panel for FeatureTreePanel {
                                 let sketch_id = sketch.id;
                                 response.context_menu(|ui| {
                                     if ui.button("Edit").clicked() {
-                                        app_state.lock().queue_action(AppAction::SketchAction(
-                                            SketchAction::EditSketch { sketch_id },
+                                        app_state.lock().queue_action(AppAction::SketchUi(
+                                            SketchUiAction::EditSketch { sketch_id },
                                         ));
                                         ui.close();
                                     }
                                     if ui.button("Delete").clicked() {
-                                        app_state.lock().queue_action(AppAction::SketchAction(
-                                            SketchAction::DeleteSketch { sketch_id },
+                                        app_state.lock().queue_action(AppAction::Composite(
+                                            CompositeAction::DeleteSketch { sketch_id },
                                         ));
                                         ui.close();
                                     }
@@ -256,14 +258,17 @@ impl Panel for FeatureTreePanel {
                                         })
                                         .clicked()
                                     {
-                                        app_state.lock().queue_action(AppAction::SketchAction(
-                                            SketchAction::ToggleFeatureSuppression { feature_id },
+                                        app_state.lock().queue_action(AppAction::Cmd(
+                                            Command::SetFeatureSuppressed {
+                                                feature_id,
+                                                suppressed: !is_suppressed,
+                                            },
                                         ));
                                         ui.close();
                                     }
                                     if ui.button("Delete").clicked() {
-                                        app_state.lock().queue_action(AppAction::SketchAction(
-                                            SketchAction::DeleteFeature { feature_id },
+                                        app_state.lock().queue_action(AppAction::Cmd(
+                                            Command::DeleteFeature { feature_id },
                                         ));
                                         ui.close();
                                     }
@@ -279,7 +284,7 @@ impl Panel for FeatureTreePanel {
             if ui.button("Exit Sketch Mode").clicked() {
                 app_state
                     .lock()
-                    .queue_action(AppAction::SketchAction(SketchAction::ExitSketchMode));
+                    .queue_action(AppAction::Composite(CompositeAction::ExitSketchMode));
             }
         }
     }

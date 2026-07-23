@@ -7,6 +7,8 @@ use rk_core::{JointLimits, JointType, Pose};
 
 use crate::panels::properties::helpers::{rotation_row, vector3_row};
 use crate::panels::properties::{PropertyComponent, PropertyContext};
+use rk_engine::Command;
+
 use crate::state::AppAction;
 
 /// Joint component for editing joints to child parts
@@ -84,10 +86,12 @@ impl PropertyComponent for JointComponent {
                                         .selectable_label(current_type == *jt, jt.display_name())
                                         .clicked()
                                     {
-                                        ctx.pending_actions.push(AppAction::UpdateJointType {
-                                            joint_id: info.joint_id,
-                                            joint_type: *jt,
-                                        });
+                                        ctx.pending_actions.push(AppAction::Cmd(
+                                            Command::SetJointType {
+                                                joint_id: info.joint_id,
+                                                joint_type: *jt,
+                                            },
+                                        ));
                                         changed = true;
                                     }
                                 }
@@ -100,10 +104,13 @@ impl PropertyComponent for JointComponent {
                     let mut pos = info.joint.origin.xyz;
                     if vector3_row(ui, "Position", &mut pos, 0.01) {
                         let origin = Pose::new(pos, info.joint.origin.rpy);
-                        ctx.pending_actions.push(AppAction::UpdateJointOrigin {
-                            joint_id: info.joint_id,
-                            origin,
-                        });
+                        ctx.pending_actions.push(AppAction::Cmd(
+                            Command::SetJointOrigin {
+                                joint_id: info.joint_id,
+                                origin,
+                                keep_child_world_pose: true,
+                            },
+                        ));
                         changed = true;
                     }
 
@@ -120,10 +127,13 @@ impl PropertyComponent for JointComponent {
                             rot_deg[2].to_radians(),
                         ];
                         let origin = Pose::new(info.joint.origin.xyz, rpy);
-                        ctx.pending_actions.push(AppAction::UpdateJointOrigin {
-                            joint_id: info.joint_id,
-                            origin,
-                        });
+                        ctx.pending_actions.push(AppAction::Cmd(
+                            Command::SetJointOrigin {
+                                joint_id: info.joint_id,
+                                origin,
+                                keep_child_world_pose: true,
+                            },
+                        ));
                         changed = true;
                     }
 
@@ -139,10 +149,12 @@ impl PropertyComponent for JointComponent {
                             } else {
                                 Vec3::Z // Default to Z if zero
                             };
-                            ctx.pending_actions.push(AppAction::UpdateJointAxis {
-                                joint_id: info.joint_id,
-                                axis: new_axis,
-                            });
+                            ctx.pending_actions.push(AppAction::Cmd(
+                                Command::SetJointAxis {
+                                    joint_id: info.joint_id,
+                                    axis: new_axis,
+                                },
+                            ));
                             changed = true;
                         }
                     }
@@ -217,15 +229,17 @@ impl PropertyComponent for JointComponent {
                                 lower = lower.to_radians();
                                 upper = upper.to_radians();
                             }
-                            ctx.pending_actions.push(AppAction::UpdateJointLimits {
-                                joint_id: info.joint_id,
-                                limits: Some(JointLimits {
-                                    lower,
-                                    upper,
-                                    effort,
-                                    velocity,
-                                }),
-                            });
+                            ctx.pending_actions.push(AppAction::Cmd(
+                                Command::SetJointLimits {
+                                    joint_id: info.joint_id,
+                                    limits: Some(JointLimits {
+                                        lower,
+                                        upper,
+                                        effort,
+                                        velocity,
+                                    }),
+                                },
+                            ));
                             changed = true;
                         }
                     }

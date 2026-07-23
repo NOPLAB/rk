@@ -140,7 +140,7 @@ pub fn sketch_to_render_data(
 
     // Render in-progress entity preview
     if let Some(in_progress) = in_progress {
-        render_in_progress_preview(&mut render_data, in_progress, &point_positions);
+        render_in_progress_preview(&mut render_data, in_progress);
     }
 
     // Generate constraint icon data (only for active sketch)
@@ -152,62 +152,49 @@ pub fn sketch_to_render_data(
     render_data
 }
 
-/// Render preview for in-progress entities
-fn render_in_progress_preview(
-    render_data: &mut SketchRenderData,
-    in_progress: &InProgressEntity,
-    point_positions: &std::collections::HashMap<uuid::Uuid, Vec2>,
-) {
+/// Render preview for in-progress entities (coordinates live in UI state)
+fn render_in_progress_preview(render_data: &mut SketchRenderData, in_progress: &InProgressEntity) {
     let preview_color = sketch_colors::PREVIEW;
 
     match in_progress {
-        InProgressEntity::Line {
-            start_point,
-            preview_end,
-        } => {
-            if let Some(&start_pos) = point_positions.get(start_point) {
-                render_data.add_line(start_pos, *preview_end, preview_color, 0);
-                // Also draw preview point at the end
-                render_data.add_point(*preview_end, preview_color, 0);
-            }
+        InProgressEntity::Line { start, preview_end } => {
+            render_data.add_line(*start, *preview_end, preview_color, 0);
+            // Also draw preview points at both ends
+            render_data.add_point(*start, preview_color, 0);
+            render_data.add_point(*preview_end, preview_color, 0);
         }
         InProgressEntity::Circle {
-            center_point,
+            center,
             preview_radius,
         } => {
-            if let Some(&center_pos) = point_positions.get(center_point) {
-                render_data.add_circle(center_pos, *preview_radius, preview_color, 0, 64);
-            }
+            render_data.add_point(*center, preview_color, 0);
+            render_data.add_circle(*center, *preview_radius, preview_color, 0, 64);
         }
         InProgressEntity::Arc {
-            center_point,
-            start_point,
+            center,
+            start,
             preview_end,
         } => {
-            if let Some(&center_pos) = point_positions.get(center_point) {
-                if let Some(start_id) = start_point {
-                    if let Some(&start_pos) = point_positions.get(start_id) {
-                        let radius = (start_pos - center_pos).length();
-                        let start_offset = start_pos - center_pos;
-                        let end_offset = *preview_end - center_pos;
-                        let start_angle = start_offset.y.atan2(start_offset.x);
-                        let end_angle = end_offset.y.atan2(end_offset.x);
-                        render_data.add_arc(
-                            center_pos,
-                            radius,
-                            start_angle,
-                            end_angle,
-                            preview_color,
-                            0,
-                            32,
-                        );
-                    }
-                } else {
-                    // Just show a line from center to preview
-                    render_data.add_line(center_pos, *preview_end, preview_color, 0);
-                }
-                render_data.add_point(*preview_end, preview_color, 0);
+            if let Some(start_pos) = start {
+                let radius = (*start_pos - *center).length();
+                let start_offset = *start_pos - *center;
+                let end_offset = *preview_end - *center;
+                let start_angle = start_offset.y.atan2(start_offset.x);
+                let end_angle = end_offset.y.atan2(end_offset.x);
+                render_data.add_arc(
+                    *center,
+                    radius,
+                    start_angle,
+                    end_angle,
+                    preview_color,
+                    0,
+                    32,
+                );
+            } else {
+                // Just show a line from center to preview
+                render_data.add_line(*center, *preview_end, preview_color, 0);
             }
+            render_data.add_point(*preview_end, preview_color, 0);
         }
         InProgressEntity::Rectangle {
             corner1,

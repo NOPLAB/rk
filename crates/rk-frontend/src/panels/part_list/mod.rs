@@ -4,6 +4,8 @@ mod toolbar;
 mod tree;
 
 use std::collections::{HashMap, HashSet};
+
+use rk_engine::Command;
 use uuid::Uuid;
 
 use crate::panels::Panel;
@@ -199,9 +201,11 @@ impl PartListPanel {
                     // Confirm on Enter or when focus is lost
                     if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         if !self.project_name_buffer.trim().is_empty() {
-                            app_state.lock().project.name =
-                                self.project_name_buffer.trim().to_string();
-                            app_state.lock().modified = true;
+                            app_state
+                                .lock()
+                                .queue_action(AppAction::Cmd(Command::RenameProject {
+                                    name: self.project_name_buffer.trim().to_string(),
+                                }));
                         }
                         self.editing_project_name = false;
                     }
@@ -257,23 +261,28 @@ impl Panel for PartListPanel {
         ui.separator();
 
         // Collect state data
-        let state = app_state.lock();
-        let selected_id = state.selected_part;
-        let project_name = state.project.name.clone();
-
-        // Build tree structure from Assembly
-        let (root_parts, children_map, parts_with_parent) = build_tree_structure(&state);
-
-        // Collect part names for display
-        let part_names: HashMap<Uuid, String> = state
-            .project
-            .parts()
-            .iter()
-            .map(|(id, p)| (*id, p.name.clone()))
-            .collect();
-
-        let is_empty = state.project.parts().is_empty();
-        drop(state);
+        let (engine, selected_id) = {
+            let state = app_state.lock();
+            (state.engine.clone(), state.selected_part)
+        };
+        let (project_name, root_parts, children_map, parts_with_parent, part_names, is_empty) = {
+            let eng = engine.lock();
+            let project = eng.project();
+            let (root_parts, children_map, parts_with_parent) = build_tree_structure(project);
+            let part_names: HashMap<Uuid, String> = project
+                .parts()
+                .iter()
+                .map(|(id, p)| (*id, p.name.clone()))
+                .collect();
+            (
+                project.name.clone(),
+                root_parts,
+                children_map,
+                parts_with_parent,
+                part_names,
+                project.parts().is_empty(),
+            )
+        };
 
         // Reset drop targets each frame
         self.drop_target = None;
@@ -329,10 +338,7 @@ impl Panel for PartListPanel {
                 if let Some(target_id) = self.drop_target {
                     // Dropped on another part - connect
                     if dragged_id != target_id {
-                        let state = app_state.lock();
-                        let can_conn = can_connect(&state, target_id, dragged_id);
-                        drop(state);
-
+                        let can_conn = can_connect(engine.lock().project(), target_id, dragged_id);
                         if can_conn {
                             actions.push(TreeAction::Connect {
                                 parent: target_id,
@@ -342,17 +348,16 @@ impl Panel for PartListPanel {
                     }
                 } else {
                     // Dropped outside (no target) - disconnect if has parent
-                    let state = app_state.lock();
-                    let has_parent = state
-                        .project
-                        .assembly
-                        .links
-                        .iter()
-                        .find(|(_, l)| l.part_id == Some(dragged_id))
-                        .and_then(|(link_id, _)| state.project.assembly.parent.get(link_id))
-                        .is_some();
-                    drop(state);
-
+                    let has_parent = {
+                        let eng = engine.lock();
+                        let assembly = &eng.project().assembly;
+                        assembly
+                            .links
+                            .iter()
+                            .find(|(_, l)| l.part_id == Some(dragged_id))
+                            .and_then(|(link_id, _)| assembly.parent.get(link_id))
+                            .is_some()
+                    };
                     if has_parent {
                         actions.push(TreeAction::Disconnect(dragged_id));
                     }
@@ -365,28 +370,25 @@ impl Panel for PartListPanel {
 
         // Process collected actions
         for action in actions {
+            let mut state = app_state.lock();
             match action {
                 TreeAction::Select(id) => {
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::SelectPart(Some(id)));
+                    state.queue_action(AppAction::SelectPart(Some(id)));
                 }
                 TreeAction::Delete(id) => {
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::SelectPart(Some(id)));
-                    app_state.lock().queue_action(AppAction::DeleteSelectedPart);
+                    state.queue_action(AppAction::Cmd(Command::DeletePart { part_id: id }));
                 }
                 TreeAction::Disconnect(id) => {
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::DisconnectPart { child: id });
+                    state.queue_action(AppAction::Cmd(Command::DisconnectPart {
+                        child_part: id,
+                    }));
                 }
                 TreeAction::Connect { parent, child } => {
-                    // ConnectParts handler will disconnect existing parent if needed
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::ConnectParts { parent, child });
+                    // The engine disconnects an existing parent if needed
+                    state.queue_action(AppAction::Cmd(Command::ConnectParts {
+                        parent_part: parent,
+                        child_part: child,
+                    }));
                 }
             }
         }

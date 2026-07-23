@@ -48,6 +48,9 @@ fn all_commands() -> Vec<Command> {
             path: PathBuf::from("out"),
             robot_name: "robot".into(),
         },
+        Command::RenameProject {
+            name: "renamed".into(),
+        },
         Command::CreatePrimitive {
             id: Some(id()),
             primitive: PrimitiveSpec::Box {
@@ -84,6 +87,10 @@ fn all_commands() -> Vec<Command> {
         Command::SetPartColor {
             part_id: id(),
             color: [0.1, 0.2, 0.3, 1.0],
+        },
+        Command::SetPartMaterial {
+            part_id: id(),
+            material_name: Some("steel".into()),
         },
         Command::SetPartMass {
             part_id: id(),
@@ -276,9 +283,10 @@ fn assert_command_coverage(cmd: &Command) {
     use Command::*;
     match cmd {
         NewDocument | LoadDocument { .. } | SaveDocument { .. } | ImportMesh { .. }
-        | ImportUrdf { .. } | ExportUrdf { .. } | CreatePrimitive { .. }
+        | ImportUrdf { .. } | ExportUrdf { .. } | RenameProject { .. } | CreatePrimitive { .. }
         | CreateEmptyPart { .. } | DeletePart { .. } | RenamePart { .. }
-        | SetPartTransform { .. } | SetPartColor { .. } | SetPartMass { .. }
+        | SetPartTransform { .. } | SetPartColor { .. } | SetPartMaterial { .. }
+        | SetPartMass { .. }
         | SetPartInertia { .. } | ConnectParts { .. } | DisconnectPart { .. }
         | SetJointPosition { .. } | ResetJointPosition { .. } | ResetAllJointPositions
         | SetJointType { .. } | SetJointOrigin { .. } | SetJointAxis { .. }

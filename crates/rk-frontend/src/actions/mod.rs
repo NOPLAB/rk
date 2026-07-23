@@ -1,115 +1,84 @@
-//! Action handling module
+//! Action dispatch
 //!
-//! This module contains the action dispatch system for the URDF editor.
-//! Actions are queued in AppState and processed each frame.
+//! Panels queue `AppAction`s; once per frame they are dispatched here.
+//! UI actions mutate `AppState` directly, engine actions go through
+//! `Engine::apply` and return events that `crate::sync` turns into
+//! renderer updates.
 
-mod assembly;
-mod file;
-mod history;
-mod part;
-mod sketch;
+mod composite;
+mod constraints;
+mod ui;
 
-use std::sync::Arc;
-
-use rk_cad::CadKernel;
+use rk_engine::{Event, SharedEngine};
 
 use crate::state::{AppAction, SharedAppState, SharedViewportState};
 
-pub use assembly::handle_assembly_action;
-pub use file::handle_file_action;
-pub use history::{handle_redo, handle_undo};
-pub use part::handle_part_action;
-pub use sketch::handle_sketch_action;
-
-/// Shared CAD kernel for geometry operations
-pub type SharedKernel = Arc<dyn CadKernel>;
-
-/// Context for action handlers
+/// Context passed to action handlers
 pub struct ActionContext<'a> {
     pub app_state: &'a SharedAppState,
     pub viewport_state: &'a Option<SharedViewportState>,
-    pub kernel: &'a SharedKernel,
 }
 
 impl<'a> ActionContext<'a> {
     pub fn new(
         app_state: &'a SharedAppState,
         viewport_state: &'a Option<SharedViewportState>,
-        kernel: &'a SharedKernel,
     ) -> Self {
         Self {
             app_state,
             viewport_state,
-            kernel,
+        }
+    }
+
+    /// Clone the engine handle out of the app state (so no app_state
+    /// guard is held while the engine is locked)
+    pub fn engine(&self) -> SharedEngine {
+        self.app_state.lock().engine.clone()
+    }
+
+    /// Apply a command, collecting events; returns false on error
+    pub fn apply(&self, cmd: rk_engine::Command, events: &mut Vec<Event>) -> bool {
+        match self.engine().lock().apply(cmd) {
+            Ok(evts) => {
+                events.extend(evts);
+                true
+            }
+            Err(e) => {
+                tracing::error!("engine command failed: {e}");
+                false
+            }
         }
     }
 }
 
-/// Dispatch an action to the appropriate handler
-pub fn dispatch_action(action: AppAction, ctx: &ActionContext) {
-    // Save state before undoable actions
-    if action.is_undoable() {
-        let mut state = ctx.app_state.lock();
-        let project = state.project.clone();
-        let cad = state.cad.clone();
-        let description = action.description();
-        state.history.save_state(&project, &cad, description);
-    }
-
+/// Dispatch an action, accumulating engine events for the caller to sync
+pub fn dispatch_action(action: AppAction, ctx: &ActionContext, events: &mut Vec<Event>) {
     match action {
-        // File actions
-        AppAction::ImportMesh(_)
-        | AppAction::ImportUrdf(_)
-        | AppAction::SaveProject(_)
-        | AppAction::LoadProject(_)
-        | AppAction::ExportUrdf { .. }
-        | AppAction::NewProject => {
-            handle_file_action(action, ctx);
+        AppAction::SelectPart(part_id) => ui::handle_select_part(part_id, ctx),
+        AppAction::SelectCollision(selection) => {
+            ctx.app_state.lock().selected_collision = selection;
+        }
+        AppAction::SetEditingJoint(joint_id) => {
+            ctx.app_state.lock().editing_joint_id = joint_id;
+        }
+        AppAction::SketchUi(action) => ui::handle_sketch_ui(action, ctx, events),
+
+        AppAction::Cmd(cmd) => {
+            ctx.apply(cmd, events);
+        }
+        AppAction::Interactive { session, cmd } => {
+            match ctx.engine().lock().apply_interactive(session, cmd) {
+                Ok(evts) => events.extend(evts),
+                Err(e) => tracing::error!("interactive command failed: {e}"),
+            }
+        }
+        AppAction::EndInteraction { session, cancel } => {
+            match ctx.engine().lock().end_interaction(session, cancel) {
+                Ok(evts) => events.extend(evts),
+                Err(e) => tracing::error!("end_interaction failed: {e}"),
+            }
         }
 
-        // Part actions
-        AppAction::CreatePrimitive { .. }
-        | AppAction::CreateEmpty { .. }
-        | AppAction::SelectPart(_)
-        | AppAction::DeleteSelectedPart
-        | AppAction::UpdatePartTransform { .. } => {
-            handle_part_action(action, ctx);
-        }
-
-        // Assembly actions
-        AppAction::ConnectParts { .. }
-        | AppAction::DisconnectPart { .. }
-        | AppAction::UpdateJointPosition { .. }
-        | AppAction::ResetJointPosition { .. }
-        | AppAction::ResetAllJointPositions
-        | AppAction::UpdateJointType { .. }
-        | AppAction::UpdateJointOrigin { .. }
-        | AppAction::UpdateJointAxis { .. }
-        | AppAction::UpdateJointLimits { .. }
-        | AppAction::SetEditingJoint(_) => {
-            handle_assembly_action(action, ctx);
-        }
-
-        // Collision actions
-        AppAction::SelectCollision(_)
-        | AppAction::AddCollision { .. }
-        | AppAction::RemoveCollision { .. }
-        | AppAction::UpdateCollisionOrigin { .. }
-        | AppAction::UpdateCollisionGeometry { .. } => {
-            handle_assembly_action(action, ctx);
-        }
-
-        // Sketch/CAD actions
-        AppAction::SketchAction(_) => {
-            handle_sketch_action(action, ctx);
-        }
-
-        // History actions
-        AppAction::Undo => {
-            handle_undo(ctx);
-        }
-        AppAction::Redo => {
-            handle_redo(ctx);
-        }
+        AppAction::Composite(action) => composite::handle_composite(action, ctx, events),
     }
 }

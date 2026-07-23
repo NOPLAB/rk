@@ -163,6 +163,10 @@ impl Engine {
             ImportMesh { path, unit } => self.exec_import_mesh(path, unit, events),
             ImportUrdf { path, stl_unit } => self.exec_import_urdf(path, stl_unit, events),
             ExportUrdf { path, robot_name } => self.exec_export_urdf(path, robot_name),
+            RenameProject { name } => {
+                self.doc.project.name = name;
+                Ok(())
+            }
 
             CreatePrimitive {
                 id,
@@ -176,6 +180,10 @@ impl Engine {
                 self.exec_set_part_transform(part_id, transform, events)
             }
             SetPartColor { part_id, color } => self.exec_set_part_color(part_id, color, events),
+            SetPartMaterial {
+                part_id,
+                material_name,
+            } => self.exec_set_part_material(part_id, material_name, events),
             SetPartMass { part_id, mass } => self.exec_set_part_mass(part_id, mass, events),
             SetPartInertia { part_id, inertia } => {
                 self.exec_set_part_inertia(part_id, inertia, events)

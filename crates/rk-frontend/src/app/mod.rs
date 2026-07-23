@@ -10,7 +10,9 @@ use std::sync::Arc;
 use egui_dock::{DockArea, DockState, Style};
 use parking_lot::Mutex;
 
-use crate::actions::{ActionContext, SharedKernel, dispatch_action};
+use rk_engine::{Command, Engine, SharedEngine};
+
+use crate::actions::{ActionContext, dispatch_action};
 use crate::config::{SharedConfig, create_shared_config};
 use crate::fonts::configure_fonts;
 use crate::panels::PreferencesPanel;
@@ -31,8 +33,6 @@ pub struct UrdfEditorApp {
     dock_state: DockState<PanelType>,
     app_state: SharedAppState,
     viewport_state: Option<SharedViewportState>,
-    /// CAD kernel for geometry operations
-    kernel: SharedKernel,
     update_status: SharedUpdateStatus,
     /// Whether the update notification has been dismissed
     update_dismissed: bool,
@@ -52,8 +52,10 @@ impl UrdfEditorApp {
         // Configure fonts with Noto Sans as default
         configure_fonts(&cc.egui_ctx);
 
-        // Initialize CAD kernel
-        let kernel: SharedKernel = Arc::from(rk_cad::default_kernel());
+        // Initialize the engine (owns the CAD kernel and all domain state)
+        let engine: SharedEngine = Arc::new(Mutex::new(Engine::new(Arc::from(
+            rk_cad::default_kernel(),
+        ))));
 
         // Load configuration
         let config = create_shared_config();
@@ -83,7 +85,7 @@ impl UrdfEditorApp {
         });
 
         // Create app state and apply editor config
-        let app_state = create_shared_state();
+        let app_state = create_shared_state(engine.clone());
         {
             let cfg = config.read();
             let mut state = app_state.lock();
@@ -110,7 +112,6 @@ impl UrdfEditorApp {
             dock_state,
             app_state,
             viewport_state,
-            kernel,
             update_status,
             update_dismissed: false,
             welcome_dialog: WelcomeDialog::new(is_first_launch),
@@ -120,14 +121,19 @@ impl UrdfEditorApp {
         }
     }
 
-    /// Process pending actions
+    /// Process pending actions and sync the resulting engine events
     fn process_actions(&mut self) {
         let actions = self.app_state.lock().take_pending_actions();
-        let ctx = ActionContext::new(&self.app_state, &self.viewport_state, &self.kernel);
-
-        for action in actions {
-            dispatch_action(action, &ctx);
+        if actions.is_empty() {
+            return;
         }
+        let ctx = ActionContext::new(&self.app_state, &self.viewport_state);
+
+        let mut events = Vec::new();
+        for action in actions {
+            dispatch_action(action, &ctx, &mut events);
+        }
+        crate::sync::apply_events(&events, &self.app_state, &self.viewport_state);
     }
 
     /// Handle global keyboard shortcuts
@@ -135,13 +141,17 @@ impl UrdfEditorApp {
         ctx.input(|i| {
             // Ctrl+Z: Undo
             if i.modifiers.ctrl && i.key_pressed(egui::Key::Z) && !i.modifiers.shift {
-                self.app_state.lock().queue_action(AppAction::Undo);
+                self.app_state
+                    .lock()
+                    .queue_action(AppAction::Cmd(Command::Undo));
             }
             // Ctrl+Y or Ctrl+Shift+Z: Redo
             if (i.modifiers.ctrl && i.key_pressed(egui::Key::Y))
                 || (i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::Z))
             {
-                self.app_state.lock().queue_action(AppAction::Redo);
+                self.app_state
+                    .lock()
+                    .queue_action(AppAction::Cmd(Command::Redo));
             }
         });
     }

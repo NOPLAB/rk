@@ -29,6 +29,7 @@ pub enum Command {
     /// Replaces the current document with the imported robot
     ImportUrdf { path: PathBuf, stl_unit: StlUnit },
     ExportUrdf { path: PathBuf, robot_name: String },
+    RenameProject { name: String },
 
     // ---- Part ----
     CreatePrimitive {
@@ -44,6 +45,10 @@ pub enum Command {
     RenamePart { part_id: Uuid, name: String },
     SetPartTransform { part_id: Uuid, transform: Mat4 },
     SetPartColor { part_id: Uuid, color: [f32; 4] },
+    SetPartMaterial {
+        part_id: Uuid,
+        material_name: Option<String>,
+    },
     SetPartMass { part_id: Uuid, mass: f32 },
     SetPartInertia { part_id: Uuid, inertia: InertiaMatrix },
 
@@ -226,12 +231,14 @@ impl Command {
             Command::ImportMesh { .. } => "Import Mesh",
             Command::ImportUrdf { .. } => "Import URDF",
             Command::ExportUrdf { .. } => "Export URDF",
+            Command::RenameProject { .. } => "Rename Project",
             Command::CreatePrimitive { .. } => "Create Primitive",
             Command::CreateEmptyPart { .. } => "Create Empty Part",
             Command::DeletePart { .. } => "Delete Part",
             Command::RenamePart { .. } => "Rename Part",
             Command::SetPartTransform { .. } => "Move Part",
             Command::SetPartColor { .. } => "Change Part Color",
+            Command::SetPartMaterial { .. } => "Change Part Material",
             Command::SetPartMass { .. } => "Change Part Mass",
             Command::SetPartInertia { .. } => "Change Part Inertia",
             Command::ConnectParts { .. } => "Connect Parts",

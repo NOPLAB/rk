@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::state::AppState;
+use rk_core::Project;
 
 /// Actions collected during tree rendering
 pub enum TreeAction {
@@ -21,9 +21,9 @@ pub enum TreeAction {
 /// - parts_with_parent: Set of parts that have a parent
 #[allow(clippy::type_complexity)]
 pub fn build_tree_structure(
-    state: &AppState,
+    project: &Project,
 ) -> (Vec<Uuid>, HashMap<Uuid, Vec<Uuid>>, HashSet<Uuid>) {
-    let assembly = &state.project.assembly;
+    let assembly = &project.assembly;
 
     // Map link_id -> part_id (only for links with parts)
     let link_to_part: HashMap<Uuid, Uuid> = assembly
@@ -64,8 +64,7 @@ pub fn build_tree_structure(
     // This includes:
     // 1. Parts with a link but no parent (top of their hierarchy)
     // 2. Parts without a link (newly imported, not yet connected)
-    let root_parts: Vec<Uuid> = state
-        .project
+    let root_parts: Vec<Uuid> = project
         .parts()
         .keys()
         .filter(|part_id| {
@@ -84,12 +83,12 @@ pub fn build_tree_structure(
 }
 
 /// Check if connecting parent to child would be valid (no cycle)
-pub fn can_connect(state: &AppState, parent_part: Uuid, child_part: Uuid) -> bool {
+pub fn can_connect(project: &Project, parent_part: Uuid, child_part: Uuid) -> bool {
     if parent_part == child_part {
         return false;
     }
 
-    let assembly = &state.project.assembly;
+    let assembly = &project.assembly;
 
     // Find link IDs
     let parent_link = assembly

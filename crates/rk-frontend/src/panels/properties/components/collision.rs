@@ -4,6 +4,8 @@ use egui::{DragValue, Ui};
 
 use rk_core::{GeometryType, Pose};
 
+use rk_engine::Command;
+
 use crate::panels::properties::helpers::{rotation_row, vector3_row};
 use crate::panels::properties::{PropertyComponent, PropertyContext};
 use crate::state::AppAction;
@@ -48,12 +50,13 @@ impl PropertyComponent for CollisionComponent {
             ui.label(format!("{} collision(s)", ctx.collisions.len()));
             if ui.button("+ Add").clicked() {
                 // Add a default box collision
-                ctx.pending_actions.push(AppAction::AddCollision {
+                ctx.pending_actions.push(AppAction::Cmd(Command::AddCollision {
                     link_id,
                     geometry: GeometryType::Box {
                         size: [0.1, 0.1, 0.1],
                     },
-                });
+                    origin: Pose::default(),
+                }));
                 changed = true;
             }
         });
@@ -90,11 +93,12 @@ impl PropertyComponent for CollisionComponent {
                     let mut pos = collision.origin.xyz;
                     if vector3_row(ui, "Position", &mut pos, 0.01) {
                         let origin = Pose::new(pos, collision.origin.rpy);
-                        ctx.pending_actions.push(AppAction::UpdateCollisionOrigin {
-                            link_id,
-                            index,
-                            origin,
-                        });
+                        ctx.pending_actions
+                            .push(AppAction::Cmd(Command::SetCollisionOrigin {
+                                link_id,
+                                index,
+                                origin,
+                            }));
                         changed = true;
                     }
 
@@ -111,11 +115,12 @@ impl PropertyComponent for CollisionComponent {
                             rot_deg[2].to_radians(),
                         ];
                         let origin = Pose::new(collision.origin.xyz, rpy);
-                        ctx.pending_actions.push(AppAction::UpdateCollisionOrigin {
-                            link_id,
-                            index,
-                            origin,
-                        });
+                        ctx.pending_actions
+                            .push(AppAction::Cmd(Command::SetCollisionOrigin {
+                                link_id,
+                                index,
+                                origin,
+                            }));
                         changed = true;
                     }
 
@@ -123,11 +128,11 @@ impl PropertyComponent for CollisionComponent {
                     ui.add_space(4.0);
                     if let Some(new_geometry) = render_geometry_editor(ui, &collision.geometry) {
                         ctx.pending_actions
-                            .push(AppAction::UpdateCollisionGeometry {
+                            .push(AppAction::Cmd(Command::SetCollisionGeometry {
                                 link_id,
                                 index,
                                 geometry: new_geometry,
-                            });
+                            }));
                         changed = true;
                     }
 
@@ -143,7 +148,7 @@ impl PropertyComponent for CollisionComponent {
         // Handle removal
         if let Some(index) = remove_index {
             ctx.pending_actions
-                .push(AppAction::RemoveCollision { link_id, index });
+                .push(AppAction::Cmd(Command::RemoveCollision { link_id, index }));
             changed = true;
         }
 

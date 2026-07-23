@@ -119,6 +119,18 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn exec_set_part_material(
+        &mut self,
+        part_id: Uuid,
+        material_name: Option<String>,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let part = self.part_mut(part_id)?;
+        part.material_name = material_name;
+        events.push(Event::PartAppearanceChanged { part_id });
+        Ok(())
+    }
+
     pub(crate) fn exec_set_part_mass(
         &mut self,
         part_id: Uuid,

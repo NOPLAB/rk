@@ -5,14 +5,18 @@ mod plane_picking;
 mod sketch_input;
 mod sketch_rendering;
 
+use std::collections::HashMap;
+
 use glam::{Mat4, Vec3};
+use rk_engine::{Command, InteractionId};
 use rk_renderer::{GizmoAxis, GizmoMode, GizmoSpace, SketchRenderData, plane_ids};
+use uuid::Uuid;
 
 use crate::config::SharedConfig;
 use crate::panels::Panel;
 use crate::state::{
-    AppAction, GizmoTransform, PickablePartData, ReferencePlane, SharedAppState,
-    SharedViewportState, SketchAction, pick_object,
+    AppAction, CompositeAction, GizmoTransform, PickablePartData, ReferencePlane, SharedAppState,
+    SharedViewportState, pick_object,
 };
 use crate::theme::palette;
 
@@ -44,6 +48,8 @@ pub struct ViewportPanel {
     gizmo_collapsed: bool,
     /// Camera toolbar collapsed state
     camera_collapsed: bool,
+    /// Active gizmo drag session (one undo step per drag)
+    gizmo_session: Option<InteractionId>,
 }
 
 impl ViewportPanel {
@@ -54,6 +60,7 @@ impl ViewportPanel {
             show_camera_settings: false,
             gizmo_collapsed: false,
             camera_collapsed: false,
+            gizmo_session: None,
         }
     }
 }
@@ -157,7 +164,7 @@ impl Panel for ViewportPanel {
             // Check if we're in plane selection mode
             let is_plane_selection_mode = {
                 let app = app_state.lock();
-                app.cad.editor_mode.is_plane_selection()
+                app.editor_mode.is_plane_selection()
             };
 
             // Enable/disable plane selector based on editor mode
@@ -170,24 +177,27 @@ impl Panel for ViewportPanel {
                 Vec<SketchRenderData>,
                 Option<(Vec<rk_renderer::ConstraintIconData>, Mat4)>,
             ) = {
-                let app = app_state.lock();
-                let cad = &app.cad;
-
                 // Get selected entities and in-progress state if in sketch mode
-                let (selected_entities, in_progress, active_sketch_id) =
-                    if let Some(sketch_state) = cad.editor_mode.sketch() {
-                        (
-                            sketch_state.selected_entities.clone(),
-                            sketch_state.in_progress.clone(),
-                            Some(sketch_state.active_sketch),
-                        )
-                    } else {
-                        (Vec::new(), None, None)
-                    };
+                let (engine, selected_entities, in_progress, active_sketch_id) = {
+                    let app = app_state.lock();
+                    let (selected, in_progress, active) =
+                        if let Some(sketch_state) = app.editor_mode.sketch() {
+                            (
+                                sketch_state.selected_entities.clone(),
+                                sketch_state.in_progress.clone(),
+                                Some(sketch_state.active_sketch),
+                            )
+                        } else {
+                            (Vec::new(), None, None)
+                        };
+                    (app.engine.clone(), selected, in_progress, active)
+                };
 
                 // Convert all sketches to render data
-                let render_data: Vec<SketchRenderData> = cad
-                    .data
+                let eng = engine.lock();
+                let render_data: Vec<SketchRenderData> = eng
+                    .document()
+                    .cad
                     .history
                     .sketches()
                     .values()
@@ -219,7 +229,7 @@ impl Panel for ViewportPanel {
             // Update preview mesh for extrude preview
             {
                 let app = app_state.lock();
-                if let Some(sketch_state) = app.cad.editor_mode.sketch() {
+                if let Some(sketch_state) = app.editor_mode.sketch() {
                     if sketch_state.extrude_dialog.open {
                         if let Some(ref preview_mesh) = sketch_state.extrude_dialog.preview_mesh {
                             // The preview mesh is already in world coordinates
@@ -245,9 +255,19 @@ impl Panel for ViewportPanel {
 
             // Update collision instances
             {
-                let app = app_state.lock();
-                let selected_collision = app.selected_collision;
-                vp_state.update_collisions(app.project.assembly.links.iter(), selected_collision);
+                let (engine, selected_collision) = {
+                    let app = app_state.lock();
+                    (app.engine.clone(), app.selected_collision)
+                };
+                let links: Vec<(Uuid, rk_core::Link)> = engine
+                    .lock()
+                    .assembly()
+                    .links
+                    .iter()
+                    .map(|(id, link)| (*id, link.clone()))
+                    .collect();
+                vp_state
+                    .update_collisions(links.iter().map(|(id, link)| (id, link)), selected_collision);
             }
 
             vp_state.render();
@@ -273,7 +293,7 @@ impl Panel for ViewportPanel {
         // Check if in plane selection mode
         let is_plane_selection = {
             let app = app_state.lock();
-            app.cad.editor_mode.is_plane_selection()
+            app.editor_mode.is_plane_selection()
         };
 
         // Handle plane selection mode
@@ -295,8 +315,8 @@ impl Panel for ViewportPanel {
                 && let Some(plane) = hovered_plane
             {
                 drop(vp_state);
-                app_state.lock().queue_action(AppAction::SketchAction(
-                    SketchAction::SelectPlaneAndCreateSketch { plane },
+                app_state.lock().queue_action(AppAction::Composite(
+                    CompositeAction::SelectPlaneAndCreateSketch { plane },
                 ));
                 vp_state = viewport_state.lock();
             }
@@ -305,7 +325,7 @@ impl Panel for ViewportPanel {
         // Check if in sketch mode
         let is_sketch_mode = {
             let app = app_state.lock();
-            app.cad.editor_mode.is_sketch()
+            app.editor_mode.is_sketch()
         };
 
         // Handle sketch mode input
@@ -362,23 +382,34 @@ impl Panel for ViewportPanel {
             // End drag
             if response.drag_stopped_by(egui::PointerButton::Primary) {
                 vp_state.end_gizmo_drag();
+                if let Some(session) = self.gizmo_session.take() {
+                    let engine = app_state.lock().engine.clone();
+                    if let Err(e) = engine.lock().end_interaction(session, false) {
+                        tracing::error!("end_interaction failed: {e}");
+                    }
+                }
             }
 
             // Object picking on click (only if not interacting with gizmo)
             if response.clicked_by(egui::PointerButton::Primary)
                 && self.hovered_axis == GizmoAxis::None
             {
-                // Gather pickable part data from app_state
+                // Gather pickable part data from the engine, using the
+                // same transforms the renderer displays
                 let pickable_parts: Vec<PickablePartData> = {
-                    let app = app_state.lock();
-                    app.project
-                        .parts()
-                        .values()
+                    let engine = app_state.lock().engine.clone();
+                    let eng = engine.lock();
+                    let transforms: HashMap<Uuid, Mat4> =
+                        eng.part_render_transforms().into_iter().collect();
+                    eng.parts()
                         .map(|part| PickablePartData {
                             id: part.id,
                             vertices: part.vertices.clone(),
                             indices: part.indices.clone(),
-                            transform: part.origin_transform,
+                            transform: transforms
+                                .get(&part.id)
+                                .copied()
+                                .unwrap_or(part.origin_transform),
                             bbox_min: part.bbox_min,
                             bbox_max: part.bbox_max,
                         })
@@ -404,240 +435,125 @@ impl Panel for ViewportPanel {
             }
         }
 
-        // Apply gizmo transform to joint element (highest priority)
-        if let Some(transform) = gizmo_delta
-            && let Some(joint_id) = vp_state.gizmo.editing_joint
-        {
+        // Apply the gizmo drag through the engine as one interaction
+        // session, so the whole drag is a single undo step. Events are
+        // applied immediately to keep drag feedback at zero latency.
+        if let Some(transform) = gizmo_delta {
+            let editing_joint = vp_state.gizmo.editing_joint;
+            let editing_collision = vp_state.gizmo.editing_collision;
+            let editing_part = vp_state.gizmo.part_id;
             let link_world_transform = vp_state.gizmo.link_world_transform;
             drop(vp_state);
 
-            // Calculate the delta in parent link-local space
-            let link_world_inv = link_world_transform.inverse();
+            let engine = app_state.lock().engine.clone();
 
-            let mut app = app_state.lock();
-
-            // Get child link info before modifying joint
-            let child_link_id = app
-                .project
-                .assembly
-                .get_joint(joint_id)
-                .map(|j| j.child_link);
-
-            // Get child link's old world transform and part info
-            let child_part_info = child_link_id.and_then(|child_id| {
-                app.project.assembly.get_link(child_id).and_then(|link| {
-                    link.part_id.map(|part_id| {
-                        let old_world = link.world_transform;
-                        (child_id, part_id, old_world)
+            // Build the command for whichever element the gizmo is editing
+            let cmd: Option<Command> = if let Some(joint_id) = editing_joint {
+                // Deltas arrive in world space; joint origins live in the
+                // parent link frame
+                let link_world_inv = link_world_transform.inverse();
+                engine.lock().assembly().joints.get(&joint_id).and_then(|joint| {
+                    let mut origin = joint.origin;
+                    match transform {
+                        GizmoTransform::Translation(delta) => {
+                            let local_delta = link_world_inv.transform_vector3(delta);
+                            origin.xyz[0] += local_delta.x;
+                            origin.xyz[1] += local_delta.y;
+                            origin.xyz[2] += local_delta.z;
+                        }
+                        GizmoTransform::Rotation(rotation) => {
+                            let new_quat = rotation * origin.to_quat();
+                            let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
+                            origin.rpy = [x, y, z];
+                        }
+                        // Joint origins do not scale
+                        GizmoTransform::Scale(_) => return None,
+                    }
+                    Some(Command::SetJointOrigin {
+                        joint_id,
+                        origin,
+                        keep_child_world_pose: true,
                     })
                 })
-            });
-
-            match transform {
-                GizmoTransform::Translation(delta) => {
-                    // Transform world delta to parent link-local delta
-                    let local_delta = link_world_inv.transform_vector3(delta);
-
-                    if let Some(joint) = app.project.assembly.get_joint_mut(joint_id) {
-                        joint.origin.xyz[0] += local_delta.x;
-                        joint.origin.xyz[1] += local_delta.y;
-                        joint.origin.xyz[2] += local_delta.z;
-                    }
-                }
-                GizmoTransform::Rotation(rotation) => {
-                    // For rotation, we need to update the RPY angles
-                    if let Some(joint) = app.project.assembly.get_joint_mut(joint_id) {
-                        // Current rotation as quaternion
-                        let current_quat = joint.origin.to_quat();
-                        // Apply the rotation delta
-                        let new_quat = rotation * current_quat;
-                        // Convert back to euler angles (XYZ order)
-                        let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
-                        joint.origin.rpy = [x, y, z];
-                    }
-                }
-                GizmoTransform::Scale(_) => {
-                    // Joint origins don't support scaling - ignore
-                }
-            }
-
-            app.modified = true;
-
-            // Update world transforms after joint origin change
-            app.project
-                .assembly
-                .update_world_transforms_with_current_positions();
-
-            // Compensate child link's part origin_transform to maintain its world position
-            // This makes only the joint move, not the mesh
-            if let Some((child_id, part_id, old_child_world)) = child_part_info
-                && let Some(new_child_link) = app.project.assembly.get_link(child_id)
-            {
-                let new_child_world = new_child_link.world_transform;
-                // Calculate compensation: new_origin = new_world^-1 * old_world * old_origin
-                // This keeps the part's world position unchanged
-                let compensation = new_child_world.inverse() * old_child_world;
-                if let Some(part) = app.project.get_part_mut(part_id) {
-                    part.origin_transform = compensation * part.origin_transform;
-                }
-            }
-
-            // Sync renderer transforms with updated world transforms
-            {
-                let mut vp = viewport_state.lock();
-                for link in app.project.assembly.links.values() {
-                    if let Some(part_id) = link.part_id
-                        && let Some(part) = app.project.get_part(part_id)
-                    {
-                        let result = link.world_transform * part.origin_transform;
-                        vp.update_part_transform(part_id, result);
-                    }
-                }
-            }
-
-            drop(app);
-
-            // Re-lock viewport state for rest of handling
-            vp_state = viewport_state.lock();
-        }
-        // Apply gizmo transform to collision element
-        else if let Some(transform) = gizmo_delta
-            && let Some((link_id, collision_index)) = vp_state.gizmo.editing_collision
-        {
-            let link_world_transform = vp_state.gizmo.link_world_transform;
-            drop(vp_state);
-
-            // Calculate the delta in link-local space
-            let link_world_inv = link_world_transform.inverse();
-
-            let mut app = app_state.lock();
-
-            match transform {
-                GizmoTransform::Translation(delta) => {
-                    // Transform world delta to link-local delta
-                    let local_delta = link_world_inv.transform_vector3(delta);
-
-                    if let Some(link) = app.project.assembly.get_link_mut(link_id)
-                        && let Some(collision) = link.collisions.get_mut(collision_index)
-                    {
-                        collision.origin.xyz[0] += local_delta.x;
-                        collision.origin.xyz[1] += local_delta.y;
-                        collision.origin.xyz[2] += local_delta.z;
-                    }
-                }
-                GizmoTransform::Rotation(rotation) => {
-                    // For rotation, we need to update the RPY angles
-                    if let Some(link) = app.project.assembly.get_link_mut(link_id)
-                        && let Some(collision) = link.collisions.get_mut(collision_index)
-                    {
-                        // Current rotation as quaternion
-                        let current_quat = collision.origin.to_quat();
-                        // Apply the rotation delta
-                        let new_quat = rotation * current_quat;
-                        // Convert back to euler angles (XYZ order)
-                        let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
-                        collision.origin.rpy = [x, y, z];
-                    }
-                }
-                GizmoTransform::Scale(_) => {
-                    // Collision origins don't support scaling - ignore
-                }
-            }
-
-            app.modified = true;
-            drop(app);
-
-            // Re-lock viewport state for rest of handling
-            vp_state = viewport_state.lock();
-        }
-        // Apply gizmo transform to part
-        else if let Some(transform) = gizmo_delta
-            && let Some(part_id) = vp_state.gizmo.part_id
-        {
-            let queue = vp_state.queue.clone();
-            drop(vp_state);
-
-            let mut app = app_state.lock();
-
-            match transform {
-                GizmoTransform::Translation(delta) => {
-                    // Moving the whole part - update part transform
-                    let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                        let (scale, rotation, translation) =
-                            part.origin_transform.to_scale_rotation_translation();
-                        let new_translation = translation + delta;
-                        part.origin_transform = glam::Mat4::from_scale_rotation_translation(
-                            scale,
-                            rotation,
-                            new_translation,
-                        );
-                        Some(part.origin_transform)
-                    } else {
-                        None
+            } else if let Some((link_id, index)) = editing_collision {
+                let link_world_inv = link_world_transform.inverse();
+                let eng = engine.lock();
+                eng.assembly()
+                    .get_link(link_id)
+                    .and_then(|link| link.collisions.get(index))
+                    .and_then(|collision| {
+                        let mut origin = collision.origin;
+                        match transform {
+                            GizmoTransform::Translation(delta) => {
+                                let local_delta = link_world_inv.transform_vector3(delta);
+                                origin.xyz[0] += local_delta.x;
+                                origin.xyz[1] += local_delta.y;
+                                origin.xyz[2] += local_delta.z;
+                            }
+                            GizmoTransform::Rotation(rotation) => {
+                                let new_quat = rotation * origin.to_quat();
+                                let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
+                                origin.rpy = [x, y, z];
+                            }
+                            // Collision origins do not scale
+                            GizmoTransform::Scale(_) => return None,
+                        }
+                        Some(Command::SetCollisionOrigin {
+                            link_id,
+                            index,
+                            origin,
+                        })
+                    })
+            } else if let Some(part_id) = editing_part {
+                engine.lock().part(part_id).map(|part| {
+                    let (scale, rotation, translation) =
+                        part.origin_transform.to_scale_rotation_translation();
+                    let new_transform = match transform {
+                        GizmoTransform::Translation(delta) => {
+                            Mat4::from_scale_rotation_translation(
+                                scale,
+                                rotation,
+                                translation + delta,
+                            )
+                        }
+                        GizmoTransform::Rotation(rot) => {
+                            Mat4::from_scale_rotation_translation(
+                                scale,
+                                rot * rotation,
+                                translation,
+                            )
+                        }
+                        GizmoTransform::Scale(scale_delta) => {
+                            Mat4::from_scale_rotation_translation(
+                                scale * scale_delta,
+                                rotation,
+                                translation,
+                            )
+                        }
                     };
-                    drop(app);
-
-                    // Update mesh renderer transform
-                    if let Some(transform) = new_transform {
-                        let mut vp = viewport_state.lock();
-                        vp.renderer
-                            .update_part_transform(&queue, part_id, transform);
-                        drop(vp);
+                    Command::SetPartTransform {
+                        part_id,
+                        transform: new_transform,
                     }
-                }
-                GizmoTransform::Rotation(rotation) => {
-                    // Rotating the whole part
-                    let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                        let (scale, old_rotation, translation) =
-                            part.origin_transform.to_scale_rotation_translation();
-                        let new_rotation = rotation * old_rotation;
-                        part.origin_transform = glam::Mat4::from_scale_rotation_translation(
-                            scale,
-                            new_rotation,
-                            translation,
+                })
+            } else {
+                None
+            };
+
+            if let Some(cmd) = cmd {
+                let session = *self.gizmo_session.get_or_insert_with(Uuid::new_v4);
+                match engine.lock().apply_interactive(session, cmd) {
+                    Ok(events) => {
+                        crate::sync::apply_events(
+                            &events,
+                            app_state,
+                            &Some(viewport_state.clone()),
                         );
-                        Some(part.origin_transform)
-                    } else {
-                        None
-                    };
-                    drop(app);
-
-                    // Update mesh renderer transform
-                    if let Some(transform) = new_transform {
-                        let mut vp = viewport_state.lock();
-                        vp.renderer
-                            .update_part_transform(&queue, part_id, transform);
-                        drop(vp);
                     }
-                }
-                GizmoTransform::Scale(scale_delta) => {
-                    // Scaling the whole part
-                    let new_transform = if let Some(part) = app.get_part_mut(part_id) {
-                        let (old_scale, rotation, translation) =
-                            part.origin_transform.to_scale_rotation_translation();
-                        let new_scale = old_scale * scale_delta;
-                        part.origin_transform = glam::Mat4::from_scale_rotation_translation(
-                            new_scale,
-                            rotation,
-                            translation,
-                        );
-                        Some(part.origin_transform)
-                    } else {
-                        None
-                    };
-                    drop(app);
-
-                    // Update mesh renderer transform
-                    if let Some(transform) = new_transform {
-                        let mut vp = viewport_state.lock();
-                        vp.renderer
-                            .update_part_transform(&queue, part_id, transform);
-                        drop(vp);
-                    }
+                    Err(e) => tracing::error!("gizmo command failed: {e}"),
                 }
             }
 
-            // Re-lock viewport state for rest of handling
             vp_state = viewport_state.lock();
         }
 
@@ -759,7 +675,7 @@ impl Panel for ViewportPanel {
         // Draw sketch toolbar (bottom-left) when in sketch mode
         {
             let app = app_state.lock();
-            if let Some(sketch_state) = app.cad.editor_mode.sketch() {
+            if let Some(sketch_state) = app.editor_mode.sketch() {
                 let current_tool = sketch_state.current_tool;
                 let extrude_dialog_open = sketch_state.extrude_dialog.open;
                 let dimension_dialog_open = sketch_state.dimension_dialog.open;
@@ -795,7 +711,7 @@ impl Panel for ViewportPanel {
         // Draw plane selection hint when in plane selection mode
         {
             let app = app_state.lock();
-            if app.cad.editor_mode.is_plane_selection() {
+            if app.editor_mode.is_plane_selection() {
                 drop(app);
                 render_plane_selection_hint(ui, response.rect);
             }
