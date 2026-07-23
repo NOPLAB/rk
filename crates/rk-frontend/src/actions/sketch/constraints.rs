@@ -85,34 +85,36 @@ pub fn handle_select_entity_for_constraint(ctx: &ActionContext, entity_id: uuid:
         // First selection
 
         // Check if selected entity is a Line for dimensional constraint (line length)
-        if is_dimensional_constraint(tool) {
-            let line_endpoints = {
+        if tool == SketchTool::DimensionDistance {
+            let is_line = {
                 let state = ctx.app_state.lock();
                 if let Some(sketch) = state.cad.get_sketch(sketch_id) {
-                    if let Some(SketchEntity::Line { start, end, .. }) =
-                        sketch.get_entity(entity_id)
-                    {
-                        Some((*start, *end))
-                    } else {
-                        None
-                    }
+                    matches!(
+                        sketch.get_entity(entity_id),
+                        Some(SketchEntity::Line { .. })
+                    )
                 } else {
-                    None
+                    false
                 }
             };
 
-            if let Some((start, end)) = line_endpoints {
-                // Line selected - use its endpoints for distance constraint
+            if is_line {
+                // Line selected - create Length constraint (line length)
                 let initial_value = {
                     let state = ctx.app_state.lock();
-                    compute_initial_value(tool, &[start, end], &state.cad, sketch_id)
+                    compute_initial_value(
+                        SketchTool::DimensionDistance,
+                        &[entity_id],
+                        &state.cad,
+                        sketch_id,
+                    )
                 };
 
                 let mut state = ctx.app_state.lock();
                 if let Some(sketch_state) = state.cad.editor_mode.sketch_mut() {
                     sketch_state.dimension_dialog.open_for_constraint(
-                        tool,
-                        vec![start, end],
+                        SketchTool::DimensionDistance,
+                        vec![entity_id], // Pass line ID for Length constraint
                         initial_value,
                     );
                     sketch_state.constraint_tool_state = None;
@@ -274,7 +276,11 @@ fn create_dimensional_constraint(
 ) -> Option<SketchConstraint> {
     match tool {
         SketchTool::DimensionDistance => {
-            if entities.len() >= 2 {
+            if entities.len() == 1 {
+                // Single entity (line) - create Length constraint
+                Some(SketchConstraint::length(entities[0], value))
+            } else if entities.len() >= 2 {
+                // Two entities (points) - create Distance constraint
                 Some(SketchConstraint::distance(entities[0], entities[1], value))
             } else {
                 None
@@ -351,13 +357,22 @@ fn compute_initial_value(
 
     match tool {
         SketchTool::DimensionDistance => {
-            if entities.len() >= 2
-                && let (Some(&p1), Some(&p2)) = (
+            if entities.len() == 1 {
+                // Single entity - check if it's a line and compute its length
+                if let Some(SketchEntity::Line { start, end, .. }) = sketch.get_entity(entities[0])
+                    && let (Some(&p1), Some(&p2)) =
+                        (point_positions.get(start), point_positions.get(end))
+                {
+                    return (p2 - p1).length();
+                }
+            } else if entities.len() >= 2 {
+                // Two points - compute distance between them
+                if let (Some(&p1), Some(&p2)) = (
                     point_positions.get(&entities[0]),
                     point_positions.get(&entities[1]),
-                )
-            {
-                return (p2 - p1).length();
+                ) {
+                    return (p2 - p1).length();
+                }
             }
             10.0
         }

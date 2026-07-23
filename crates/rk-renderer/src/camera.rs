@@ -3,6 +3,16 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+/// Projection mode for the camera
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectionMode {
+    /// Perspective projection - realistic view where distant objects appear smaller
+    #[default]
+    Perspective,
+    /// Orthographic projection - parallel projection for CAD-style viewing
+    Orthographic,
+}
+
 /// Camera uniform buffer data
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -51,6 +61,8 @@ pub struct Camera {
     pub pitch: f32,
     /// Distance from target.
     pub distance: f32,
+    /// Projection mode (perspective or orthographic).
+    pub projection_mode: ProjectionMode,
 }
 
 impl Camera {
@@ -78,6 +90,7 @@ impl Camera {
             yaw,
             pitch,
             distance,
+            projection_mode: ProjectionMode::default(),
         }
     }
 
@@ -176,9 +189,45 @@ impl Camera {
         Mat4::look_at_rh(self.position, self.target, self.up)
     }
 
-    /// Get projection matrix
+    /// Get projection matrix based on current projection mode
     pub fn projection_matrix(&self) -> Mat4 {
-        Mat4::perspective_rh(self.fov, self.aspect, self.near, self.far)
+        match self.projection_mode {
+            ProjectionMode::Perspective => {
+                Mat4::perspective_rh(self.fov, self.aspect, self.near, self.far)
+            }
+            ProjectionMode::Orthographic => {
+                // Calculate orthographic bounds based on distance
+                // This makes zooming work naturally with the existing distance-based zoom
+                let half_height = self.distance * (self.fov / 2.0).tan();
+                let half_width = half_height * self.aspect;
+                Mat4::orthographic_rh(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    self.near,
+                    self.far,
+                )
+            }
+        }
+    }
+
+    /// Get current projection mode
+    pub fn projection_mode(&self) -> ProjectionMode {
+        self.projection_mode
+    }
+
+    /// Set projection mode
+    pub fn set_projection_mode(&mut self, mode: ProjectionMode) {
+        self.projection_mode = mode;
+    }
+
+    /// Toggle between perspective and orthographic projection
+    pub fn toggle_projection_mode(&mut self) {
+        self.projection_mode = match self.projection_mode {
+            ProjectionMode::Perspective => ProjectionMode::Orthographic,
+            ProjectionMode::Orthographic => ProjectionMode::Perspective,
+        };
     }
 
     /// Get camera uniform data

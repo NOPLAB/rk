@@ -1,6 +1,8 @@
 //! Common UI helper functions for property components
 
-use egui::{DragValue, Ui};
+use egui::{DragValue, RichText, Ui};
+
+use crate::theme::palette::{AXIS_X, AXIS_Y, AXIS_Z};
 
 /// Render a labeled XYZ vector3 row with drag values
 /// Returns true if any value was changed
@@ -10,15 +12,15 @@ pub fn vector3_row(ui: &mut Ui, label: &str, values: &mut [f32; 3], speed: f32) 
     });
     ui.horizontal(|ui| {
         let mut changed = false;
-        ui.label("X");
+        ui.label(RichText::new("X").color(AXIS_X));
         changed |= ui
             .add(DragValue::new(&mut values[0]).speed(speed))
             .changed();
-        ui.label("Y");
+        ui.label(RichText::new("Y").color(AXIS_Y));
         changed |= ui
             .add(DragValue::new(&mut values[1]).speed(speed))
             .changed();
-        ui.label("Z");
+        ui.label(RichText::new("Z").color(AXIS_Z));
         changed |= ui
             .add(DragValue::new(&mut values[2]).speed(speed))
             .changed();
@@ -34,11 +36,11 @@ pub fn vector3_readonly_row(ui: &mut Ui, label: &str, values: &[f32; 3]) {
         ui.label(label);
     });
     ui.horizontal(|ui| {
-        ui.label("X");
+        ui.label(RichText::new("X").color(AXIS_X));
         ui.weak(format!("{:.3}", values[0]));
-        ui.label("Y");
+        ui.label(RichText::new("Y").color(AXIS_Y));
         ui.weak(format!("{:.3}", values[1]));
-        ui.label("Z");
+        ui.label(RichText::new("Z").color(AXIS_Z));
         ui.weak(format!("{:.3}", values[2]));
     });
 }
@@ -51,15 +53,15 @@ pub fn rotation_row(ui: &mut Ui, label: &str, rot_deg: &mut [f32; 3], speed: f32
     });
     ui.horizontal(|ui| {
         let mut changed = false;
-        ui.label("X");
+        ui.label(RichText::new("X").color(AXIS_X));
         changed |= ui
             .add(DragValue::new(&mut rot_deg[0]).speed(speed).suffix("°"))
             .changed();
-        ui.label("Y");
+        ui.label(RichText::new("Y").color(AXIS_Y));
         changed |= ui
             .add(DragValue::new(&mut rot_deg[1]).speed(speed).suffix("°"))
             .changed();
-        ui.label("Z");
+        ui.label(RichText::new("Z").color(AXIS_Z));
         changed |= ui
             .add(DragValue::new(&mut rot_deg[2]).speed(speed).suffix("°"))
             .changed();
@@ -75,11 +77,11 @@ pub fn rotation_readonly_row(ui: &mut Ui, label: &str, rot_deg: &[f32; 3]) {
         ui.label(label);
     });
     ui.horizontal(|ui| {
-        ui.label("X");
+        ui.label(RichText::new("X").color(AXIS_X));
         ui.weak(format!("{:.1}°", rot_deg[0]));
-        ui.label("Y");
+        ui.label(RichText::new("Y").color(AXIS_Y));
         ui.weak(format!("{:.1}°", rot_deg[1]));
-        ui.label("Z");
+        ui.label(RichText::new("Z").color(AXIS_Z));
         ui.weak(format!("{:.1}°", rot_deg[2]));
     });
 }

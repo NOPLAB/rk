@@ -25,7 +25,7 @@ impl PropertyComponent for GeometryComponent {
     }
 
     fn default_open(&self) -> bool {
-        false // Collapsed by default since it's read-only info
+        true
     }
 
     fn ui(&mut self, ui: &mut Ui, ctx: &mut PropertyContext) -> bool {

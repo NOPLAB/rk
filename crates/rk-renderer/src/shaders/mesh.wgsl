@@ -133,7 +133,12 @@ fn calculate_shadow(light_space_pos: vec4<f32>, normal: vec3<f32>, light_dir: ve
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(light.direction.xyz);
     let view_dir = normalize(camera.eye.xyz - in.world_pos);
-    let normal = normalize(in.world_normal);
+    var normal = normalize(in.world_normal);
+
+    // Two-sided lighting: flip normal if facing away from camera
+    if (dot(normal, view_dir) < 0.0) {
+        normal = -normal;
+    }
 
     // Calculate shadow factor
     let shadow = calculate_shadow(in.light_space_pos, normal, light_dir);

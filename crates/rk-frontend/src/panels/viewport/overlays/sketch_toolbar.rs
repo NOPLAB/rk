@@ -1,6 +1,7 @@
 //! Sketch toolbar and plane selection overlay for the viewport
 
 use crate::state::{AppAction, SharedAppState, SketchAction, SketchTool};
+use crate::theme::palette;
 
 /// Render plane selection hint at the top-center of the viewport
 pub fn render_plane_selection_hint(ui: &mut egui::Ui, rect: egui::Rect) {
@@ -18,9 +19,9 @@ pub fn render_plane_selection_hint(ui: &mut egui::Ui, rect: egui::Rect) {
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style())
-                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240))
+                .fill(palette::overlay_bg(240))
                 .corner_radius(6.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                .stroke(egui::Stroke::new(1.0, palette::BORDER_STRONG))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
                     ui.set_width(panel_width - 24.0);
@@ -45,11 +46,7 @@ pub fn render_plane_selection_hint(ui: &mut egui::Ui, rect: egui::Rect) {
                                     egui::vec2(16.0, 16.0),
                                     egui::Sense::hover(),
                                 );
-                                ui.painter().rect_filled(
-                                    rect,
-                                    2.0,
-                                    egui::Color32::from_rgb(77, 128, 230),
-                                );
+                                ui.painter().rect_filled(rect, 2.0, palette::PLANE_XY);
                                 ui.label("XY (Top)");
                             });
 
@@ -59,11 +56,7 @@ pub fn render_plane_selection_hint(ui: &mut egui::Ui, rect: egui::Rect) {
                                     egui::vec2(16.0, 16.0),
                                     egui::Sense::hover(),
                                 );
-                                ui.painter().rect_filled(
-                                    rect,
-                                    2.0,
-                                    egui::Color32::from_rgb(77, 230, 128),
-                                );
+                                ui.painter().rect_filled(rect, 2.0, palette::PLANE_XZ);
                                 ui.label("XZ (Front)");
                             });
 
@@ -73,11 +66,7 @@ pub fn render_plane_selection_hint(ui: &mut egui::Ui, rect: egui::Rect) {
                                     egui::vec2(16.0, 16.0),
                                     egui::Sense::hover(),
                                 );
-                                ui.painter().rect_filled(
-                                    rect,
-                                    2.0,
-                                    egui::Color32::from_rgb(230, 128, 77),
-                                );
+                                ui.painter().rect_filled(rect, 2.0, palette::PLANE_YZ);
                                 ui.label("YZ (Side)");
                             });
                         });
@@ -106,9 +95,9 @@ pub fn render_sketch_toolbar(
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style())
-                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 230))
+                .fill(palette::overlay_bg(230))
                 .corner_radius(6.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                .stroke(egui::Stroke::new(1.0, palette::BORDER_NORMAL))
                 .inner_margin(6.0)
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -119,7 +108,7 @@ pub fn render_sketch_toolbar(
                             ui.label(
                                 egui::RichText::new("Draw")
                                     .small()
-                                    .color(egui::Color32::GRAY),
+                                    .color(palette::TEXT_SECONDARY),
                             );
                         });
                         render_drawing_tools(ui, app_state, current_tool);
@@ -133,7 +122,7 @@ pub fn render_sketch_toolbar(
                             ui.label(
                                 egui::RichText::new("Constrain")
                                     .small()
-                                    .color(egui::Color32::GRAY),
+                                    .color(palette::TEXT_SECONDARY),
                             );
                         });
                         render_constraint_tools(ui, app_state, current_tool);
@@ -147,7 +136,7 @@ pub fn render_sketch_toolbar(
                             ui.label(
                                 egui::RichText::new("Dimension")
                                     .small()
-                                    .color(egui::Color32::GRAY),
+                                    .color(palette::TEXT_SECONDARY),
                             );
                         });
                         render_dimension_tools(ui, app_state, current_tool);
@@ -161,7 +150,7 @@ pub fn render_sketch_toolbar(
                             ui.label(
                                 egui::RichText::new("Operations")
                                     .small()
-                                    .color(egui::Color32::GRAY),
+                                    .color(palette::TEXT_SECONDARY),
                             );
                         });
                         render_operations_tools(ui, app_state);

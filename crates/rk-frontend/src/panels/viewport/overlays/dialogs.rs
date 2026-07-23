@@ -3,6 +3,7 @@
 use rk_cad::BooleanOp;
 
 use crate::state::{AppAction, ExtrudeDirection, SharedAppState, SketchAction};
+use crate::theme::palette;
 
 /// Render extrude dialog overlay (movable window on left-center)
 pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &SharedAppState) {
@@ -58,14 +59,11 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                         selected_count, profile_count
                     ))
                     .small()
-                    .color(egui::Color32::GRAY),
+                    .color(palette::TEXT_SECONDARY),
                 );
                 ui.add_space(4.0);
             } else {
-                ui.colored_label(
-                    egui::Color32::from_rgb(255, 150, 100),
-                    "No closed profiles found",
-                );
+                ui.colored_label(palette::WARNING, "No closed profiles found");
                 ui.add_space(4.0);
             }
 
@@ -208,17 +206,14 @@ pub fn render_extrude_dialog(ui: &mut egui::Ui, rect: egui::Rect, app_state: &Sh
                 });
 
                 if available_bodies.is_empty() {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 150, 100),
-                        "No bodies available",
-                    );
+                    ui.colored_label(palette::WARNING, "No bodies available");
                 }
             }
 
             // Show error message if any
             if let Some(error) = error_message {
                 ui.add_space(4.0);
-                ui.colored_label(egui::Color32::from_rgb(255, 100, 100), error);
+                ui.colored_label(palette::ERROR, error);
             }
 
             ui.add_space(12.0);

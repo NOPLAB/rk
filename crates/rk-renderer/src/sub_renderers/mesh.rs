@@ -180,18 +180,13 @@ impl MeshData {
         // Build vertices with normals
         let mut vertices = Vec::new();
 
-        for (i, chunk) in mesh_indices.chunks(3).enumerate() {
+        for chunk in mesh_indices.chunks(3) {
             if chunk.len() != 3 {
                 continue;
             }
 
-            // Get face normal - try per-vertex normals first, then compute from vertices
-            let normal = if i * 3 < mesh_normals.len() {
-                mesh_normals[i * 3]
-            } else if !mesh_normals.is_empty() && (chunk[0] as usize) < mesh_normals.len() {
-                mesh_normals[chunk[0] as usize]
-            } else {
-                // Compute face normal from vertex positions
+            // Compute face normal from vertex positions (for fallback)
+            let compute_face_normal = || {
                 let p0 = mesh_vertices
                     .get(chunk[0] as usize)
                     .copied()
@@ -207,8 +202,7 @@ impl MeshData {
                 let v0 = glam::Vec3::from(p0);
                 let v1 = glam::Vec3::from(p1);
                 let v2 = glam::Vec3::from(p2);
-                let normal = (v1 - v0).cross(v2 - v0).normalize_or_zero();
-                normal.to_array()
+                (v1 - v0).cross(v2 - v0).normalize_or_zero().to_array()
             };
 
             for &idx in chunk {
@@ -216,6 +210,14 @@ impl MeshData {
                     .get(idx as usize)
                     .copied()
                     .unwrap_or([0.0, 0.0, 0.0]);
+
+                // Get per-vertex normal if available, otherwise use computed face normal
+                let normal = if !mesh_normals.is_empty() && (idx as usize) < mesh_normals.len() {
+                    mesh_normals[idx as usize]
+                } else {
+                    compute_face_normal()
+                };
+
                 vertices.push(MeshVertex {
                     position: pos,
                     normal,

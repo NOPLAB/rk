@@ -57,7 +57,14 @@ impl PropertyComponent for JointComponent {
             ui.horizontal(|ui| {
                 let response = ui.selectable_label(is_expanded, &header_text);
                 if response.clicked() {
-                    self.expanded_index = if is_expanded { None } else { Some(index) };
+                    if is_expanded {
+                        self.expanded_index = None;
+                        ctx.pending_actions.push(AppAction::SetEditingJoint(None));
+                    } else {
+                        self.expanded_index = Some(index);
+                        ctx.pending_actions
+                            .push(AppAction::SetEditingJoint(Some(info.joint_id)));
+                    }
                 }
                 ui.weak(format!("[{}]", info.joint.joint_type.display_name()));
             });

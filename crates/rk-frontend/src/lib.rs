@@ -8,6 +8,7 @@ pub mod config;
 pub mod fonts;
 pub mod panels;
 pub mod state;
+pub mod theme;
 pub mod update;
 
 // Re-exports for convenience

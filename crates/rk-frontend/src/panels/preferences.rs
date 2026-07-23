@@ -74,7 +74,7 @@ impl PreferencesPanel {
                         self.editor_tab(ui, config, app_state);
                     }
                     PreferencesTab::Interface => {
-                        self.interface_tab(ui, config);
+                        self.interface_tab(ui, config, viewport_state);
                     }
                 });
 
@@ -462,10 +462,16 @@ impl PreferencesPanel {
         }
     }
 
-    fn interface_tab(&mut self, ui: &mut egui::Ui, config: &SharedConfig) {
+    fn interface_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        config: &SharedConfig,
+        viewport_state: &Option<SharedViewportState>,
+    ) {
         let mut cfg = config.write();
         let ui_cfg = cfg.config_mut().ui.clone();
         let mut changed = false;
+        let mut theme_changed = false;
 
         let mut theme = ui_cfg.theme;
         let mut font_size = ui_cfg.font_size;
@@ -483,12 +489,14 @@ impl PreferencesPanel {
                         .changed()
                     {
                         changed = true;
+                        theme_changed = true;
                     }
                     if ui
                         .selectable_value(&mut theme, UiTheme::Light, "Light")
                         .changed()
                     {
                         changed = true;
+                        theme_changed = true;
                     }
                 });
         });
@@ -501,6 +509,28 @@ impl PreferencesPanel {
             cfg.config_mut().ui = UiConfig { theme, font_size };
         }
 
-        ui.label("(Theme and font changes require restart)");
+        // Apply theme immediately (hot reload)
+        if theme_changed {
+            // Apply viewport theme colors
+            match theme {
+                UiTheme::Dark => cfg.config_mut().renderer.apply_dark_theme(),
+                UiTheme::Light => cfg.config_mut().renderer.apply_light_theme(),
+            }
+            let renderer_cfg = cfg.config().renderer.clone();
+
+            // Apply to renderer
+            if let Some(vp) = viewport_state {
+                let vp_lock = vp.lock();
+                let device = vp_lock.device.clone();
+                let queue = vp_lock.queue.clone();
+                drop(vp_lock);
+                vp.lock()
+                    .renderer
+                    .apply_config(&renderer_cfg, &device, &queue);
+            }
+
+            drop(cfg);
+            crate::theme::apply_theme(ui.ctx(), config);
+        }
     }
 }

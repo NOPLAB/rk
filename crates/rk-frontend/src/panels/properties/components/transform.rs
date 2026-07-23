@@ -31,7 +31,7 @@ impl PropertyComponent for TransformComponent {
 
     fn ui(&mut self, ui: &mut Ui, ctx: &mut PropertyContext) -> bool {
         let part = &mut ctx.part;
-        let parent_transform = ctx.parent_world_transform;
+        let link_transform = ctx.link_world_transform;
 
         // Extract position, rotation, and scale from the transform matrix (world coordinates)
         let (scale, rotation, translation) = part.origin_transform.to_scale_rotation_translation();
@@ -50,10 +50,10 @@ impl PropertyComponent for TransformComponent {
         let mut local_rot_deg = [0.0f32; 3];
         let mut local_scl = [1.0f32; 3];
 
-        // Calculate local transform if parent exists
-        if let Some(parent) = parent_transform {
-            let parent_inverse = parent.inverse();
-            let local = parent_inverse * part.origin_transform;
+        // Calculate local transform relative to link's coordinate system
+        if let Some(link) = link_transform {
+            let link_inverse = link.inverse();
+            let local = link_inverse * part.origin_transform;
             let (local_scale, local_rotation, local_translation) =
                 local.to_scale_rotation_translation();
             let local_euler = local_rotation.to_euler(EulerRot::XYZ);
@@ -72,7 +72,7 @@ impl PropertyComponent for TransformComponent {
         }
 
         // Show toggle switch only if parent exists
-        if parent_transform.is_some() {
+        if link_transform.is_some() {
             ui.checkbox(&mut self.show_local, "Local");
             ui.add_space(4.0);
         }
@@ -80,7 +80,7 @@ impl PropertyComponent for TransformComponent {
         let (pos_changed, rot_changed, scale_changed);
         let (local_pos_changed, local_rot_changed, local_scale_changed);
 
-        if self.show_local && parent_transform.is_some() {
+        if self.show_local && link_transform.is_some() {
             // Show local coordinates
             local_pos_changed = vector3_row(ui, "Position", &mut local_pos, 0.01);
             local_rot_changed = rotation_row(ui, "Rotation", &mut local_rot_deg, 1.0);
@@ -101,7 +101,8 @@ impl PropertyComponent for TransformComponent {
         // Update transform if changed
         if local_pos_changed || local_rot_changed || local_scale_changed {
             // Local transform was edited - compute new world transform
-            let parent = parent_transform.unwrap();
+            // Local coordinates are relative to the link's coordinate system
+            let link = link_transform.unwrap();
             let new_local_rotation = Quat::from_euler(
                 EulerRot::XYZ,
                 local_rot_deg[0].to_radians(),
@@ -115,8 +116,8 @@ impl PropertyComponent for TransformComponent {
                 new_local_rotation,
                 new_local_translation,
             );
-            // world = parent * local
-            part.origin_transform = parent * new_local_transform;
+            // origin_transform = link_world * local
+            part.origin_transform = link * new_local_transform;
             true
         } else if pos_changed || rot_changed || scale_changed {
             // World transform was edited

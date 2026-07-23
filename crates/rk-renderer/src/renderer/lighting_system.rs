@@ -43,7 +43,8 @@ impl LightingSystem {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let (shadow_texture, shadow_view) = gpu_resources::create_shadow_texture(device, SHADOW_MAP_SIZE);
+        let (shadow_texture, shadow_view) =
+            gpu_resources::create_shadow_texture(device, SHADOW_MAP_SIZE);
         let shadow_sampler = gpu_resources::create_shadow_sampler(device);
 
         let light_bind_group = gpu_resources::create_light_bind_group(
@@ -134,7 +135,11 @@ impl LightingSystem {
     /// Update the light buffer on the GPU.
     pub fn update(&self, queue: &wgpu::Queue, scene_center: Vec3) {
         let light_uniform = self.light.uniform(scene_center);
-        queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[light_uniform]));
+        queue.write_buffer(
+            &self.light_buffer,
+            0,
+            bytemuck::cast_slice(&[light_uniform]),
+        );
     }
 
     /// Apply lighting configuration.

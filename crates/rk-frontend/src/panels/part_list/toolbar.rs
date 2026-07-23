@@ -22,7 +22,7 @@ pub fn render_unit_selector(ui: &mut egui::Ui, app_state: &SharedAppState) {
 
 /// Show context menu for creating new objects
 pub fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
-    // Import Parts submenu (native only)
+    // Import Parts submenu (native)
     #[cfg(not(target_arch = "wasm32"))]
     ui.menu_button("Import Parts", |ui| {
         if ui.button("STL...").clicked() {
@@ -54,7 +54,65 @@ pub fn show_tree_context_menu(ui: &mut egui::Ui, app_state: &SharedAppState) {
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
+    // Import Parts submenu (WASM)
+    #[cfg(target_arch = "wasm32")]
+    ui.menu_button("Import Parts", |ui| {
+        if ui.button("STL...").clicked() {
+            let app_state = app_state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("STL files", &["stl", "STL"])
+                    .pick_file()
+                    .await
+                {
+                    let filename = file.file_name();
+                    let data = file.read().await;
+                    app_state.lock().queue_action(AppAction::ImportMeshBytes {
+                        name: filename,
+                        data,
+                    });
+                }
+            });
+            ui.close();
+        }
+        if ui.button("OBJ...").clicked() {
+            let app_state = app_state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("OBJ files", &["obj", "OBJ"])
+                    .pick_file()
+                    .await
+                {
+                    let filename = file.file_name();
+                    let data = file.read().await;
+                    app_state.lock().queue_action(AppAction::ImportMeshBytes {
+                        name: filename,
+                        data,
+                    });
+                }
+            });
+            ui.close();
+        }
+        if ui.button("DAE (COLLADA)...").clicked() {
+            let app_state = app_state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("DAE files", &["dae", "DAE"])
+                    .pick_file()
+                    .await
+                {
+                    let filename = file.file_name();
+                    let data = file.read().await;
+                    app_state.lock().queue_action(AppAction::ImportMeshBytes {
+                        name: filename,
+                        data,
+                    });
+                }
+            });
+            ui.close();
+        }
+    });
+
     ui.separator();
 
     // Create Primitives submenu

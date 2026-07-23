@@ -14,10 +14,12 @@ use crate::state::{
     AppAction, GizmoTransform, PickablePartData, ReferencePlane, SharedAppState,
     SharedViewportState, SketchAction, pick_object,
 };
+use crate::theme::palette;
 
 use overlays::{
-    render_axes_indicator, render_camera_settings, render_dimension_dialog, render_extrude_dialog,
-    render_gizmo_toggle, render_plane_selection_hint, render_sketch_toolbar,
+    render_axes_indicator, render_camera_settings, render_constraint_icons,
+    render_dimension_dialog, render_extrude_dialog, render_gizmo_toggle,
+    render_plane_selection_hint, render_sketch_toolbar,
 };
 use plane_picking::pick_reference_plane;
 use sketch_input::handle_sketch_mode_input;
@@ -77,13 +79,13 @@ impl Panel for ViewportPanel {
         let (response, painter) =
             ui.allocate_painter(available_size, egui::Sense::click_and_drag());
 
-        painter.rect_filled(response.rect, 0.0, egui::Color32::from_rgb(30, 30, 30));
+        painter.rect_filled(response.rect, 0.0, palette::BG_BASE);
         painter.text(
             response.rect.center(),
             egui::Align2::CENTER_CENTER,
             "3D Viewport\n(WebGPU not available)",
             egui::FontId::proportional(16.0),
-            egui::Color32::GRAY,
+            palette::TEXT_SECONDARY,
         );
 
         self.last_size = available_size;
@@ -144,7 +146,10 @@ impl Panel for ViewportPanel {
         }
 
         // Ensure texture and render
-        let texture_id = {
+        let (texture_id, constraint_overlay_data): (
+            egui::TextureId,
+            Option<(Vec<rk_renderer::ConstraintIconData>, Mat4)>,
+        ) = {
             let mut vp_state = viewport_state.lock();
             let mut egui_renderer = render_state.renderer.write();
             let tex_id = vp_state.ensure_texture(width, height, &mut egui_renderer);
@@ -161,7 +166,10 @@ impl Panel for ViewportPanel {
                 .set_plane_selector_visible(is_plane_selection_mode);
 
             // Update sketch data for rendering
-            let sketch_render_data: Vec<SketchRenderData> = {
+            let (sketch_render_data, constraint_icons_data): (
+                Vec<SketchRenderData>,
+                Option<(Vec<rk_renderer::ConstraintIconData>, Mat4)>,
+            ) = {
                 let app = app_state.lock();
                 let cad = &app.cad;
 
@@ -178,7 +186,8 @@ impl Panel for ViewportPanel {
                     };
 
                 // Convert all sketches to render data
-                cad.data
+                let render_data: Vec<SketchRenderData> = cad
+                    .data
                     .history
                     .sketches()
                     .values()
@@ -191,7 +200,15 @@ impl Panel for ViewportPanel {
                         };
                         sketch_to_render_data(sketch, &selected_entities, is_active, in_prog_ref)
                     })
-                    .collect()
+                    .collect();
+
+                // Extract constraint icons from active sketch for overlay rendering
+                let icons_data = render_data
+                    .iter()
+                    .find(|s| s.is_active)
+                    .map(|s| (s.constraint_icons.clone(), s.transform));
+
+                (render_data, icons_data)
             };
 
             // Set sketch data and prepare GPU resources
@@ -226,8 +243,15 @@ impl Panel for ViewportPanel {
                 }
             }
 
+            // Update collision instances
+            {
+                let app = app_state.lock();
+                let selected_collision = app.selected_collision;
+                vp_state.update_collisions(app.project.assembly.links.iter(), selected_collision);
+            }
+
             vp_state.render();
-            tex_id
+            (tex_id, constraint_icons_data)
         };
 
         // Display the rendered texture
@@ -380,8 +404,104 @@ impl Panel for ViewportPanel {
             }
         }
 
-        // Apply gizmo transform to collision element
+        // Apply gizmo transform to joint element (highest priority)
         if let Some(transform) = gizmo_delta
+            && let Some(joint_id) = vp_state.gizmo.editing_joint
+        {
+            let link_world_transform = vp_state.gizmo.link_world_transform;
+            drop(vp_state);
+
+            // Calculate the delta in parent link-local space
+            let link_world_inv = link_world_transform.inverse();
+
+            let mut app = app_state.lock();
+
+            // Get child link info before modifying joint
+            let child_link_id = app
+                .project
+                .assembly
+                .get_joint(joint_id)
+                .map(|j| j.child_link);
+
+            // Get child link's old world transform and part info
+            let child_part_info = child_link_id.and_then(|child_id| {
+                app.project.assembly.get_link(child_id).and_then(|link| {
+                    link.part_id.map(|part_id| {
+                        let old_world = link.world_transform;
+                        (child_id, part_id, old_world)
+                    })
+                })
+            });
+
+            match transform {
+                GizmoTransform::Translation(delta) => {
+                    // Transform world delta to parent link-local delta
+                    let local_delta = link_world_inv.transform_vector3(delta);
+
+                    if let Some(joint) = app.project.assembly.get_joint_mut(joint_id) {
+                        joint.origin.xyz[0] += local_delta.x;
+                        joint.origin.xyz[1] += local_delta.y;
+                        joint.origin.xyz[2] += local_delta.z;
+                    }
+                }
+                GizmoTransform::Rotation(rotation) => {
+                    // For rotation, we need to update the RPY angles
+                    if let Some(joint) = app.project.assembly.get_joint_mut(joint_id) {
+                        // Current rotation as quaternion
+                        let current_quat = joint.origin.to_quat();
+                        // Apply the rotation delta
+                        let new_quat = rotation * current_quat;
+                        // Convert back to euler angles (XYZ order)
+                        let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
+                        joint.origin.rpy = [x, y, z];
+                    }
+                }
+                GizmoTransform::Scale(_) => {
+                    // Joint origins don't support scaling - ignore
+                }
+            }
+
+            app.modified = true;
+
+            // Update world transforms after joint origin change
+            app.project
+                .assembly
+                .update_world_transforms_with_current_positions();
+
+            // Compensate child link's part origin_transform to maintain its world position
+            // This makes only the joint move, not the mesh
+            if let Some((child_id, part_id, old_child_world)) = child_part_info
+                && let Some(new_child_link) = app.project.assembly.get_link(child_id)
+            {
+                let new_child_world = new_child_link.world_transform;
+                // Calculate compensation: new_origin = new_world^-1 * old_world * old_origin
+                // This keeps the part's world position unchanged
+                let compensation = new_child_world.inverse() * old_child_world;
+                if let Some(part) = app.project.get_part_mut(part_id) {
+                    part.origin_transform = compensation * part.origin_transform;
+                }
+            }
+
+            // Sync renderer transforms with updated world transforms
+            {
+                let mut vp = viewport_state.lock();
+                for link in app.project.assembly.links.values() {
+                    if let Some(part_id) = link.part_id
+                        && let Some(part) = app.project.get_part(part_id)
+                    {
+                        let result = link.world_transform * part.origin_transform;
+                        vp.update_part_transform(part_id, result);
+                    }
+                }
+            }
+
+            drop(app);
+
+            // Re-lock viewport state for rest of handling
+            vp_state = viewport_state.lock();
+        }
+        // Apply gizmo transform to collision element
+        else if let Some(transform) = gizmo_delta
             && let Some((link_id, collision_index)) = vp_state.gizmo.editing_collision
         {
             let link_world_transform = vp_state.gizmo.link_world_transform;
@@ -645,6 +765,20 @@ impl Panel for ViewportPanel {
                 let dimension_dialog_open = sketch_state.dimension_dialog.open;
                 drop(app); // Release lock before calling render
                 render_sketch_toolbar(ui, response.rect, app_state, current_tool);
+
+                // Draw constraint icons overlay
+                if let Some((icons, transform)) = &constraint_overlay_data {
+                    let vp_state = viewport_state.lock();
+                    let camera = vp_state.renderer.camera();
+                    render_constraint_icons(
+                        ui,
+                        response.rect,
+                        icons,
+                        *transform,
+                        camera,
+                        available_size,
+                    );
+                }
 
                 // Draw extrude dialog if open
                 if extrude_dialog_open {

@@ -1,6 +1,8 @@
 //! Camera settings overlay for the 3D viewport
 
 use crate::state::SharedViewportState;
+use crate::theme::palette;
+use rk_renderer::ProjectionMode;
 
 /// Render camera settings overlay in the top-right corner (Unity-style)
 pub fn render_camera_settings(
@@ -25,9 +27,9 @@ pub fn render_camera_settings(
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style())
-                    .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 220))
+                    .fill(palette::overlay_bg(220))
                     .corner_radius(4.0)
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                    .stroke(egui::Stroke::new(1.0, palette::BORDER_NORMAL))
                     .inner_margin(2.0)
                     .show(ui, |ui| {
                         // Expand button (left arrow - to expand from right)
@@ -36,11 +38,7 @@ pub fn render_camera_settings(
                             ui.allocate_painter(button_size, egui::Sense::click());
 
                         if response.hovered() {
-                            painter.rect_filled(
-                                response.rect,
-                                2.0,
-                                egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200),
-                            );
+                            painter.rect_filled(response.rect, 2.0, palette::BG_HOVER);
                         }
 
                         let center = response.rect.center();
@@ -53,9 +51,9 @@ pub fn render_camera_settings(
                         let bottom = egui::pos2(center.x + arrow_width, center.y + arrow_height);
 
                         let arrow_color = if response.hovered() {
-                            egui::Color32::from_gray(200)
+                            palette::TEXT_PRIMARY
                         } else {
-                            egui::Color32::from_gray(100)
+                            palette::TEXT_SECONDARY
                         };
 
                         painter.line_segment([top, tip], egui::Stroke::new(1.0, arrow_color));
@@ -85,9 +83,9 @@ pub fn render_camera_settings(
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style())
-                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 220))
+                .fill(palette::overlay_bg(220))
                 .corner_radius(4.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                .stroke(egui::Stroke::new(1.0, palette::BORDER_NORMAL))
                 .inner_margin(2.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -100,11 +98,7 @@ pub fn render_camera_settings(
 
                         // Button background on hover
                         if response.hovered() {
-                            painter.rect_filled(
-                                response.rect,
-                                2.0,
-                                egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200),
-                            );
+                            painter.rect_filled(response.rect, 2.0, palette::BG_HOVER);
                         }
 
                         // Draw arrow
@@ -118,9 +112,9 @@ pub fn render_camera_settings(
                         let bottom = egui::pos2(center.x - arrow_width, center.y + arrow_height);
 
                         let arrow_color = if response.hovered() {
-                            egui::Color32::from_gray(200)
+                            palette::TEXT_PRIMARY
                         } else {
-                            egui::Color32::from_gray(100)
+                            palette::TEXT_SECONDARY
                         };
 
                         // Draw thin arrow (just lines)
@@ -137,6 +131,24 @@ pub fn render_camera_settings(
                         ui.add_space(2.0);
                         ui.separator();
                         ui.add_space(4.0);
+
+                        // Projection mode toggle button
+                        {
+                            let mut vp = viewport_state.lock();
+                            let current_mode = vp.renderer.camera().projection_mode();
+                            let (icon, tooltip) = match current_mode {
+                                ProjectionMode::Perspective => {
+                                    ("🎥", "Perspective (click for Ortho)")
+                                }
+                                ProjectionMode::Orthographic => {
+                                    ("📐", "Orthographic (click for Persp)")
+                                }
+                            };
+                            let button = egui::Button::new(icon).min_size(egui::vec2(24.0, 24.0));
+                            if ui.add(button).on_hover_text(tooltip).clicked() {
+                                vp.renderer.camera_mut().toggle_projection_mode();
+                            }
+                        }
 
                         // Camera button
                         let button = egui::Button::new("📷")
@@ -164,9 +176,9 @@ pub fn render_camera_settings(
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style())
-                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 220))
+                .fill(palette::overlay_bg(220))
                 .corner_radius(4.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)))
+                .stroke(egui::Stroke::new(1.0, palette::BORDER_NORMAL))
                 .inner_margin(8.0)
                 .show(ui, |ui| {
                     ui.set_width(panel_width - 16.0);
@@ -179,9 +191,41 @@ pub fn render_camera_settings(
 
                     let mut vp = viewport_state.lock();
 
-                    // FOV slider
+                    // Projection mode
                     ui.horizontal(|ui| {
-                        ui.label("FOV");
+                        ui.label("Projection");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let current_mode = vp.renderer.camera().projection_mode();
+                            let is_perspective = current_mode == ProjectionMode::Perspective;
+
+                            if ui
+                                .selectable_label(!is_perspective, "Ortho")
+                                .on_hover_text("Orthographic projection")
+                                .clicked()
+                            {
+                                vp.renderer
+                                    .camera_mut()
+                                    .set_projection_mode(ProjectionMode::Orthographic);
+                            }
+                            if ui
+                                .selectable_label(is_perspective, "Persp")
+                                .on_hover_text("Perspective projection")
+                                .clicked()
+                            {
+                                vp.renderer
+                                    .camera_mut()
+                                    .set_projection_mode(ProjectionMode::Perspective);
+                            }
+                        });
+                    });
+
+                    // FOV slider (only affects perspective, but also affects ortho scale)
+                    ui.horizontal(|ui| {
+                        let label = match vp.renderer.camera().projection_mode() {
+                            ProjectionMode::Perspective => "FOV",
+                            ProjectionMode::Orthographic => "FOV",
+                        };
+                        ui.label(label);
                         ui.add_space(ui.available_width() - 100.0);
                         let mut fov = vp.renderer.camera().fov_degrees();
                         if ui

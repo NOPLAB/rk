@@ -39,7 +39,7 @@ ron = "0.8"
 
 # CAD kernels
 # OpenCASCADE: GitHub version with default-features = false to link against pre-installed OCCT
-opencascade-sys = { git = "https://github.com/bschwind/opencascade-rs", default-features = false }
+opencascade-sys = { git = "https://github.com/NOPLAB/opencascade-rs", default-features = false }
 cxx = "1.0"
 truck-modeling = "0.6"
 truck-meshalgo = "0.4"

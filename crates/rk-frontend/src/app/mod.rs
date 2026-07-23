@@ -14,6 +14,7 @@ use crate::actions::{ActionContext, SharedKernel, dispatch_action};
 use crate::config::{SharedConfig, create_shared_config};
 use crate::fonts::configure_fonts;
 use crate::panels::PreferencesPanel;
+use crate::state::AppAction;
 use crate::state::{SharedAppState, SharedViewportState, ViewportState, create_shared_state};
 use crate::update::{SharedUpdateStatus, UpdateStatus, check_for_updates, create_update_status};
 use welcome::WelcomeDialog;
@@ -56,6 +57,9 @@ impl UrdfEditorApp {
 
         // Load configuration
         let config = create_shared_config();
+
+        // Apply theme from config
+        crate::theme::apply_theme(&cc.egui_ctx, &config);
 
         // Create viewport state if WGPU is available
         let viewport_state = cc.wgpu_render_state.as_ref().map(|render_state| {
@@ -126,6 +130,22 @@ impl UrdfEditorApp {
         }
     }
 
+    /// Handle global keyboard shortcuts
+    fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| {
+            // Ctrl+Z: Undo
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::Z) && !i.modifiers.shift {
+                self.app_state.lock().queue_action(AppAction::Undo);
+            }
+            // Ctrl+Y or Ctrl+Shift+Z: Redo
+            if (i.modifiers.ctrl && i.key_pressed(egui::Key::Y))
+                || (i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::Z))
+            {
+                self.app_state.lock().queue_action(AppAction::Redo);
+            }
+        });
+    }
+
     /// Show update notification banner
     fn show_update_banner(&mut self, ctx: &egui::Context) {
         let status = self.update_status.lock().clone();
@@ -140,7 +160,7 @@ impl UrdfEditorApp {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
                     ui.colored_label(
-                        egui::Color32::from_rgb(100, 200, 100),
+                        crate::theme::palette::SUCCESS,
                         format!(
                             "New version {} available! (current: {})",
                             latest_version,
@@ -168,6 +188,9 @@ impl UrdfEditorApp {
 
 impl eframe::App for UrdfEditorApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Handle global keyboard shortcuts first
+        self.handle_global_shortcuts(ctx);
+
         // Process pending actions
         self.process_actions();
 

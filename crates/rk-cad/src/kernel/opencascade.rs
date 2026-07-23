@@ -268,8 +268,8 @@ impl CadKernel for OpenCascadeKernel {
             let triangulation = ffi::BRep_Tool_Triangulation(face, location.pin_mut());
 
             if !triangulation.IsNull() {
-                let tri = ffi::Handle_Poly_Triangulation_Get(&triangulation)
-                    .map_err(|e| CadError::TessellationFailed(e.to_string()))?;
+                let tri = ffi::HandlePoly_Triangulation_Get(&triangulation)
+                    .map_err(|e: cxx::Exception| CadError::TessellationFailed(e.to_string()))?;
 
                 let nb_nodes = tri.NbNodes();
                 let nb_triangles = tri.NbTriangles();
@@ -361,18 +361,15 @@ impl CadKernel for OpenCascadeKernel {
     }
 
     fn create_sphere(&self, center: Vec3, radius: f32) -> CadResult<Solid> {
-        // Create sphere at origin then translate
-        let mut sphere = ffi::BRepPrimAPI_MakeSphere_ctor(radius as f64);
-        let sphere_shape = ffi::TopoDS_Shape_to_owned(sphere.pin_mut().Shape());
+        // Create sphere centered at the specified point
+        let origin = ffi::new_point(center.x as f64, center.y as f64, center.z as f64);
+        let dir = ffi::gp_Dir_ctor(0.0, 0.0, 1.0);
+        let ax2 = ffi::gp_Ax2_ctor(&origin, &dir);
 
-        // Create translation transform
-        let mut transform = ffi::new_transform();
-        let origin = ffi::new_point(0.0, 0.0, 0.0);
-        let target = ffi::new_point(center.x as f64, center.y as f64, center.z as f64);
-        transform.pin_mut().SetTranslation(&origin, &target);
-
-        let mut transformed = ffi::BRepBuilderAPI_Transform_ctor(&sphere_shape, &transform, true);
-        Ok(self.store_solid(ffi::TopoDS_Shape_to_owned(transformed.pin_mut().Shape())))
+        // Create sphere with axis, radius, and angle (PI for full sphere)
+        let mut sphere =
+            ffi::BRepPrimAPI_MakeSphere_ctor(&ax2, radius as f64, std::f64::consts::PI);
+        Ok(self.store_solid(ffi::TopoDS_Shape_to_owned(sphere.pin_mut().Shape())))
     }
 
     fn get_edges(&self, solid: &Solid) -> CadResult<Vec<EdgeInfo>> {
@@ -688,7 +685,7 @@ impl CadKernel for OpenCascadeKernel {
         }
 
         // Get the combined shape
-        let compound_shape = ffi::one_shape(&reader);
+        let compound_shape = ffi::one_shape_step(&reader);
 
         let mut solids = Vec::new();
         let mut meshes = Vec::new();
@@ -887,8 +884,8 @@ impl OpenCascadeKernel {
             let triangulation = ffi::BRep_Tool_Triangulation(face, location.pin_mut());
 
             if !triangulation.IsNull() {
-                let tri = ffi::Handle_Poly_Triangulation_Get(&triangulation)
-                    .map_err(|e| CadError::TessellationFailed(e.to_string()))?;
+                let tri = ffi::HandlePoly_Triangulation_Get(&triangulation)
+                    .map_err(|e: cxx::Exception| CadError::TessellationFailed(e.to_string()))?;
 
                 let nb_nodes = tri.NbNodes();
                 let nb_triangles = tri.NbTriangles();

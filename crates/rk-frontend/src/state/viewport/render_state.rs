@@ -3,9 +3,12 @@
 use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
+use uuid::Uuid;
 
-use rk_core::Part;
-use rk_renderer::{GizmoAxis, GizmoMode, Renderer, axis::AxisInstance};
+use rk_core::{GeometryType, Part, assembly::Link};
+use rk_renderer::{
+    GizmoAxis, GizmoMode, Renderer, axis::AxisInstance, constants::collision as collision_constants,
+};
 
 use super::{GizmoInteraction, GizmoTransform};
 
@@ -171,6 +174,65 @@ impl ViewportState {
         self.renderer.update_markers(&self.queue, &[]);
         self.renderer.update_selected_markers(&self.queue, &[]);
         self.renderer.hide_gizmo();
+        // Clear gizmo state to prevent stale hit testing
+        self.gizmo.part_id = None;
+        self.gizmo.editing_collision = None;
+        self.gizmo.editing_joint = None;
+    }
+
+    /// Update collision instances from assembly links
+    ///
+    /// # Arguments
+    /// * `links` - Iterator over (link_id, link) pairs
+    /// * `selected_collision` - Currently selected collision (link_id, collision_index)
+    pub fn update_collisions<'a>(
+        &mut self,
+        links: impl Iterator<Item = (&'a Uuid, &'a Link)>,
+        selected_collision: Option<(Uuid, usize)>,
+    ) {
+        let collision_renderer = self.renderer.collision_renderer_mut();
+        collision_renderer.clear();
+
+        for (link_id, link) in links {
+            let link_world_transform = link.world_transform;
+
+            for (collision_index, collision) in link.collisions.iter().enumerate() {
+                let collision_origin = collision.origin.to_mat4();
+                let world_transform = link_world_transform * collision_origin;
+
+                // Determine color based on selection state
+                let is_selected = selected_collision.is_some_and(|(sel_link, sel_idx)| {
+                    sel_link == *link_id && sel_idx == collision_index
+                });
+                let color = if is_selected {
+                    collision_constants::SELECTED_COLOR
+                } else {
+                    collision_constants::DEFAULT_COLOR
+                };
+
+                // Add collision to renderer based on geometry type
+                match &collision.geometry {
+                    GeometryType::Box { size } => {
+                        collision_renderer.add_box(world_transform, *size, color);
+                    }
+                    GeometryType::Sphere { radius } => {
+                        collision_renderer.add_sphere(world_transform, *radius, color);
+                    }
+                    GeometryType::Cylinder { radius, length } => {
+                        collision_renderer.add_cylinder(world_transform, *radius, *length, color);
+                    }
+                    GeometryType::Capsule { radius, length } => {
+                        collision_renderer.add_capsule(world_transform, *radius, *length, color);
+                    }
+                    GeometryType::Mesh { .. } => {
+                        // Mesh collisions are not rendered as primitives
+                        // They would use the actual mesh geometry if needed
+                    }
+                }
+            }
+        }
+
+        collision_renderer.upload(&self.queue);
     }
 
     /// Show gizmo for a part
@@ -207,6 +269,7 @@ impl ViewportState {
         self.renderer.hide_gizmo();
         self.gizmo.part_id = None;
         self.gizmo.editing_collision = None;
+        self.gizmo.editing_joint = None;
     }
 
     /// Show gizmo for a collision element
@@ -251,6 +314,47 @@ impl ViewportState {
         self.gizmo.editing_collision.is_some()
     }
 
+    /// Show gizmo for a joint element
+    ///
+    /// # Arguments
+    /// * `joint_id` - The joint being edited
+    /// * `parent_link_world_transform` - World transform of the parent link
+    /// * `joint_origin` - Local transform of the joint (from Pose)
+    pub fn show_gizmo_for_joint(
+        &mut self,
+        joint_id: uuid::Uuid,
+        parent_link_world_transform: Mat4,
+        joint_origin: Mat4,
+    ) {
+        // Compute joint world transform
+        let world_transform = parent_link_world_transform * joint_origin;
+
+        // Extract position from world transform
+        let (_, rotation, translation) = world_transform.to_scale_rotation_translation();
+
+        // Use fixed scale - shader handles distance-based scaling
+        let scale = 1.0;
+
+        // Store gizmo state
+        self.gizmo.gizmo_position = translation;
+        self.gizmo.gizmo_scale = scale;
+        self.gizmo.part_id = None;
+        self.gizmo.editing_collision = None;
+        self.gizmo.editing_joint = Some(joint_id);
+        self.gizmo.link_world_transform = parent_link_world_transform;
+        self.gizmo.part_start_transform = joint_origin;
+
+        // Set object rotation for local coordinate space
+        self.renderer
+            .set_gizmo_object_rotation(&self.queue, rotation);
+        self.renderer.show_gizmo(&self.queue, translation, scale);
+    }
+
+    /// Check if currently editing a joint element
+    pub fn is_editing_joint(&self) -> bool {
+        self.gizmo.editing_joint.is_some()
+    }
+
     /// Test if a screen position hits the gizmo
     pub fn gizmo_hit_test(
         &self,
@@ -259,7 +363,10 @@ impl ViewportState {
         width: f32,
         height: f32,
     ) -> GizmoAxis {
-        if self.gizmo.part_id.is_none() && self.gizmo.editing_collision.is_none() {
+        if self.gizmo.part_id.is_none()
+            && self.gizmo.editing_collision.is_none()
+            && self.gizmo.editing_joint.is_none()
+        {
             return GizmoAxis::None;
         }
 

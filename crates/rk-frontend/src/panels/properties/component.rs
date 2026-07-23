@@ -22,8 +22,9 @@ pub struct ChildJointInfo {
 pub struct PropertyContext<'a> {
     /// The part being edited
     pub part: &'a mut Part,
-    /// Parent link's world transform (if this part has a parent in assembly)
-    pub parent_world_transform: Option<Mat4>,
+    /// The link's world transform (the link this part belongs to)
+    /// Used for local coordinate calculations
+    pub link_world_transform: Option<Mat4>,
     /// The link's UUID (if any)
     pub link_id: Option<Uuid>,
     /// Copy of the link's collisions for display (modifications via actions)

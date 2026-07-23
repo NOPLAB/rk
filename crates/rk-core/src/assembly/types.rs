@@ -118,9 +118,8 @@ impl Default for CollisionElement {
         Self {
             name: None,
             origin: Pose::default(),
-            geometry: GeometryType::Mesh {
-                path: None,
-                scale: None,
+            geometry: GeometryType::Box {
+                size: [0.1, 0.1, 0.1],
             },
         }
     }

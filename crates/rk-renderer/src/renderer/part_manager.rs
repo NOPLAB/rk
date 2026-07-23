@@ -37,7 +37,12 @@ impl PartManager {
     /// Add a part to the manager.
     ///
     /// Returns the part's UUID for reference.
-    pub fn add(&mut self, device: &wgpu::Device, mesh_renderer: &MeshRenderer, part: &Part) -> Uuid {
+    pub fn add(
+        &mut self,
+        device: &wgpu::Device,
+        mesh_renderer: &MeshRenderer,
+        part: &Part,
+    ) -> Uuid {
         tracing::info!("PartManager::add called for '{}'", part.name);
         let data = MeshData::from_part(device, part);
         let bind_group = mesh_renderer.create_instance_bind_group(device, &data);

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::panels::Panel;
 use crate::state::{AppAction, SharedAppState};
+use crate::theme::palette;
 
 use toolbar::{render_unit_selector, show_tree_context_menu};
 use tree::{TreeAction, build_tree_structure, can_connect};
@@ -22,6 +23,8 @@ pub struct PartListPanel {
     editing_project_name: bool,
     /// Temporary buffer for editing project name
     project_name_buffer: String,
+    /// Collapsed nodes (folded tree items)
+    collapsed: HashSet<Uuid>,
 }
 
 impl PartListPanel {
@@ -31,6 +34,7 @@ impl PartListPanel {
             drop_target: None,
             editing_project_name: false,
             project_name_buffer: String::new(),
+            collapsed: HashSet::new(),
         }
     }
 
@@ -53,7 +57,7 @@ impl PartListPanel {
         } else if is_drop_target {
             egui::RichText::new(label_text)
                 .strong()
-                .color(egui::Color32::GREEN)
+                .color(palette::SUCCESS)
         } else {
             egui::RichText::new(label_text)
         };
@@ -122,21 +126,39 @@ impl PartListPanel {
         let has_children = children.is_some_and(|c| !c.is_empty());
         let has_parent = parts_with_parent.contains(&part_id);
         let is_selected = selected_id == Some(part_id);
+        let is_collapsed = self.collapsed.contains(&part_id);
 
         ui.push_id(part_id, |ui| {
             let indent = depth as f32 * 16.0;
 
-            // Tree icon
-            let icon = if has_children { "▼" } else { "●" };
-            let label_text = format!("{} {}", icon, name);
-
             ui.horizontal(|ui| {
                 ui.add_space(indent);
-                self.render_part_item(ui, part_id, &label_text, is_selected, has_parent, actions);
+
+                // Unity-style arrow toggle (only for items with children)
+                if has_children {
+                    let arrow = if is_collapsed { "▶" } else { "▼" };
+                    let arrow_response = ui.add(
+                        egui::Label::new(egui::RichText::new(arrow).weak())
+                            .selectable(false)
+                            .sense(egui::Sense::click()),
+                    );
+                    if arrow_response.clicked() {
+                        if is_collapsed {
+                            self.collapsed.remove(&part_id);
+                        } else {
+                            self.collapsed.insert(part_id);
+                        }
+                    }
+                } else {
+                    // Reserve space for alignment
+                    ui.add_space(ui.spacing().icon_width);
+                }
+
+                self.render_part_item(ui, part_id, name, is_selected, has_parent, actions);
             });
 
-            // Render children
-            if let Some(children) = children {
+            // Render children (only if not collapsed)
+            if !is_collapsed && let Some(children) = children {
                 for child_id in children {
                     self.render_part_tree(
                         ui,
@@ -150,26 +172,6 @@ impl PartListPanel {
                     );
                 }
             }
-        });
-    }
-
-    /// Render an orphaned (unconnected) part
-    fn render_orphan_part(
-        &mut self,
-        ui: &mut egui::Ui,
-        part_id: Uuid,
-        name: &str,
-        selected_id: Option<Uuid>,
-        actions: &mut Vec<TreeAction>,
-    ) {
-        let is_selected = selected_id == Some(part_id);
-        let label_text = format!("○ {}", name);
-
-        ui.push_id(part_id, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(16.0); // Indent under project root
-                self.render_part_item(ui, part_id, &label_text, is_selected, false, actions);
-            });
         });
     }
 
@@ -260,8 +262,7 @@ impl Panel for PartListPanel {
         let project_name = state.project.name.clone();
 
         // Build tree structure from Assembly
-        let (root_parts, children_map, parts_with_parent, unconnected_parts) =
-            build_tree_structure(&state);
+        let (root_parts, children_map, parts_with_parent) = build_tree_structure(&state);
 
         // Collect part names for display
         let part_names: HashMap<Uuid, String> = state
@@ -300,21 +301,6 @@ impl Panel for PartListPanel {
                 );
             }
 
-            // Render unconnected parts (parts not in assembly at all)
-            if !unconnected_parts.is_empty() {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(16.0);
-                    ui.label(egui::RichText::new("Unconnected").weak().italics());
-                });
-
-                for part_id in &unconnected_parts {
-                    if let Some(name) = part_names.get(part_id) {
-                        self.render_orphan_part(ui, *part_id, name, selected_id, &mut actions);
-                    }
-                }
-            }
-
             // Empty space area for context menu (right-click on empty space)
             let remaining = ui.available_size();
             if remaining.y > 0.0 {
@@ -330,7 +316,7 @@ impl Panel for PartListPanel {
                     ui.painter().rect_stroke(
                         rect,
                         2.0,
-                        egui::Stroke::new(1.0, egui::Color32::GRAY),
+                        egui::Stroke::new(1.0, palette::BORDER_NORMAL),
                         egui::StrokeKind::Outside,
                     );
                 }

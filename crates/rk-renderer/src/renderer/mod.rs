@@ -47,7 +47,7 @@ use crate::resources::MeshManager;
 use crate::scene::Scene;
 use crate::sub_renderers::{
     AxisInstance, AxisRenderer, CollisionRenderer, GizmoAxis, GizmoMode, GizmoRenderer, GizmoSpace,
-    GridRenderer, MarkerInstance, MarkerRenderer, MeshData, MeshRenderer, PlaneSelectorRenderer,
+    GridSubRenderer, MarkerInstance, MarkerRenderer, MeshData, MeshRenderer, PlaneSelectorRenderer,
     SketchRenderData, SketchRenderer,
 };
 
@@ -99,7 +99,7 @@ pub struct Renderer {
     msaa_view: Option<wgpu::TextureView>,
 
     // Sub-renderers
-    grid_renderer: GridRenderer,
+    grid_renderer: GridSubRenderer,
     mesh_renderer: MeshRenderer,
     axis_renderer: AxisRenderer,
     marker_renderer: MarkerRenderer,
@@ -130,7 +130,8 @@ impl Renderer {
         let camera_controller = CameraController::new(device, width, height);
 
         // Create depth and MSAA textures
-        let (depth_texture, depth_view) = gpu_resources::create_depth_texture(device, width, height);
+        let (depth_texture, depth_view) =
+            gpu_resources::create_depth_texture(device, width, height);
         let msaa_result = gpu_resources::create_msaa_texture(device, format, width, height);
         let (msaa_texture, msaa_view) = match msaa_result {
             Some((tex, view)) => (Some(tex), Some(view)),
@@ -138,7 +139,8 @@ impl Renderer {
         };
 
         // Initialize sub-renderers
-        let grid_renderer = GridRenderer::new(
+        let mut grid_renderer = GridSubRenderer::new();
+        grid_renderer.init(
             device,
             format,
             depth_format,
@@ -157,7 +159,8 @@ impl Renderer {
         // Initialize lighting system (needs mesh_renderer for bind group layout)
         let lighting_system = LightingSystem::new(device, &mesh_renderer);
 
-        let axis_renderer = AxisRenderer::new(
+        let mut axis_renderer = AxisRenderer::new();
+        axis_renderer.init(
             device,
             format,
             depth_format,
@@ -165,7 +168,8 @@ impl Renderer {
             camera_controller.buffer(),
         );
 
-        let marker_renderer = MarkerRenderer::new(
+        let mut marker_renderer = MarkerRenderer::new();
+        marker_renderer.init(
             device,
             format,
             depth_format,
@@ -181,7 +185,8 @@ impl Renderer {
             camera_controller.buffer(),
         );
 
-        let collision_renderer = CollisionRenderer::new(
+        let mut collision_renderer = CollisionRenderer::new();
+        collision_renderer.init(
             device,
             format,
             depth_format,
@@ -198,7 +203,8 @@ impl Renderer {
             camera_controller.buffer(),
         );
 
-        let plane_selector_renderer = PlaneSelectorRenderer::new(
+        let mut plane_selector_renderer = PlaneSelectorRenderer::new();
+        plane_selector_renderer.init(
             device,
             format,
             depth_format,
@@ -357,7 +363,8 @@ impl Renderer {
         self.height = height;
         self.camera_controller.update_aspect(width, height);
 
-        let (depth_texture, depth_view) = gpu_resources::create_depth_texture(device, width, height);
+        let (depth_texture, depth_view) =
+            gpu_resources::create_depth_texture(device, width, height);
         self.depth_texture = depth_texture;
         self.depth_view = depth_view;
 
@@ -385,7 +392,8 @@ impl Renderer {
 
     /// Update a part's transform.
     pub fn update_part_transform(&mut self, queue: &wgpu::Queue, part_id: Uuid, transform: Mat4) {
-        self.part_manager.update_transform(queue, part_id, transform);
+        self.part_manager
+            .update_transform(queue, part_id, transform);
     }
 
     /// Update a part's color.
@@ -436,8 +444,14 @@ impl Renderer {
         indices: &[u32],
         transform: Mat4,
     ) {
-        self.preview_manager
-            .set_preview_mesh(device, &self.mesh_renderer, vertices, normals, indices, transform);
+        self.preview_manager.set_preview_mesh(
+            device,
+            &self.mesh_renderer,
+            vertices,
+            normals,
+            indices,
+            transform,
+        );
     }
 
     /// Clear the preview mesh.
@@ -510,7 +524,8 @@ impl Renderer {
 
     /// Update selected marker display (rendered on top)
     pub fn update_selected_markers(&mut self, queue: &wgpu::Queue, instances: &[MarkerInstance]) {
-        self.marker_renderer.update_selected_instances(queue, instances);
+        self.marker_renderer
+            .update_selected_instances(queue, instances);
     }
 
     /// Show gizmo at position
@@ -638,7 +653,8 @@ impl Renderer {
 
     /// Set plane selector highlighted plane
     pub fn set_plane_selector_highlighted(&mut self, queue: &wgpu::Queue, plane_id: u32) {
-        self.plane_selector_renderer.set_highlighted(queue, plane_id);
+        self.plane_selector_renderer
+            .set_highlighted(queue, plane_id);
     }
 
     /// Get plane selector highlighted plane ID
@@ -654,7 +670,8 @@ impl Renderer {
         queue: &wgpu::Queue,
     ) {
         self.camera_controller.update(queue);
-        self.lighting_system.update(queue, self.camera_controller.camera().target);
+        self.lighting_system
+            .update(queue, self.camera_controller.camera().target);
 
         // Shadow pass
         let shadow_params = render_pass::ShadowPassParams {
@@ -769,7 +786,8 @@ impl Renderer {
 
     /// Apply shadow configuration.
     pub fn apply_shadow_config(&mut self, config: &ShadowConfig, device: &wgpu::Device) {
-        self.lighting_system.apply_shadow_config(config, device, &self.mesh_renderer);
+        self.lighting_system
+            .apply_shadow_config(config, device, &self.mesh_renderer);
     }
 
     /// Apply lighting configuration.

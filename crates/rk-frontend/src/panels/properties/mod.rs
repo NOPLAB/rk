@@ -74,16 +74,16 @@ impl Panel for PropertiesPanel {
         };
 
         // Find link info for this part
-        let (link_id, parent_world_transform, collisions, child_joints) = state
+        let (link_id, link_world_transform, collisions, child_joints) = state
             .project
             .assembly
             .find_link_by_part(selected_id)
             .map(|link| {
-                let parent_transform = state
-                    .project
-                    .assembly
-                    .get_parent_link(link.id)
-                    .map(|parent| parent.world_transform);
+                // Use the link's own world_transform for local coordinate calculations
+                // This ensures local coordinates are relative to the link's coordinate system,
+                // not the parent link's. This is important because joint origin changes
+                // should not affect the displayed local coordinates.
+                let link_transform = Some(link.world_transform);
 
                 // Collect child joint info
                 let children = state.project.assembly.get_children(link.id);
@@ -107,7 +107,7 @@ impl Panel for PropertiesPanel {
 
                 (
                     Some(link.id),
-                    parent_transform,
+                    link_transform,
                     link.collisions.clone(),
                     child_joints,
                 )
@@ -145,7 +145,7 @@ impl Panel for PropertiesPanel {
         // Create context for components
         let mut ctx = PropertyContext {
             part,
-            parent_world_transform,
+            link_world_transform,
             link_id,
             collisions,
             selected_collision_index,

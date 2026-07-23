@@ -8,6 +8,7 @@ description = "CAD kernel abstraction and sketch system for RK"
 [features]
 default = ["truck"]
 opencascade = ["dep:opencascade-sys", "dep:cxx"]
+opencascade-builtin = ["opencascade", "opencascade-sys/builtin"]
 truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh", "dep:truck-shapeops"]
 
 [dependencies]

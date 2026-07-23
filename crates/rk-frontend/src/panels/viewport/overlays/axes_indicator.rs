@@ -2,6 +2,8 @@
 
 use glam::Vec3;
 
+use crate::theme::palette;
+
 /// Render axes indicator in the bottom-right corner
 pub fn render_axes_indicator(ui: &mut egui::Ui, rect: egui::Rect, yaw: f32, pitch: f32) {
     let painter = ui.painter();
@@ -31,9 +33,9 @@ pub fn render_axes_indicator(ui: &mut egui::Ui, rect: egui::Rect, yaw: f32, pitc
     let (z_dir, z_depth) = project_axis(Vec3::Z);
 
     let mut axes = [
-        (x_depth, x_dir, "X", egui::Color32::from_rgb(255, 68, 68)),
-        (y_depth, y_dir, "Y", egui::Color32::from_rgb(68, 255, 68)),
-        (z_depth, z_dir, "Z", egui::Color32::from_rgb(68, 68, 255)),
+        (x_depth, x_dir, "X", palette::AXIS_X),
+        (y_depth, y_dir, "Y", palette::AXIS_Y),
+        (z_depth, z_dir, "Z", palette::AXIS_Z),
     ];
     axes.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 

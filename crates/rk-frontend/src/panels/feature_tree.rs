@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::panels::Panel;
 use crate::state::{AppAction, SharedAppState, SketchAction};
+use crate::theme::palette;
 
 /// Feature tree panel for CAD modeling
 pub struct FeatureTreePanel {
@@ -145,10 +146,7 @@ impl Panel for FeatureTreePanel {
         // Plane selection mode indicator and cancel button
         if is_plane_selection_mode {
             ui.separator();
-            ui.colored_label(
-                egui::Color32::from_rgb(77, 180, 255),
-                "Selecting reference plane...",
-            );
+            ui.colored_label(palette::ACCENT_HOVER, "Selecting reference plane...");
             ui.label("Click on a plane in the viewport to create a sketch.");
             if ui.button("Cancel").clicked() {
                 app_state

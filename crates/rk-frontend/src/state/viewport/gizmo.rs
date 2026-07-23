@@ -23,7 +23,9 @@ pub struct GizmoInteraction {
     pub part_id: Option<Uuid>,
     /// Collision being edited: (link_id, collision_index)
     pub editing_collision: Option<(Uuid, usize)>,
-    /// Link world transform for collision editing
+    /// Joint being edited: joint_id
+    pub editing_joint: Option<Uuid>,
+    /// Link world transform for collision/joint editing (parent link transform)
     pub link_world_transform: Mat4,
     pub gizmo_position: Vec3,
     pub gizmo_scale: f32,

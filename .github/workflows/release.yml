@@ -8,20 +8,18 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   build-windows:
     name: Build Windows
     runs-on: windows-latest
-    env:
-      VCPKG_DEFAULT_TRIPLET: x64-windows
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install OpenCASCADE via vcpkg
-        run: |
-          vcpkg install opencascade
-          echo "DEP_OCCT_ROOT=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -29,7 +27,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release
-        run: cargo build --release --package rk-frontend --features rk-cad/opencascade
+        run: cargo build --release --package rk-frontend --features rk-cad/opencascade-builtin
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -49,31 +50,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install OpenCASCADE
-        run: |
-          brew install opencascade cmake
-          echo "DEP_OCCT_ROOT=$(brew --prefix opencascade)" >> $GITHUB_ENV
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install build dependencies
+        run: brew install cmake
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build x86_64
-        run: cargo build --release --package rk-frontend --target x86_64-apple-darwin --features rk-cad/opencascade
-
-      - name: Build aarch64
-        run: cargo build --release --package rk-frontend --target aarch64-apple-darwin --features rk-cad/opencascade
-
-      - name: Create universal binary
-        run: |
-          mkdir -p target/release
-          lipo -create \
-            target/x86_64-apple-darwin/release/rk \
-            target/aarch64-apple-darwin/release/rk \
-            -output target/release/rk
+      - name: Build release
+        run: cargo build --release --package rk-frontend --features rk-cad/opencascade-builtin
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -89,9 +82,12 @@ jobs:
 
   build-linux:
     name: Build Linux
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install dependencies
         run: |
@@ -105,14 +101,7 @@ jobs:
             libgtk-3-dev \
             libfuse2 \
             cmake \
-            clang \
-            libocct-data-exchange-dev \
-            libocct-foundation-dev \
-            libocct-modeling-algorithms-dev \
-            libocct-modeling-data-dev \
-            libocct-ocaf-dev \
-            libocct-visualization-dev
-          echo "DEP_OCCT_ROOT=/usr" >> $GITHUB_ENV
+            clang
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -120,7 +109,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release
-        run: cargo build --release --package rk-frontend --features rk-cad/opencascade
+        run: cargo build --release --package rk-frontend --features rk-cad/opencascade-builtin
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -157,8 +149,8 @@ jobs:
           # Windows
           cp artifacts/windows-installer/*.exe "release/rk-${VERSION}-windows-x64-setup.exe" 2>/dev/null || true
 
-          # macOS
-          cp artifacts/macos-installer/*.dmg "release/rk-${VERSION}-macos-universal.dmg" 2>/dev/null || true
+          # macOS (arm64 only)
+          cp artifacts/macos-installer/*.dmg "release/rk-${VERSION}-macos-arm64.dmg" 2>/dev/null || true
 
           # Linux
           cp artifacts/linux-installers/*.deb "release/rk_${VERSION}_amd64.deb" 2>/dev/null || true

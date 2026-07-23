@@ -19,16 +19,10 @@ pub enum TreeAction {
 /// - root_parts: Parts whose links have no parent (top-level parts in hierarchy)
 /// - children_map: Map of part_id -> child part_ids
 /// - parts_with_parent: Set of parts that have a parent
-/// - unconnected_parts: Parts not in assembly at all
 #[allow(clippy::type_complexity)]
 pub fn build_tree_structure(
     state: &AppState,
-) -> (
-    Vec<Uuid>,
-    HashMap<Uuid, Vec<Uuid>>,
-    HashSet<Uuid>,
-    Vec<Uuid>,
-) {
+) -> (Vec<Uuid>, HashMap<Uuid, Vec<Uuid>>, HashSet<Uuid>) {
     let assembly = &state.project.assembly;
 
     // Map link_id -> part_id (only for links with parts)
@@ -66,7 +60,10 @@ pub fn build_tree_structure(
         .filter_map(|link_id| link_to_part.get(link_id).copied())
         .collect();
 
-    // Root parts: parts with a link but no parent (top of their hierarchy)
+    // Root parts: parts with no parent in the hierarchy
+    // This includes:
+    // 1. Parts with a link but no parent (top of their hierarchy)
+    // 2. Parts without a link (newly imported, not yet connected)
     let root_parts: Vec<Uuid> = state
         .project
         .parts()
@@ -76,27 +73,14 @@ pub fn build_tree_structure(
                 // Part has a link - it's a root if it has no parent
                 !assembly.parent.contains_key(&link_id)
             } else {
-                false // No link = not a root (it's unconnected)
+                // No link = show as root (unconnected part)
+                true
             }
         })
         .copied()
         .collect();
 
-    // Unconnected parts: parts not in assembly at all (no link)
-    let unconnected_parts: Vec<Uuid> = state
-        .project
-        .parts()
-        .keys()
-        .filter(|part_id| !part_to_link.contains_key(part_id))
-        .copied()
-        .collect();
-
-    (
-        root_parts,
-        children_map,
-        parts_with_parent,
-        unconnected_parts,
-    )
+    (root_parts, children_map, parts_with_parent)
 }
 
 /// Check if connecting parent to child would be valid (no cycle)

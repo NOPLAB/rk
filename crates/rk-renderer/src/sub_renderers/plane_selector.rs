@@ -7,7 +7,10 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
+use crate::context::RenderContext;
 use crate::pipeline::{PipelineConfig, create_camera_bind_group};
+use crate::scene::Scene;
+use crate::traits::SubRenderer;
 
 /// Vertex for plane selector rendering.
 #[repr(C)]
@@ -95,14 +98,16 @@ pub mod plane_ids {
 
 /// Plane selector renderer for reference plane visualization.
 pub struct PlaneSelectorRenderer {
-    pipeline: wgpu::RenderPipeline,
-    camera_bind_group: wgpu::BindGroup,
+    enabled: bool,
+    initialized: bool,
+    pipeline: Option<wgpu::RenderPipeline>,
+    camera_bind_group: Option<wgpu::BindGroup>,
     #[allow(dead_code)]
-    uniform_bind_group_layout: wgpu::BindGroupLayout,
-    uniform_buffer: wgpu::Buffer,
-    uniform_bind_group: wgpu::BindGroup,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
+    uniform_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    uniform_buffer: Option<wgpu::Buffer>,
+    uniform_bind_group: Option<wgpu::BindGroup>,
+    vertex_buffer: Option<wgpu::Buffer>,
+    index_buffer: Option<wgpu::Buffer>,
     index_count: u32,
 
     /// Currently highlighted plane ID.
@@ -122,14 +127,34 @@ impl PlaneSelectorRenderer {
     const XZ_COLOR: [f32; 4] = [0.3, 0.9, 0.5, 0.25]; // Green
     const YZ_COLOR: [f32; 4] = [0.9, 0.5, 0.3, 0.25]; // Red
 
-    /// Creates a new plane selector renderer.
-    pub fn new(
+    /// Creates a new plane selector renderer (uninitialized).
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            initialized: false,
+            pipeline: None,
+            camera_bind_group: None,
+            uniform_bind_group_layout: None,
+            uniform_buffer: None,
+            uniform_bind_group: None,
+            vertex_buffer: None,
+            index_buffer: None,
+            index_count: 0,
+            highlighted_plane: plane_ids::NONE,
+            plane_size: Self::DEFAULT_PLANE_SIZE,
+            visible: false,
+        }
+    }
+
+    /// Initialize the plane selector renderer with GPU resources.
+    pub fn init(
+        &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         camera_buffer: &wgpu::Buffer,
-    ) -> Self {
+    ) {
         let camera_bind_group = create_camera_bind_group(
             device,
             camera_bind_group_layout,
@@ -203,19 +228,15 @@ impl PlaneSelectorRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        Self {
-            pipeline,
-            camera_bind_group,
-            uniform_bind_group_layout,
-            uniform_buffer,
-            uniform_bind_group,
-            vertex_buffer,
-            index_buffer,
-            index_count: indices.len() as u32,
-            highlighted_plane: plane_ids::NONE,
-            plane_size: Self::DEFAULT_PLANE_SIZE,
-            visible: false,
-        }
+        self.pipeline = Some(pipeline);
+        self.camera_bind_group = Some(camera_bind_group);
+        self.uniform_bind_group_layout = Some(uniform_bind_group_layout);
+        self.uniform_buffer = Some(uniform_buffer);
+        self.uniform_bind_group = Some(uniform_bind_group);
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
+        self.index_count = indices.len() as u32;
+        self.initialized = true;
     }
 
     /// Generate vertices and indices for the three reference planes.
@@ -370,25 +391,79 @@ impl PlaneSelectorRenderer {
 
     /// Update the uniform buffer.
     fn update_uniform(&self, queue: &wgpu::Queue) {
-        let uniform = PlaneUniform {
-            highlighted_plane: self.highlighted_plane,
-            plane_size: self.plane_size,
-            _padding: [0.0; 2],
-        };
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
+        if let Some(ref buffer) = self.uniform_buffer {
+            let uniform = PlaneUniform {
+                highlighted_plane: self.highlighted_plane,
+                plane_size: self.plane_size,
+                _padding: [0.0; 2],
+            };
+            queue.write_buffer(buffer, 0, bytemuck::bytes_of(&uniform));
+        }
     }
 
     /// Render the plane selector.
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        if !self.visible {
+        if !self.visible || !self.initialized {
             return;
         }
 
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-        render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let camera_bind_group = self.camera_bind_group.as_ref().unwrap();
+        let uniform_bind_group = self.uniform_bind_group.as_ref().unwrap();
+        let vertex_buffer = self.vertex_buffer.as_ref().unwrap();
+        let index_buffer = self.index_buffer.as_ref().unwrap();
+
+        render_pass.set_pipeline(pipeline);
+        render_pass.set_bind_group(0, camera_bind_group, &[]);
+        render_pass.set_bind_group(1, uniform_bind_group, &[]);
+        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw_indexed(0..self.index_count, 0, 0..1);
+    }
+}
+
+impl Default for PlaneSelectorRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SubRenderer for PlaneSelectorRenderer {
+    fn name(&self) -> &str {
+        "plane_selector"
+    }
+
+    fn priority(&self) -> i32 {
+        super::priorities::PLANE_SELECTOR
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    fn on_init(&mut self, ctx: &RenderContext) {
+        self.init(
+            ctx.device(),
+            ctx.surface_format(),
+            ctx.depth_format(),
+            ctx.camera_bind_group_layout(),
+            ctx.camera_buffer(),
+        );
+    }
+
+    fn on_resize(&mut self, _ctx: &RenderContext, _width: u32, _height: u32) {
+        // Plane selector doesn't need to respond to resize
+    }
+
+    fn prepare(&mut self, _ctx: &RenderContext, _scene: &Scene) {
+        // Plane selector data is updated externally
+    }
+
+    fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, _scene: &Scene) {
+        PlaneSelectorRenderer::render(self, pass);
     }
 }

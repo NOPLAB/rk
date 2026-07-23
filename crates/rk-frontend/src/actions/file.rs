@@ -131,6 +131,18 @@ fn handle_import_urdf(path: std::path::PathBuf, ctx: &ActionContext) {
                         .camera_mut()
                         .fit_all(total_center, max_radius * 2.0);
                 }
+
+                // Apply world transforms to renderer
+                // (import_urdf already computed world_transforms)
+                let mut vp = viewport_state.lock();
+                for link in project.assembly.links.values() {
+                    if let Some(part_id) = link.part_id
+                        && let Some(part) = project.get_part(part_id)
+                    {
+                        let result = link.world_transform * part.origin_transform;
+                        vp.update_part_transform(part_id, result);
+                    }
+                }
             }
 
             // Load into app state
@@ -164,8 +176,13 @@ fn handle_save_project(path: Option<std::path::PathBuf>, ctx: &ActionContext) {
 
 fn handle_load_project(path: std::path::PathBuf, ctx: &ActionContext) {
     match Project::load(&path) {
-        Ok(project) => {
+        Ok(mut project) => {
             tracing::info!("Loaded project: {}", project.name);
+
+            // Update world transforms (not serialized, need to recompute)
+            project
+                .assembly
+                .update_world_transforms_with_current_positions();
 
             // Clear viewport
             if let Some(viewport_state) = ctx.viewport_state {
@@ -173,10 +190,21 @@ fn handle_load_project(path: std::path::PathBuf, ctx: &ActionContext) {
                 viewport_state.lock().clear_overlays();
             }
 
-            // Load parts into viewport
+            // Load parts into viewport with correct transforms
             if let Some(viewport_state) = ctx.viewport_state {
                 for part in project.parts_iter() {
                     viewport_state.lock().add_part(part);
+                }
+
+                // Apply world transforms to renderer
+                let mut vp = viewport_state.lock();
+                for link in project.assembly.links.values() {
+                    if let Some(part_id) = link.part_id
+                        && let Some(part) = project.get_part(part_id)
+                    {
+                        let result = link.world_transform * part.origin_transform;
+                        vp.update_part_transform(part_id, result);
+                    }
                 }
             }
 

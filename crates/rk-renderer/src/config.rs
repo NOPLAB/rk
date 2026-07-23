@@ -24,11 +24,30 @@ pub struct GridConfig {
 
 impl Default for GridConfig {
     fn default() -> Self {
+        Self::dark()
+    }
+}
+
+impl GridConfig {
+    /// Create dark theme grid config
+    pub fn dark() -> Self {
         Self {
             enabled: true,
             size: 10.0,
             spacing: 1.0,
             line_color: [0.3, 0.3, 0.3],
+            x_axis_color: [0.8, 0.2, 0.2],
+            y_axis_color: [0.2, 0.8, 0.2],
+        }
+    }
+
+    /// Create light theme grid config
+    pub fn light() -> Self {
+        Self {
+            enabled: true,
+            size: 10.0,
+            spacing: 1.0,
+            line_color: [0.7, 0.7, 0.7],
             x_axis_color: [0.8, 0.2, 0.2],
             y_axis_color: [0.2, 0.8, 0.2],
         }
@@ -46,8 +65,23 @@ pub struct ViewportConfig {
 
 impl Default for ViewportConfig {
     fn default() -> Self {
+        Self::dark()
+    }
+}
+
+impl ViewportConfig {
+    /// Create dark theme viewport config
+    pub fn dark() -> Self {
         Self {
             background_color: [0.15, 0.15, 0.18, 1.0],
+            msaa_sample_count: 4,
+        }
+    }
+
+    /// Create light theme viewport config
+    pub fn light() -> Self {
+        Self {
+            background_color: [0.92, 0.92, 0.94, 1.0],
             msaa_sample_count: 4,
         }
     }
@@ -191,5 +225,33 @@ impl RendererConfig {
     /// Create a new renderer configuration with default values
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Apply dark theme colors to viewport and grid
+    pub fn apply_dark_theme(&mut self) {
+        self.viewport = ViewportConfig {
+            msaa_sample_count: self.viewport.msaa_sample_count,
+            ..ViewportConfig::dark()
+        };
+        self.grid = GridConfig {
+            enabled: self.grid.enabled,
+            size: self.grid.size,
+            spacing: self.grid.spacing,
+            ..GridConfig::dark()
+        };
+    }
+
+    /// Apply light theme colors to viewport and grid
+    pub fn apply_light_theme(&mut self) {
+        self.viewport = ViewportConfig {
+            msaa_sample_count: self.viewport.msaa_sample_count,
+            ..ViewportConfig::light()
+        };
+        self.grid = GridConfig {
+            enabled: self.grid.enabled,
+            size: self.grid.size,
+            spacing: self.grid.spacing,
+            ..GridConfig::light()
+        };
     }
 }

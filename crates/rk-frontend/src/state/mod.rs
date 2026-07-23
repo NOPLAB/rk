@@ -1,10 +1,12 @@
 //! Application state module
 
 mod editor;
+mod history;
 mod sketch;
 mod viewport;
 
 pub use editor::{EditorTool, PrimitiveType};
+pub use history::UndoHistory;
 pub use sketch::{
     CadState, ConstraintToolState, DimensionDialogState, EditorMode, ExtrudeDialogState,
     ExtrudeDirection, InProgressEntity, PlaneSelectionState, ReferencePlane, SketchAction,
@@ -92,6 +94,10 @@ pub enum AppAction {
         limits: Option<JointLimits>,
     },
 
+    // Joint editing actions
+    /// Set the joint being edited (for gizmo display)
+    SetEditingJoint(Option<Uuid>),
+
     // Collision actions
     /// Select a collision element (link_id, collision_index)
     SelectCollision(Option<(Uuid, usize)>),
@@ -118,6 +124,12 @@ pub enum AppAction {
     // Sketch/CAD actions
     /// Execute a sketch action
     SketchAction(SketchAction),
+
+    // History actions
+    /// Undo the last action
+    Undo,
+    /// Redo the last undone action
+    Redo,
 }
 
 /// Angle display mode for joint sliders
@@ -134,10 +146,14 @@ pub struct AppState {
     pub project: Project,
     /// CAD state (sketches, features, editor mode)
     pub cad: CadState,
+    /// Undo/redo history
+    pub history: UndoHistory,
     /// Currently selected part
     pub selected_part: Option<Uuid>,
     /// Currently selected collision element (link_id, collision_index)
     pub selected_collision: Option<(Uuid, usize)>,
+    /// Currently editing joint (for gizmo display)
+    pub editing_joint_id: Option<Uuid>,
     /// Hovered part
     pub hovered_part: Option<Uuid>,
     /// Current editor tool
@@ -165,8 +181,10 @@ impl Default for AppState {
         Self {
             project: Project::default(),
             cad: CadState::default(),
+            history: UndoHistory::default(),
             selected_part: None,
             selected_collision: None,
+            editing_joint_id: None,
             hovered_part: None,
             current_tool: EditorTool::default(),
             symmetry_mode: false,
@@ -247,6 +265,8 @@ impl AppState {
     /// Select a part
     pub fn select_part(&mut self, id: Option<Uuid>) {
         self.selected_part = id;
+        // Clear joint editing when selecting a part
+        self.editing_joint_id = None;
     }
 
     /// Queue an action
@@ -263,8 +283,10 @@ impl AppState {
     pub fn new_project(&mut self) {
         self.project = Project::default();
         self.cad = CadState::default();
+        self.history.clear();
         self.selected_part = None;
         self.selected_collision = None;
+        self.editing_joint_id = None;
         self.project_path = None;
         self.modified = false;
     }
@@ -273,9 +295,11 @@ impl AppState {
     pub fn load_project(&mut self, project: Project, path: PathBuf) {
         self.project = project;
         self.cad = CadState::default(); // TODO: Load CAD data from project
+        self.history.clear();
         self.project_path = Some(path);
         self.selected_part = None;
         self.selected_collision = None;
+        self.editing_joint_id = None;
         self.modified = false;
     }
 }
