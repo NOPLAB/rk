@@ -770,8 +770,13 @@ impl Default for CadBody {
 impl CadBody {
     /// Create a new body with the given name
     pub fn new(name: impl Into<String>) -> Self {
+        Self::with_id(Uuid::new_v4(), name)
+    }
+
+    /// Create a body with a specific ID, so IDs stay stable across rebuilds
+    pub fn with_id(id: Uuid, name: impl Into<String>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id,
             name: name.into(),
             solid: None,
             mesh_cache: None,

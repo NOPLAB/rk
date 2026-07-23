@@ -243,10 +243,15 @@ impl FeatureHistory {
 
             match entry.feature.execute(kernel, &self.sketches, &solids) {
                 Ok(solid) => {
-                    // Create a new body for the result
-                    let mut body = CadBody::new(entry.feature.name());
+                    // Reuse the previous body ID so references to this body
+                    // (e.g. Boolean target_body) stay valid across rebuilds
+                    let body_id = entry
+                        .created_bodies
+                        .first()
+                        .copied()
+                        .unwrap_or_else(Uuid::new_v4);
+                    let mut body = CadBody::with_id(body_id, entry.feature.name());
                     body.source_feature = Some(entry.feature.id());
-                    let body_id = body.id;
 
                     // Store the solid
                     solids.insert(body_id, solid.clone());
@@ -298,16 +303,20 @@ impl FeatureHistory {
                 continue;
             }
 
-            // Clear previous results for this entry
-            entry.created_bodies.clear();
+            // Clear previous results for this entry (created_bodies is kept so
+            // the body ID can be reused on success)
             entry.modified_bodies.clear();
             entry.deleted_bodies.clear();
 
             match entry.feature.execute(kernel, &self.sketches, &solids) {
                 Ok(solid) => {
-                    let mut body = CadBody::new(entry.feature.name());
+                    let body_id = entry
+                        .created_bodies
+                        .first()
+                        .copied()
+                        .unwrap_or_else(Uuid::new_v4);
+                    let mut body = CadBody::with_id(body_id, entry.feature.name());
                     body.source_feature = Some(entry.feature.id());
-                    let body_id = body.id;
 
                     solids.insert(body_id, solid.clone());
                     body.solid = Some(solid);
@@ -348,6 +357,8 @@ impl CadData {
 mod tests {
     use super::*;
     use crate::feature::ExtrudeDirection;
+    use crate::sketch::SketchPlane;
+    use glam::Vec2;
 
     #[test]
     fn test_add_feature() {
@@ -386,5 +397,41 @@ mod tests {
         // Roll forward
         history.rollback_to_end();
         assert_eq!(history.effective_len(), 3);
+    }
+
+    #[test]
+    fn test_rebuild_keeps_body_ids_stable() {
+        let kernel = crate::kernel::default_kernel();
+        if !kernel.is_available() {
+            return; // NullKernel build; nothing to execute
+        }
+
+        let mut history = FeatureHistory::new();
+        let mut sketch = Sketch::new("Profile", SketchPlane::xy());
+        sketch.add_rectangle(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0));
+        let sketch_id = history.add_sketch(sketch);
+
+        let f1 = Feature::extrude("E1", sketch_id, 5.0, ExtrudeDirection::Positive);
+        let f2 = Feature::extrude("E2", sketch_id, 2.0, ExtrudeDirection::Negative);
+        let f2_id = f2.id();
+        history.add_feature(f1);
+        history.add_feature(f2);
+
+        history.rebuild(&*kernel).unwrap();
+        let mut first: Vec<Uuid> = history.bodies().keys().copied().collect();
+        first.sort();
+        assert_eq!(first.len(), 2, "each extrude should create a body");
+
+        // Full rebuild must not change body IDs
+        history.rebuild(&*kernel).unwrap();
+        let mut second: Vec<Uuid> = history.bodies().keys().copied().collect();
+        second.sort();
+        assert_eq!(first, second);
+
+        // Partial rebuild must not change body IDs either
+        history.rebuild_from(f2_id, &*kernel).unwrap();
+        let mut third: Vec<Uuid> = history.bodies().keys().copied().collect();
+        third.sort();
+        assert_eq!(first, third);
     }
 }

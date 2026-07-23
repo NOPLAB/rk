@@ -138,7 +138,7 @@ pub enum CadError {
 pub type CadResult<T> = Result<T, CadError>;
 
 /// A tessellated mesh output from the CAD kernel
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TessellatedMesh {
     /// Vertex positions (3 floats per vertex)
     pub vertices: Vec<[f32; 3]>,
