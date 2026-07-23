@@ -9,7 +9,7 @@ default = []
 cad = ["dep:rk-cad"]
 
 [dependencies]
-glam = { workspace = true, features = ["serde"] }
+glam = { workspace = true }
 serde = { workspace = true }
 ron = { workspace = true }
 uuid = { workspace = true }
@@ -19,7 +19,7 @@ stl_io = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }
 dae-parser = { workspace = true }
-rk-cad = { path = "../rk-cad", optional = true }
+rk-cad = { workspace = true, optional = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
