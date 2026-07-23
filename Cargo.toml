@@ -61,4 +61,5 @@ tempfile = "3"
 # Internal crates
 rk-core = { path = "crates/rk-core" }
 rk-cad = { path = "crates/rk-cad" }
+rk-engine = { path = "crates/rk-engine" }
 rk-renderer = { path = "crates/rk-renderer" }

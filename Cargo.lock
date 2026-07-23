@@ -3284,6 +3284,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rk-engine"
+version = "0.1.0"
+dependencies = [
+ "approx 0.5.1",
+ "glam",
+ "parking_lot",
+ "rk-cad",
+ "rk-core",
+ "ron",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "rk-frontend"
 version = "0.1.0"
 dependencies = [
