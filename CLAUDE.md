@@ -43,15 +43,19 @@ cargo build --no-default-features        # No CAD kernel (NullKernel)
 
 ## Architecture
 
-RK is a 3D CAD editor built with Rust. The codebase is organized as a Cargo workspace with four crates:
+RK is a 3D CAD editor built with Rust, evolving into an agentic platform
+where AI agents drive CAD (and later simulation) through a headless
+engine. The codebase is a Cargo workspace with five crates:
 
 ### Crate Dependencies
 
 ```
-rk-frontend (egui application)
-    ├── rk-cad (CAD kernel abstraction)
+rk-frontend (egui application; UI state + rendering glue only)
+    ├── rk-engine (headless engine: document, commands, events, undo)
+    │       ├── rk-core (data structures)
+    │       └── rk-cad (CAD kernel abstraction)
     └── rk-renderer (wgpu rendering)
-            └── rk-core (data structures)
+            └── rk-core
 ```
 
 ### rk-core
@@ -74,6 +78,25 @@ CAD kernel abstraction and parametric modeling:
 - **Feature operations**: Extrude, revolve, boolean operations on sketches to create 3D solids
 - **Parametric history**: Ordered feature list with rollback/rebuild support
 
+### rk-engine
+
+Headless CAD engine — the single owner and mutator of all domain state.
+GUI and (future) agent frontends are both clients:
+
+- `Document`: `rk_core::Project` + `rk_cad::CadData`, persisted as RON v2
+  (`.rk`). v1 files load with empty CAD data; bodies are rebuilt on load
+- `Command` / `Event`: serde enums (JSON-tagged) — the only mutation path
+  and the change-notification stream. Events carry IDs; bulk data
+  (meshes) is pulled from the engine by ID
+- `Engine::apply(cmd) -> Result<Vec<Event>>`: atomic (snapshot rollback
+  on failure). `apply_interactive`/`end_interaction` coalesce a drag
+  into one undo step, with cancel support
+- Undo/redo: full-document snapshots (max 50) + an append-only command
+  journal (`command_log()`) for auditing and future branching
+- `preview_extrude`: pure query for dialog previews
+- Adding a Command/Event variant: update the exhaustive lists in
+  `crates/rk-engine/tests/serde_roundtrip.rs` (compile error reminds you)
+
 ### rk-renderer
 
 WGPU-based 3D renderer with plugin architecture:
@@ -88,25 +111,44 @@ WGPU-based 3D renderer with plugin architecture:
 
 ### rk-frontend
 
-egui-based GUI application:
+egui-based GUI application. Owns UI state only — all domain state lives
+in the engine:
 
-- `AppState`: Central application state with action queue pattern
-- `AppAction`: Enum defining all possible state mutations (file, part, assembly, joint, collision, sketch actions)
-- `SharedAppState`: Thread-safe state wrapper (`Arc<Mutex<AppState>>`)
-- `CadState`: CAD-specific state including `EditorMode` (Assembly/Sketch modes)
-- `SketchModeState`: Sketch editing state with tools, selection, and in-progress entities
+- `AppState`: selection, `EditorMode` (Assembly/PlaneSelection/Sketch),
+  tools, dialogs, and a `SharedEngine` handle. `SharedAppState` =
+  `Arc<Mutex<AppState>>`
+- `AppAction`: UI-only variants (`SelectPart`, `SketchUi(...)`) plus
+  `Cmd(Command)`, `Interactive`/`EndInteraction` (drag sessions), and
+  `Composite(...)` (UI + command combos)
+- `actions/`: dispatch (`mod.rs`), UI handlers (`ui.rs`), composites
+  (`composite.rs`), constraint workflow (`constraints.rs`)
+- `sync.rs`: `apply_events` — the single place engine events become
+  renderer updates; `DocumentReset` triggers a full scene rebuild
+- `SketchModeState`: tools, selection, and coordinate-based
+  `InProgressEntity` previews (shapes commit as one atomic command)
 - Panels in `panels/` module for UI components
 
 ## Key Patterns
 
-- **Action Queue**: UI components queue `AppAction` variants, which are processed centrally in the update loop
+- **Command/Event**: panels queue `AppAction`s; per frame the dispatcher
+  applies engine commands and `sync::apply_events` updates the renderer.
+  Never mutate domain state directly — add a `Command` instead
+- **Interaction sessions**: continuous edits (gizmo drags, DragValue
+  bursts) use `apply_interactive` under one session ID so the whole
+  gesture is a single undo step
+- **Engine reads**: lock briefly, clone what you need, release. Never
+  hold the engine guard while locking the viewport in panel code
 - **Plugin Renderer**: New rendering features implement `SubRenderer` trait and register with `RendererRegistry`
-- **Shared State**: `SharedAppState` (`Arc<Mutex<AppState>>`) is passed to panels and the renderer
 - **Editor Modes**: `EditorMode::Assembly` for 3D editing, `EditorMode::Sketch` for 2D sketch editing
-- **CAD Kernel Abstraction**: `CadKernel` trait allows switching between geometry backends via feature flags. `SharedKernel` (`Arc<dyn CadKernel>`) is passed to action handlers
-- **WASM Conditional Compilation**: Platform-specific code uses `cfg(target_arch = "wasm32")`. File I/O actions have separate native/WASM implementations (`file.rs` vs `file_wasm.rs`)
+- **CAD Kernel Abstraction**: `CadKernel` trait allows switching between geometry backends via feature flags. The engine owns the kernel (`Engine::kernel()`)
 
 ## Platform Support
 
-- Native: Linux (X11/Wayland), Windows, macOS
-- WASM: Web browser support with conditional compilation (`cfg(target_arch = "wasm32")`)
+- Native: Linux (X11/Wayland), Windows, macOS (WASM support was removed)
+
+## Roadmap (Phase 0 done)
+
+- Phase 0: headless `rk-engine` extraction — done
+- Phase 1: MCP server (`rk-mcp`) + headless rendering (screenshots for agents)
+- Phase 2: Tauri + React frontend, egui retirement
+- Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)
