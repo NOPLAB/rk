@@ -41,6 +41,15 @@ truck-topology = "0.6"
 truck-polymesh = "0.6"
 truck-shapeops = "0.4"
 
+# MCP server
+rmcp = { version = "0.9", default-features = false, features = ["base64", "server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+schemars = "1"
+png = "0.18"
+base64 = "0.22"
+anyhow = "1"
+pollster = "0.4"
+
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
@@ -63,3 +72,4 @@ rk-core = { path = "crates/rk-core" }
 rk-cad = { path = "crates/rk-cad" }
 rk-engine = { path = "crates/rk-engine" }
 rk-renderer = { path = "crates/rk-renderer" }
+rk-mcp = { path = "crates/rk-mcp" }
