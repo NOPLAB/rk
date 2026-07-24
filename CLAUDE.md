@@ -14,6 +14,9 @@ cargo build --release
 # Run the application
 cargo run -p rk-frontend
 
+# Run the MCP server (stdio; logs go to stderr)
+cargo run -p rk-mcp
+
 # Run tests
 cargo test
 
@@ -45,7 +48,7 @@ cargo build --no-default-features        # No CAD kernel (NullKernel)
 
 RK is a 3D CAD editor built with Rust, evolving into an agentic platform
 where AI agents drive CAD (and later simulation) through a headless
-engine. The codebase is a Cargo workspace with five crates:
+engine. The codebase is a Cargo workspace with six crates:
 
 ### Crate Dependencies
 
@@ -56,6 +59,10 @@ rk-frontend (egui application; UI state + rendering glue only)
     │       └── rk-cad (CAD kernel abstraction)
     └── rk-renderer (wgpu rendering)
             └── rk-core
+
+rk-mcp (MCP server for agents; stdio transport)
+    ├── rk-engine
+    └── rk-renderer (headless: offscreen texture + readback)
 ```
 
 ### rk-core
@@ -128,6 +135,22 @@ in the engine:
   `InProgressEntity` previews (shapes commit as one atomic command)
 - Panels in `panels/` module for UI components
 
+### rk-mcp
+
+MCP server (rmcp, stdio transport) that lets AI agents drive the engine.
+stdout carries JSON-RPC — log to stderr only:
+
+- Tools: `apply` (batch of `Command`s as JSON; validated first, applied
+  in order), `describe_scene` (document snapshot as JSON),
+  `screenshot` (headless render, PNG), `command_reference` (docs)
+- `headless.rs`: surfaceless wgpu device; rebuilds a fresh
+  `rk_renderer::Renderer` scene from the engine per shot, renders into a
+  COPY_SRC texture, reads back and encodes PNG. GPU is initialized
+  lazily on first screenshot
+- `src/commands_reference.md` documents every command;
+  `tests/reference_examples.rs` deserializes each ```json example and
+  fails compilation when a `Command` variant is added but undocumented
+
 ## Key Patterns
 
 - **Command/Event**: panels queue `AppAction`s; per frame the dispatcher
@@ -146,9 +169,9 @@ in the engine:
 
 - Native: Linux (X11/Wayland), Windows, macOS (WASM support was removed)
 
-## Roadmap (Phase 0 done)
+## Roadmap (Phases 0-1 done)
 
 - Phase 0: headless `rk-engine` extraction — done
-- Phase 1: MCP server (`rk-mcp`) + headless rendering (screenshots for agents)
+- Phase 1: MCP server (`rk-mcp`) + headless rendering — done
 - Phase 2: Tauri + React frontend, egui retirement
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)
