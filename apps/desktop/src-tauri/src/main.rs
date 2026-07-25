@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use rk_engine::{Command, Engine, Event, SharedEngine};
@@ -77,6 +78,53 @@ fn engine_apply(
     })
 }
 
+/// Apply one command inside an interaction session (gizmo drag). The whole
+/// session collapses into a single undo step.
+#[tauri::command]
+fn engine_apply_interactive(
+    state: State<'_, EngineState>,
+    session: Uuid,
+    command: serde_json::Value,
+) -> Result<ApplyOutcome, String> {
+    let cmd: Command =
+        serde_json::from_value(command).map_err(|e| format!("not a valid command: {e}"))?;
+    let mut engine = state.engine.lock();
+    match engine.apply_interactive(session, cmd) {
+        Ok(events) => Ok(ApplyOutcome {
+            applied: 1,
+            events,
+            error: None,
+        }),
+        Err(e) => Ok(ApplyOutcome {
+            applied: 0,
+            events: Vec::new(),
+            error: Some(ApplyFailure {
+                index: 0,
+                message: e.to_string(),
+            }),
+        }),
+    }
+}
+
+/// Close an interaction session. `cancel` rolls the document back to the
+/// state from before the drag started.
+#[tauri::command]
+fn engine_end_interaction(
+    state: State<'_, EngineState>,
+    session: Uuid,
+    cancel: bool,
+) -> Result<ApplyOutcome, String> {
+    let mut engine = state.engine.lock();
+    let events = engine
+        .end_interaction(session, cancel)
+        .map_err(|e| e.to_string())?;
+    Ok(ApplyOutcome {
+        applied: 1,
+        events,
+        error: None,
+    })
+}
+
 #[derive(serde::Serialize)]
 struct PartInfo {
     id: Uuid,
@@ -84,6 +132,9 @@ struct PartInfo {
     color: [f32; 4],
     has_mesh: bool,
     origin_transform: glam::Mat4,
+    /// World transform of the link owning this part (identity when the part
+    /// is not in the assembly). `render = parent_transform × origin_transform`
+    parent_transform: glam::Mat4,
 }
 
 #[derive(serde::Serialize)]
@@ -138,6 +189,11 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
     let engine = state.engine.lock();
     let assembly = engine.assembly();
     let part_of = |link_id: Uuid| assembly.links.get(&link_id).and_then(|l| l.part_id);
+    let link_world: HashMap<Uuid, glam::Mat4> = assembly
+        .links
+        .values()
+        .filter_map(|l| l.part_id.map(|p| (p, l.world_transform)))
+        .collect();
     let mut links: Vec<LinkInfo> = assembly
         .links
         .values()
@@ -179,6 +235,10 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
                 color: p.color,
                 has_mesh: !p.vertices.is_empty(),
                 origin_transform: p.origin_transform,
+                parent_transform: link_world
+                    .get(&p.id)
+                    .copied()
+                    .unwrap_or(glam::Mat4::IDENTITY),
             })
             .collect(),
         transforms: engine.part_render_transforms(),
@@ -243,6 +303,8 @@ fn main() {
         .manage(EngineState { engine })
         .invoke_handler(tauri::generate_handler![
             engine_apply,
+            engine_apply_interactive,
+            engine_end_interaction,
             scene_snapshot,
             get_part_mesh,
             get_body_mesh

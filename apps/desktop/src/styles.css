@@ -63,6 +63,12 @@ button:disabled {
   cursor: default;
 }
 
+button.active {
+  background: #2a4365;
+  border-color: #3d6098;
+  color: #eef2f7;
+}
+
 select {
   background: #2a2f36;
   color: #d5d9de;

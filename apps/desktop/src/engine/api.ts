@@ -29,6 +29,8 @@ export interface PartInfo {
   color: Rgba;
   has_mesh: boolean;
   origin_transform: Mat4;
+  /** Link world transform; `render = parent_transform × origin_transform` */
+  parent_transform: Mat4;
 }
 
 /** Serde PascalCase variants of rk_core::JointType */
@@ -99,6 +101,25 @@ export interface MeshPayload {
 
 export function applyCommands(commands: Command[]): Promise<ApplyOutcome> {
   return invoke("engine_apply", { commands });
+}
+
+/**
+ * Apply one command inside an interaction session (gizmo drag): the whole
+ * session collapses into a single undo step.
+ */
+export function applyInteractive(
+  session: string,
+  command: Command,
+): Promise<ApplyOutcome> {
+  return invoke("engine_apply_interactive", { session, command });
+}
+
+/** Close a session; `cancel` reverts the document to its pre-drag state */
+export function endInteraction(
+  session: string,
+  cancel: boolean,
+): Promise<ApplyOutcome> {
+  return invoke("engine_end_interaction", { session, cancel });
 }
 
 export function sceneSnapshot(): Promise<SceneSnapshot> {

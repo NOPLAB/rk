@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Command, SceneSnapshot } from "../engine/api";
+import type { GizmoMode } from "../scene/viewport";
 import {
   createBox,
   createCylinder,
@@ -27,14 +28,29 @@ const STL_UNITS: StlUnit[] = [
   "Inches",
 ];
 
+const GIZMO_MODES: { mode: GizmoMode; label: string; hint: string }[] = [
+  { mode: "none", label: "Select", hint: "Select only (Q)" },
+  { mode: "translate", label: "Move", hint: "Move gizmo (W)" },
+  { mode: "rotate", label: "Rotate", hint: "Rotate gizmo (E)" },
+];
+
 interface Props {
   snapshot: SceneSnapshot | null;
   selected: string | null;
+  gizmoMode: GizmoMode;
+  onGizmoMode: (mode: GizmoMode) => void;
   run: (commands: Command[]) => Promise<void>;
   onDeselect: () => void;
 }
 
-export function Toolbar({ snapshot, selected, run, onDeselect }: Props) {
+export function Toolbar({
+  snapshot,
+  selected,
+  gizmoMode,
+  onGizmoMode,
+  run,
+  onDeselect,
+}: Props) {
   const [unit, setUnit] = useState<StlUnit>("Millimeters");
 
   const onOpen = async () => {
@@ -96,6 +112,18 @@ export function Toolbar({ snapshot, selected, run, onDeselect }: Props) {
         <button disabled={!selected} onClick={() => void onDelete()}>
           Delete
         </button>
+      </div>
+      <div className="group">
+        {GIZMO_MODES.map(({ mode, label, hint }) => (
+          <button
+            key={mode}
+            title={hint}
+            className={gizmoMode === mode ? "active" : ""}
+            onClick={() => onGizmoMode(mode)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       <div className="group">
         <select

@@ -5,6 +5,7 @@ import type {
   JointType,
   SceneSnapshot,
 } from "../engine/api";
+import { createCoalescer } from "../engine/interaction";
 import {
   connectParts,
   disconnectPart,
@@ -41,23 +42,9 @@ export function JointPanel({ snapshot, run }: Props) {
   const [parent, setParent] = useState("");
   const [child, setChild] = useState("");
 
-  // Latest-wins coalescing for slider drags: at most one apply in flight,
-  // intermediate values are dropped in favor of the newest.
-  const inflight = useRef(false);
-  const pending = useRef<Command | null>(null);
-  const send = (cmd: Command) => {
-    if (inflight.current) {
-      pending.current = cmd;
-      return;
-    }
-    inflight.current = true;
-    void run([cmd]).finally(() => {
-      inflight.current = false;
-      const next = pending.current;
-      pending.current = null;
-      if (next) send(next);
-    });
-  };
+  // Slider drags outrun the IPC round trip; only the newest value matters
+  const slider = useRef(createCoalescer());
+  const send = (cmd: Command) => slider.current.push(() => run([cmd]));
 
   if (!snapshot) return null;
   const { parts, joints, links } = snapshot;

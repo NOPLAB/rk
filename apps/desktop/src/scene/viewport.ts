@@ -7,6 +7,7 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import {
   getBodyMesh,
   getPartMesh,
@@ -23,11 +24,17 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 const SELECT_EMISSIVE = new THREE.Color(0x2a5db0);
 const BLACK = new THREE.Color(0x000000);
 
+/** "none" hides the gizmo and leaves click-selection alone */
+export type GizmoMode = "none" | "translate" | "rotate";
+
 export class Viewport {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
+  private gizmo: TransformControls;
+  private gizmoMode: GizmoMode = "none";
+  private dragCanceled = false;
   private raycaster = new THREE.Raycaster();
   private partMeshes = new Map<string, THREE.Mesh>();
   private bodyMeshes = new Map<string, THREE.Mesh>();
@@ -36,6 +43,12 @@ export class Viewport {
 
   /** Fired when the user clicks a part (or empty space → null) */
   onPick: ((partId: string | null) => void) | null = null;
+  /** Gizmo drag started on `partId` */
+  onTransformStart: ((partId: string) => void) | null = null;
+  /** Gizmo moved `partId`; `world` is its new render transform (column-major) */
+  onTransform: ((partId: string, world: number[]) => void) | null = null;
+  /** Drag finished; `canceled` means the engine session must be rolled back */
+  onTransformEnd: ((canceled: boolean) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -64,10 +77,45 @@ export class Viewport {
     fill.position.set(-2.0, 1.5, -1.0);
     this.scene.add(fill);
 
+    this.gizmo = new TransformControls(this.camera, canvas);
+    this.gizmo.size = 0.8;
+    const helper = this.gizmo.getHelper();
+    helper.visible = false;
+    this.scene.add(helper);
+
+    // Orbiting and dragging must not happen at once
+    this.gizmo.addEventListener("dragging-changed", (e) => {
+      this.controls.enabled = !e.value;
+      if (e.value) {
+        this.dragCanceled = false;
+        const partId = this.gizmo.object?.userData.partId as string | undefined;
+        if (partId) this.onTransformStart?.(partId);
+      } else {
+        const canceled = this.dragCanceled;
+        this.dragCanceled = false;
+        this.onTransformEnd?.(canceled);
+        // cancelDrag() detached the object to stop the drag; put it back
+        if (canceled) this.attachGizmo();
+      }
+    });
+
+    this.gizmo.addEventListener("objectChange", () => {
+      if (this.dragCanceled) return;
+      const mesh = this.gizmo.object;
+      const partId = mesh?.userData.partId as string | undefined;
+      if (!mesh || !partId) return;
+      mesh.updateMatrix();
+      this.onTransform?.(partId, mesh.matrix.toArray());
+    });
+
     // Click-select with a small drag threshold so orbiting never selects
     let downAt: [number, number] | null = null;
     canvas.addEventListener("pointerdown", (e) => {
-      if (e.button === 0) downAt = [e.clientX, e.clientY];
+      // The gizmo's own listener runs first, so a grabbed handle already
+      // shows up as an active axis — that press is not a selection gesture
+      if (e.button === 0 && this.gizmo.axis === null) {
+        downAt = [e.clientX, e.clientY];
+      }
     });
     canvas.addEventListener("pointerup", (e) => {
       if (!downAt || e.button !== 0) return;
@@ -94,9 +142,42 @@ export class Viewport {
   dispose() {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
+    this.gizmo.detach();
+    this.gizmo.dispose();
     this.controls.dispose();
     this.clearAll();
     this.renderer.dispose();
+  }
+
+  // ---- gizmo ------------------------------------------------------------
+
+  setGizmoMode(mode: GizmoMode) {
+    this.gizmoMode = mode;
+    if (mode !== "none") this.gizmo.mode = mode;
+    this.attachGizmo();
+  }
+
+  /**
+   * Abort the drag in progress: restore the mesh to where it started and
+   * detach so further pointer moves are ignored. The pointer-up that follows
+   * still ends the drag normally, reporting the cancel to the engine.
+   */
+  cancelDrag() {
+    if (!this.gizmo.dragging || this.dragCanceled) return;
+    this.dragCanceled = true;
+    this.gizmo.reset();
+    this.gizmo.detach();
+  }
+
+  private attachGizmo() {
+    const mesh = this.selected ? this.partMeshes.get(this.selected) : undefined;
+    if (this.gizmoMode === "none" || !mesh) {
+      this.gizmo.detach();
+      this.gizmo.getHelper().visible = false;
+      return;
+    }
+    this.gizmo.attach(mesh);
+    this.gizmo.getHelper().visible = true;
   }
 
   // ---- engine sync ------------------------------------------------------
@@ -147,7 +228,12 @@ export class Viewport {
   setTransforms(transforms: [string, Mat4][]) {
     for (const [id, m] of transforms) {
       const mesh = this.partMeshes.get(id);
-      if (mesh) mesh.matrix.fromArray(m);
+      if (!mesh) continue;
+      // While dragging, the mesh under the gizmo leads and the engine
+      // follows — echoing its own value back would fight the pointer
+      if (this.gizmo.dragging && this.gizmo.object === mesh) continue;
+      mesh.matrix.fromArray(m);
+      mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
     }
   }
 
@@ -158,6 +244,7 @@ export class Viewport {
       mat.emissive.copy(id === partId ? SELECT_EMISSIVE : BLACK);
       mat.emissiveIntensity = 0.6;
     }
+    this.attachGizmo();
   }
 
   fitCamera() {
@@ -186,8 +273,11 @@ export class Viewport {
       buildGeometry(payload),
       makeMaterial(payload.color),
     );
-    mesh.matrixAutoUpdate = false;
-    if (prevMatrix) mesh.matrix.copy(prevMatrix);
+    // Position/rotation/scale stay authoritative so the gizmo can drive them;
+    // engine transforms are decomposed into them in setTransforms
+    if (prevMatrix) {
+      prevMatrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+    }
     mesh.userData.partId = partId;
     this.partMeshes.set(partId, mesh);
     this.scene.add(mesh);
@@ -226,6 +316,7 @@ export class Viewport {
   private removeFrom(map: Map<string, THREE.Mesh>, id: string) {
     const mesh = map.get(id);
     if (!mesh) return;
+    if (this.gizmo.object === mesh) this.gizmo.detach();
     this.scene.remove(mesh);
     mesh.geometry.dispose();
     (mesh.material as THREE.Material).dispose();

@@ -165,13 +165,19 @@ the egui frontend once at feature parity):
 
 - `src-tauri/` (`rk-desktop` crate): owns a `SharedEngine`; IPC commands
   mirror the MCP protocol shape — `engine_apply` (batch of `Command`s,
-  validate-all-then-apply), `scene_snapshot` (part metadata + render
-  transforms + body IDs + links/joints + undo state), `get_part_mesh` /
-  `get_body_mesh` (bulk data pulled by ID)
+  validate-all-then-apply), `engine_apply_interactive` /
+  `engine_end_interaction` (drag sessions), `scene_snapshot` (part
+  metadata + render transforms + body IDs + links/joints + undo state),
+  `get_part_mesh` / `get_body_mesh` (bulk data pulled by ID)
 - `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
-  command builders, `scene/viewport.ts` Three.js scene manager (Z-up;
-  event-driven sync mirroring `rk-frontend/src/sync.rs`), `components/`
-  panels
+  command builders, `engine/interaction.ts` drag-session helpers
+  (latest-wins coalescing), `scene/viewport.ts` Three.js scene manager
+  (Z-up; event-driven sync mirroring `rk-frontend/src/sync.rs`;
+  TransformControls gizmo), `components/` panels
+- Gizmo drags run through `apply_interactive` under one session ID, so a
+  whole drag is one undo step; Escape cancels (engine rolls back).
+  Parts store their origin in the owning link's frame, so the world
+  matrix from the gizmo is converted with `parent_transform⁻¹`
 - Dev: `npm run tauri dev` (Vite on port 1420); the production build embeds
   `dist/` via the `custom-protocol` feature
 
