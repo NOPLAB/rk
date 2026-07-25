@@ -3,6 +3,7 @@ import type {
   Command,
   JointInfo,
   JointType,
+  RunCommands,
   SceneSnapshot,
 } from "../engine/api";
 import { createCoalescer } from "../engine/interaction";
@@ -35,7 +36,7 @@ const hasLimits = (t: JointType) => t === "Revolute" || t === "Prismatic";
 
 interface Props {
   snapshot: SceneSnapshot | null;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
 }
 
 export function JointPanel({ snapshot, run }: Props) {
@@ -44,7 +45,10 @@ export function JointPanel({ snapshot, run }: Props) {
 
   // Slider drags outrun the IPC round trip; only the newest value matters
   const slider = useRef(createCoalescer());
-  const send = (cmd: Command) => slider.current.push(() => run([cmd]));
+  const send = (cmd: Command) =>
+    slider.current.push(async () => {
+      await run([cmd]);
+    });
 
   if (!snapshot) return null;
   const { parts, joints, links } = snapshot;
@@ -120,7 +124,7 @@ function JointCard({
   joint: JointInfo;
   parentName: string;
   childName: string;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
   send: (cmd: Command) => void;
 }) {
   return (
@@ -173,7 +177,7 @@ function PositionSlider({
   send,
 }: {
   joint: JointInfo;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
   send: (cmd: Command) => void;
 }) {
   // Local value while dragging; falls back to the engine value on release
@@ -219,7 +223,7 @@ function AxisFields({
   run,
 }: {
   joint: JointInfo;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
 }) {
   const commit = (i: number, v: number) => {
     const axis = [...joint.axis] as [number, number, number];
@@ -245,7 +249,7 @@ function LimitFields({
   run,
 }: {
   joint: JointInfo;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
 }) {
   const angular = isAngular(joint.joint_type);
   const scale = angular ? RAD2DEG : 1;

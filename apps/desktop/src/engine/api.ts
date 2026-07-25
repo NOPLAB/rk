@@ -18,6 +18,12 @@ export interface ApplyOutcome {
   error: { index: number; message: string } | null;
 }
 
+/**
+ * Apply a batch and sync the scene, returning the events it produced (empty
+ * on failure). Panels read the events to learn engine-minted IDs.
+ */
+export type RunCommands = (commands: Command[]) => Promise<EngineEvent[]>;
+
 /** Column-major 4x4 matrix, 16 elements (glam serde layout) */
 export type Mat4 = number[];
 
@@ -75,6 +81,82 @@ export interface JointInfo {
   position: number;
 }
 
+export type Vec3 = [number, number, number];
+/** A point in sketch coordinates */
+export type Vec2 = [number, number];
+
+export interface SketchPlane {
+  origin: Vec3;
+  normal: Vec3;
+  x_axis: Vec3;
+  y_axis: Vec3;
+}
+
+export interface SketchInfo {
+  id: string;
+  name: string;
+  plane: SketchPlane;
+  /** Sketch space → world */
+  transform: Mat4;
+  entity_count: number;
+  constraint_count: number;
+  is_solved: boolean;
+  dof: number;
+  /** Closed profiles found; extrude needs at least one */
+  profile_count: number;
+}
+
+/** `Feature::type_name()` of rk-cad */
+export type FeatureKind =
+  | "Extrude"
+  | "Revolve"
+  | "Boolean"
+  | "Fillet"
+  | "Chamfer"
+  | "Shell"
+  | "Sweep"
+  | "Loft";
+
+export interface FeatureInfo {
+  id: string;
+  name: string;
+  kind: FeatureKind;
+  suppressed: boolean;
+  sketch_id: string | null;
+  created_bodies: string[];
+}
+
+/** Sketch entities with point references resolved to coordinates */
+export interface SketchGeometry {
+  points: {
+    id: string;
+    position: Vec2;
+    construction: boolean;
+  }[];
+  lines: {
+    id: string;
+    start: Vec2;
+    end: Vec2;
+    start_id: string;
+    end_id: string;
+    construction: boolean;
+  }[];
+  circles: {
+    id: string;
+    center: Vec2;
+    radius: number;
+    construction: boolean;
+  }[];
+  arcs: {
+    id: string;
+    center: Vec2;
+    radius: number;
+    start_angle: number;
+    end_angle: number;
+    construction: boolean;
+  }[];
+}
+
 export interface SceneSnapshot {
   project_name: string;
   doc_path: string | null;
@@ -85,6 +167,10 @@ export interface SceneSnapshot {
   body_ids: string[];
   links: LinkInfo[];
   joints: JointInfo[];
+  sketches: SketchInfo[];
+  features: FeatureInfo[];
+  /** Features from this index on are rolled back; `null` = all active */
+  rollback_position: number | null;
   history: {
     can_undo: boolean;
     can_redo: boolean;
@@ -124,6 +210,10 @@ export function endInteraction(
 
 export function sceneSnapshot(): Promise<SceneSnapshot> {
   return invoke("scene_snapshot");
+}
+
+export function sketchGeometry(sketchId: string): Promise<SketchGeometry> {
+  return invoke("sketch_geometry", { sketchId });
 }
 
 export function getPartMesh(partId: string): Promise<MeshPayload> {

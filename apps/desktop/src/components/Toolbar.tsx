@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { Command, SceneSnapshot } from "../engine/api";
+import type { RunCommands, SceneSnapshot } from "../engine/api";
 import type { GizmoMode } from "../scene/viewport";
 import {
   createBox,
@@ -39,7 +39,7 @@ interface Props {
   selected: string | null;
   gizmoMode: GizmoMode;
   onGizmoMode: (mode: GizmoMode) => void;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
   onDeselect: () => void;
 }
 

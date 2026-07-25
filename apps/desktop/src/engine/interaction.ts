@@ -4,8 +4,11 @@
 // not queue up one round trip each: intermediate values are dropped in favor
 // of the newest, which is what the user is looking at anyway.
 
-/** Session ID for `apply_interactive` — one drag is one undo step */
-export function newSessionId(): string {
+/**
+ * UUID v4: interaction session IDs (one drag = one undo step) and
+ * client-minted sketch entity IDs, which reference each other by ID.
+ */
+export function newUuid(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   const hex = [...crypto.getRandomValues(new Uint8Array(16))].map((b, i) => {
     const v = i === 6 ? (b & 0x0f) | 0x40 : i === 8 ? (b & 0x3f) | 0x80 : b;

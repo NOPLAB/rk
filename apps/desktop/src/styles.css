@@ -320,6 +320,91 @@ button.mini {
   padding: 8px 10px;
 }
 
+/* ---- sketches & features ---- */
+.sketches,
+.features {
+  display: flex;
+  flex-direction: column;
+}
+
+.features {
+  padding: 8px 10px 0;
+  gap: 6px;
+}
+
+/* Let the section header rule span the panel, not just the padded column */
+.features .panel-title,
+.features .empty {
+  margin: 4px -10px 0;
+}
+
+.sketch-row,
+.feature-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.sketch-row {
+  cursor: pointer;
+}
+
+.sketch-row:hover {
+  background: #23272e;
+}
+
+.sketch-row.selected {
+  background: #2a4365;
+}
+
+.feature-row {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.feature-row.inactive .name {
+  color: #6c757e;
+  text-decoration: line-through;
+}
+
+.sketch-row .name,
+.feature-row .name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.counts {
+  flex-shrink: 0;
+  font-family: Consolas, monospace;
+}
+
+.sketch-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid #2c3138;
+}
+
+.tool-row {
+  display: flex;
+  gap: 4px;
+}
+
+.tool-row button {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 2px;
+}
+
+.connect-row .mini-num {
+  flex: 0 0 54px;
+}
+
 /* ---- status bar ---- */
 .status {
   display: flex;

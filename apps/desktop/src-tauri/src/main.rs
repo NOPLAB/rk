@@ -168,6 +168,34 @@ struct JointInfo {
 }
 
 #[derive(serde::Serialize)]
+struct SketchInfo {
+    id: Uuid,
+    name: String,
+    plane: rk_cad::SketchPlane,
+    /// Sketch space → world, so the UI can place 2D geometry without
+    /// rebuilding the basis itself
+    transform: glam::Mat4,
+    entity_count: usize,
+    constraint_count: usize,
+    is_solved: bool,
+    dof: u32,
+    /// Closed profiles the sketch yields — extrude needs at least one
+    profile_count: usize,
+}
+
+#[derive(serde::Serialize)]
+struct FeatureInfo {
+    id: Uuid,
+    name: String,
+    /// `Feature::type_name()`: "Extrude", "Revolve", ...
+    kind: &'static str,
+    suppressed: bool,
+    /// Sketch the feature is built from (extrude/revolve only)
+    sketch_id: Option<Uuid>,
+    created_bodies: Vec<Uuid>,
+}
+
+#[derive(serde::Serialize)]
 struct SceneSnapshot {
     project_name: String,
     doc_path: Option<String>,
@@ -179,6 +207,10 @@ struct SceneSnapshot {
     body_ids: Vec<Uuid>,
     links: Vec<LinkInfo>,
     joints: Vec<JointInfo>,
+    sketches: Vec<SketchInfo>,
+    features: Vec<FeatureInfo>,
+    /// Features from this index on are rolled back (inactive); `None` = all active
+    rollback_position: Option<usize>,
     history: HistoryInfo,
 }
 
@@ -222,6 +254,43 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
         })
         .collect();
     joints.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let history = &engine.document().cad.history;
+    let mut sketches: Vec<SketchInfo> = history
+        .sketches()
+        .values()
+        .map(|s| SketchInfo {
+            id: s.id,
+            name: s.name.clone(),
+            plane: s.plane,
+            transform: s.plane.transform(),
+            entity_count: s.entities().len(),
+            constraint_count: s.constraints().len(),
+            is_solved: s.is_solved(),
+            dof: s.degrees_of_freedom(),
+            profile_count: s.extract_profiles().map(|p| p.len()).unwrap_or(0),
+        })
+        .collect();
+    sketches.sort_by(|a, b| a.name.cmp(&b.name));
+    // Features keep history order — the list is the model's build sequence
+    let features: Vec<FeatureInfo> = history
+        .entries()
+        .iter()
+        .map(|e| FeatureInfo {
+            id: e.feature.id(),
+            name: e.feature.name().to_owned(),
+            kind: e.feature.type_name(),
+            suppressed: e.feature.is_suppressed(),
+            sketch_id: match &e.feature {
+                rk_cad::Feature::Extrude { sketch_id, .. }
+                | rk_cad::Feature::Revolve { sketch_id, .. } => Some(*sketch_id),
+                _ => None,
+            },
+            created_bodies: e.created_bodies.clone(),
+        })
+        .collect();
+    let rollback_position = history.rollback_position();
+
     SceneSnapshot {
         project_name: engine.project().name.clone(),
         doc_path: engine.doc_path().map(|p| p.display().to_string()),
@@ -245,12 +314,138 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
         body_ids: engine.body_ids(),
         links,
         joints,
+        sketches,
+        features,
+        rollback_position,
         history: HistoryInfo {
             can_undo: engine.can_undo(),
             can_redo: engine.can_redo(),
             undo_description: engine.undo_description().map(str::to_owned),
         },
     }
+}
+
+#[derive(serde::Serialize)]
+struct SketchPointGeom {
+    id: Uuid,
+    position: [f32; 2],
+    construction: bool,
+}
+
+#[derive(serde::Serialize)]
+struct SketchLineGeom {
+    id: Uuid,
+    start: [f32; 2],
+    end: [f32; 2],
+    /// Endpoint IDs, so clicks can snap onto and reuse existing points
+    start_id: Uuid,
+    end_id: Uuid,
+    construction: bool,
+}
+
+#[derive(serde::Serialize)]
+struct SketchCircleGeom {
+    id: Uuid,
+    center: [f32; 2],
+    radius: f32,
+    construction: bool,
+}
+
+#[derive(serde::Serialize)]
+struct SketchArcGeom {
+    id: Uuid,
+    center: [f32; 2],
+    radius: f32,
+    /// Sweep from `start_angle` counter-clockwise to `end_angle` (radians)
+    start_angle: f32,
+    end_angle: f32,
+    construction: bool,
+}
+
+/// Sketch entities with point references already resolved to coordinates —
+/// the viewport draws straight from this without chasing IDs.
+#[derive(serde::Serialize)]
+struct SketchGeometry {
+    points: Vec<SketchPointGeom>,
+    lines: Vec<SketchLineGeom>,
+    circles: Vec<SketchCircleGeom>,
+    arcs: Vec<SketchArcGeom>,
+}
+
+#[tauri::command]
+fn sketch_geometry(
+    state: State<'_, EngineState>,
+    sketch_id: Uuid,
+) -> Result<SketchGeometry, String> {
+    let engine = state.engine.lock();
+    let sketch = engine
+        .sketch(sketch_id)
+        .ok_or_else(|| format!("unknown sketch: {sketch_id}"))?;
+    let pos = |id: Uuid| match sketch.get_entity(id) {
+        Some(rk_cad::SketchEntity::Point { position, .. }) => Some(position.to_array()),
+        _ => None,
+    };
+    let angle = |center: [f32; 2], p: [f32; 2]| (p[1] - center[1]).atan2(p[0] - center[0]);
+
+    let mut geom = SketchGeometry {
+        points: Vec::new(),
+        lines: Vec::new(),
+        circles: Vec::new(),
+        arcs: Vec::new(),
+    };
+    for entity in sketch.entities_iter() {
+        let construction = sketch.is_construction(entity.id());
+        match entity {
+            rk_cad::SketchEntity::Point { id, position } => geom.points.push(SketchPointGeom {
+                id: *id,
+                position: position.to_array(),
+                construction,
+            }),
+            rk_cad::SketchEntity::Line { id, start, end } => {
+                if let (Some(a), Some(b)) = (pos(*start), pos(*end)) {
+                    geom.lines.push(SketchLineGeom {
+                        id: *id,
+                        start: a,
+                        end: b,
+                        start_id: *start,
+                        end_id: *end,
+                        construction,
+                    });
+                }
+            }
+            rk_cad::SketchEntity::Circle { id, center, radius } => {
+                if let Some(c) = pos(*center) {
+                    geom.circles.push(SketchCircleGeom {
+                        id: *id,
+                        center: c,
+                        radius: *radius,
+                        construction,
+                    });
+                }
+            }
+            rk_cad::SketchEntity::Arc {
+                id,
+                center,
+                start,
+                end,
+                radius,
+            } => {
+                if let (Some(c), Some(a), Some(b)) = (pos(*center), pos(*start), pos(*end)) {
+                    geom.arcs.push(SketchArcGeom {
+                        id: *id,
+                        center: c,
+                        radius: *radius,
+                        start_angle: angle(c, a),
+                        end_angle: angle(c, b),
+                        construction,
+                    });
+                }
+            }
+            // Ellipses and splines have no UI yet
+            _ => {}
+        }
+    }
+    Ok(geom)
 }
 
 #[derive(serde::Serialize)]
@@ -306,6 +501,7 @@ fn main() {
             engine_apply_interactive,
             engine_end_interaction,
             scene_snapshot,
+            sketch_geometry,
             get_part_mesh,
             get_body_mesh
         ])

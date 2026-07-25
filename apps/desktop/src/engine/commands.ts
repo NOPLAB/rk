@@ -1,7 +1,15 @@
 // Builders for the engine commands the desktop UI uses today.
 // The full catalog lives in crates/rk-mcp/src/commands_reference.md.
 
-import type { Command, JointLimits, JointType, Rgba } from "./api";
+import type {
+  Command,
+  JointLimits,
+  JointType,
+  Rgba,
+  SketchPlane,
+  Vec2,
+  Vec3,
+} from "./api";
 
 /** Serde PascalCase variants of rk_core::StlUnit */
 export type StlUnit = "Meters" | "Millimeters" | "Centimeters" | "Inches";
@@ -153,6 +161,169 @@ export const setJointLimits = (
   type: "set_joint_limits",
   joint_id: jointId,
   limits,
+});
+
+// ---- sketches -----------------------------------------------------------
+
+/** Externally tagged rk_cad::SketchEntity: `{"Line": {...}}` */
+export type SketchEntity =
+  | { Point: { id: string; position: Vec2 } }
+  | { Line: { id: string; start: string; end: string } }
+  | { Circle: { id: string; center: string; radius: number } }
+  | {
+      Arc: {
+        id: string;
+        center: string;
+        start: string;
+        end: string;
+        radius: number;
+      };
+    };
+
+export const sketchPoint = (id: string, position: Vec2): SketchEntity => ({
+  Point: { id, position },
+});
+
+/** `start`/`end` are point entity IDs */
+export const sketchLine = (
+  id: string,
+  start: string,
+  end: string,
+): SketchEntity => ({ Line: { id, start, end } });
+
+export const sketchCircle = (
+  id: string,
+  center: string,
+  radius: number,
+): SketchEntity => ({ Circle: { id, center, radius } });
+
+/** The three standard planes, optionally offset along their normal */
+export const standardPlane = (
+  which: "XY" | "XZ" | "YZ",
+  offset = 0,
+): SketchPlane => {
+  const axes: Record<string, [Vec3, Vec3, Vec3]> = {
+    XY: [
+      [0, 0, 1],
+      [1, 0, 0],
+      [0, 1, 0],
+    ],
+    XZ: [
+      [0, 1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ],
+    YZ: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+  };
+  const [normal, x_axis, y_axis] = axes[which];
+  return {
+    origin: [normal[0] * offset, normal[1] * offset, normal[2] * offset],
+    normal,
+    x_axis,
+    y_axis,
+  };
+};
+
+export const createSketch = (
+  plane: SketchPlane,
+  name: string | null = null,
+): Command => ({ type: "create_sketch", id: null, name, plane });
+
+export const deleteSketch = (sketchId: string): Command => ({
+  type: "delete_sketch",
+  sketch_id: sketchId,
+});
+
+/** One command = one undo step, so a rectangle's 4 points + 4 lines go together */
+export const addSketchEntities = (
+  sketchId: string,
+  entities: SketchEntity[],
+): Command => ({
+  type: "add_sketch_entities",
+  sketch_id: sketchId,
+  entities,
+});
+
+export const deleteSketchEntities = (
+  sketchId: string,
+  entityIds: string[],
+): Command => ({
+  type: "delete_sketch_entities",
+  sketch_id: sketchId,
+  entity_ids: entityIds,
+});
+
+export const solveSketch = (sketchId: string): Command => ({
+  type: "solve_sketch",
+  sketch_id: sketchId,
+});
+
+// ---- features -----------------------------------------------------------
+
+/** Relative to the sketch plane normal */
+export type ExtrudeDirection = "Positive" | "Negative" | "Symmetric";
+export type BooleanOp = "New" | "Join" | "Cut" | "Intersect";
+
+export const addExtrude = (
+  sketchId: string,
+  distance: number,
+  direction: ExtrudeDirection,
+  booleanOp: BooleanOp,
+  targetBody: string | null,
+  name: string | null = null,
+): Command => ({
+  type: "add_extrude",
+  id: null,
+  name,
+  sketch_id: sketchId,
+  distance,
+  direction,
+  boolean_op: booleanOp,
+  target_body: targetBody,
+});
+
+export const addRevolve = (
+  sketchId: string,
+  axisOrigin: Vec3,
+  axisDirection: Vec3,
+  angle: number,
+  booleanOp: BooleanOp,
+  targetBody: string | null,
+  name: string | null = null,
+): Command => ({
+  type: "add_revolve",
+  id: null,
+  name,
+  sketch_id: sketchId,
+  axis_origin: axisOrigin,
+  axis_direction: axisDirection,
+  angle,
+  boolean_op: booleanOp,
+  target_body: targetBody,
+});
+
+export const deleteFeature = (featureId: string): Command => ({
+  type: "delete_feature",
+  feature_id: featureId,
+});
+
+export const setFeatureSuppressed = (
+  featureId: string,
+  suppressed: boolean,
+): Command => ({
+  type: "set_feature_suppressed",
+  feature_id: featureId,
+  suppressed,
+});
+
+/** `featureId: null` rolls forward to the end of the history */
+export const rollbackTo = (featureId: string | null): Command => ({
+  type: "rollback_to",
+  feature_id: featureId,
 });
 
 export const undo = (): Command => ({ type: "undo" });

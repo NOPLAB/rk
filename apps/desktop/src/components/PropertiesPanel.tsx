@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import * as THREE from "three";
-import type { Command, PartInfo, Rgba } from "../engine/api";
+import type { PartInfo, Rgba, RunCommands } from "../engine/api";
 import {
   renamePart,
   setPartColor,
@@ -9,7 +9,7 @@ import {
 
 interface Props {
   part: PartInfo | null;
-  run: (commands: Command[]) => Promise<void>;
+  run: RunCommands;
 }
 
 const RAD2DEG = 180 / Math.PI;

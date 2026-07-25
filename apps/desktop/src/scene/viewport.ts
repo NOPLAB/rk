@@ -12,12 +12,16 @@ import {
   getBodyMesh,
   getPartMesh,
   sceneSnapshot,
+  sketchGeometry,
   type EngineEvent,
   type Mat4,
   type MeshPayload,
   type Rgba,
   type SceneSnapshot,
+  type SketchInfo,
+  type Vec2,
 } from "../engine/api";
+import { SketchLayer, type Projector, type SketchPreview } from "./sketchLayer";
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
@@ -26,6 +30,16 @@ const BLACK = new THREE.Color(0x000000);
 
 /** "none" hides the gizmo and leaves click-selection alone */
 export type GizmoMode = "none" | "translate" | "rotate";
+
+/** Pointer position resolved against the active sketch */
+export interface SketchHit {
+  /** Sketch coordinates, snapped onto an existing point when close enough */
+  position: Vec2;
+  /** The snapped point's ID, if any — reuse it to keep profiles connected */
+  pointId: string | null;
+  /** Entity under the pointer (for the select tool) */
+  entityId: string | null;
+}
 
 export class Viewport {
   private renderer: THREE.WebGLRenderer;
@@ -39,6 +53,8 @@ export class Viewport {
   private partMeshes = new Map<string, THREE.Mesh>();
   private bodyMeshes = new Map<string, THREE.Mesh>();
   private selected: string | null = null;
+  private sketch = new SketchLayer();
+  private sketchInfo: SketchInfo | null = null;
   private disposed = false;
 
   /** Fired when the user clicks a part (or empty space → null) */
@@ -49,6 +65,10 @@ export class Viewport {
   onTransform: ((partId: string, world: number[]) => void) | null = null;
   /** Drag finished; `canceled` means the engine session must be rolled back */
   onTransformEnd: ((canceled: boolean) => void) | null = null;
+  /** Click on the active sketch plane */
+  onSketchClick: ((hit: SketchHit) => void) | null = null;
+  /** Pointer moved over the active sketch plane (drives the drawing preview) */
+  onSketchMove: ((hit: SketchHit) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -76,6 +96,8 @@ export class Viewport {
     const fill = new THREE.DirectionalLight(0xffffff, 0.4);
     fill.position.set(-2.0, 1.5, -1.0);
     this.scene.add(fill);
+
+    this.scene.add(this.sketch.group);
 
     this.gizmo = new TransformControls(this.camera, canvas);
     this.gizmo.size = 0.8;
@@ -121,8 +143,21 @@ export class Viewport {
       if (!downAt || e.button !== 0) return;
       const [x0, y0] = downAt;
       downAt = null;
+      // A drag orbited the view; only a click edits
       if (Math.hypot(e.clientX - x0, e.clientY - y0) > 4) return;
+      if (this.sketch.active) {
+        const hit = this.sketchHit(e);
+        if (hit) this.onSketchClick?.(hit);
+        return;
+      }
       this.onPick?.(this.pick(e));
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!this.sketch.active) return;
+      const hit = this.sketchHit(e);
+      if (!hit) return;
+      this.sketch.setCursor(hit.pointId ? hit.position : null);
+      this.onSketchMove?.(hit);
     });
 
     this.renderer.setAnimationLoop(() => {
@@ -145,6 +180,7 @@ export class Viewport {
     this.gizmo.detach();
     this.gizmo.dispose();
     this.controls.dispose();
+    this.sketch.dispose();
     this.clearAll();
     this.renderer.dispose();
   }
@@ -171,13 +207,93 @@ export class Viewport {
 
   private attachGizmo() {
     const mesh = this.selected ? this.partMeshes.get(this.selected) : undefined;
-    if (this.gizmoMode === "none" || !mesh) {
+    // Sketch mode owns the pointer; a gizmo on top of it would fight for clicks
+    if (this.gizmoMode === "none" || this.sketch.active || !mesh) {
       this.gizmo.detach();
       this.gizmo.getHelper().visible = false;
       return;
     }
     this.gizmo.attach(mesh);
     this.gizmo.getHelper().visible = true;
+  }
+
+  // ---- sketch mode ------------------------------------------------------
+
+  /** Enter sketch mode on `info`, or leave it with `null` */
+  async setSketch(info: SketchInfo | null) {
+    const entered = info !== null && info.id !== this.sketchInfo?.id;
+    this.sketchInfo = info;
+    this.sketch.setSketch(info);
+    this.attachGizmo();
+    if (!info) {
+      this.camera.up.set(0, 0, 1);
+      return;
+    }
+    await this.refreshSketch();
+    if (entered) this.alignToSketch();
+  }
+
+  /** Re-pull the active sketch's entities from the engine */
+  async refreshSketch() {
+    const id = this.sketch.sketchId;
+    if (!id) return;
+    try {
+      this.sketch.setGeometry(await sketchGeometry(id));
+    } catch (e) {
+      console.warn(`sketch ${id} geometry:`, e);
+    }
+  }
+
+  setSketchPreview(preview: SketchPreview | null) {
+    this.sketch.setPreview(preview);
+  }
+
+  setSketchSelection(entityId: string | null) {
+    this.sketch.setHighlight(entityId);
+  }
+
+  /** Look straight down the sketch plane's normal, keeping the zoom level */
+  alignToSketch() {
+    const info = this.sketchInfo;
+    if (!info) return;
+    const origin = new THREE.Vector3(...info.plane.origin);
+    const normal = new THREE.Vector3(...info.plane.normal).normalize();
+    const dist = Math.max(
+      this.camera.position.distanceTo(this.controls.target),
+      0.05,
+    );
+    this.camera.up.set(...info.plane.y_axis);
+    this.camera.position.copy(origin.clone().add(normal.multiplyScalar(dist)));
+    this.controls.target.copy(origin);
+  }
+
+  private sketchHit(e: PointerEvent): SketchHit | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    this.raycaster.setFromCamera(
+      new THREE.Vector2((px / rect.width) * 2 - 1, -(py / rect.height) * 2 + 1),
+      this.camera,
+    );
+    const raw = this.sketch.planeHit(this.raycaster);
+    if (!raw) return null;
+    const project = this.sketchProjector(rect.width, rect.height);
+    const snapped = this.sketch.snap(raw, project);
+    return {
+      position: snapped.position,
+      pointId: snapped.pointId,
+      entityId: this.sketch.pick(px, py, project),
+    };
+  }
+
+  /** Sketch coordinates → canvas pixels, for snapping and picking */
+  private sketchProjector(width: number, height: number): Projector {
+    const toWorld = this.sketch.group.matrix;
+    const v = new THREE.Vector3();
+    return (u, w) => {
+      v.set(u, w, 0).applyMatrix4(toWorld).project(this.camera);
+      return [((v.x + 1) / 2) * width, ((1 - v.y) / 2) * height];
+    };
   }
 
   // ---- engine sync ------------------------------------------------------
@@ -187,7 +303,11 @@ export class Viewport {
     for (const ev of events) {
       switch (ev.type) {
         case "document_reset":
-          await this.rebuildFromSnapshot(await sceneSnapshot());
+          // Undo/redo must not yank the camera around; a new document does
+          await this.rebuildFromSnapshot(
+            await sceneSnapshot(),
+            ev.reason !== "undo_redo",
+          );
           break;
         case "part_added":
         case "part_appearance_changed":
@@ -206,6 +326,10 @@ export class Viewport {
           }
           break;
         }
+        case "sketch_geometry_changed":
+        case "sketch_solved":
+          if (ev.sketch_id === this.sketch.sketchId) await this.refreshSketch();
+          break;
         default:
           // list/history/joint changes are handled by the React layer
           break;
@@ -213,7 +337,7 @@ export class Viewport {
     }
   }
 
-  async rebuildFromSnapshot(snap: SceneSnapshot) {
+  async rebuildFromSnapshot(snap: SceneSnapshot, fit = true) {
     this.clearAll();
     for (const part of snap.parts) {
       if (part.has_mesh) await this.addOrUpdatePart(part.id);
@@ -222,7 +346,12 @@ export class Viewport {
     for (const id of snap.body_ids) {
       await this.addBody(id);
     }
-    if (snap.parts.length > 0 || snap.body_ids.length > 0) this.fitCamera();
+    // The sketch may have been undone away; the React layer decides whether
+    // to stay in sketch mode, we just resync what is still there
+    await this.refreshSketch();
+    if (fit && (snap.parts.length > 0 || snap.body_ids.length > 0)) {
+      this.fitCamera();
+    }
   }
 
   setTransforms(transforms: [string, Mat4][]) {

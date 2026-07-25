@@ -167,17 +167,30 @@ the egui frontend once at feature parity):
   mirror the MCP protocol shape — `engine_apply` (batch of `Command`s,
   validate-all-then-apply), `engine_apply_interactive` /
   `engine_end_interaction` (drag sessions), `scene_snapshot` (part
-  metadata + render transforms + body IDs + links/joints + undo state),
-  `get_part_mesh` / `get_body_mesh` (bulk data pulled by ID)
+  metadata + render transforms + body IDs + links/joints + sketches +
+  feature history + undo state), `sketch_geometry` (entities with point
+  references resolved to 2D coordinates), `get_part_mesh` /
+  `get_body_mesh` (bulk data pulled by ID)
 - `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
   command builders, `engine/interaction.ts` drag-session helpers
-  (latest-wins coalescing), `scene/viewport.ts` Three.js scene manager
-  (Z-up; event-driven sync mirroring `rk-frontend/src/sync.rs`;
-  TransformControls gizmo), `components/` panels
+  (latest-wins coalescing) and `newUuid`, `scene/viewport.ts` Three.js
+  scene manager (Z-up; event-driven sync mirroring
+  `rk-frontend/src/sync.rs`; TransformControls gizmo),
+  `scene/sketchLayer.ts` + `scene/sketchTools.ts` sketch mode,
+  `components/` panels
 - Gizmo drags run through `apply_interactive` under one session ID, so a
   whole drag is one undo step; Escape cancels (engine rolls back).
   Parts store their origin in the owning link's frame, so the world
   matrix from the gizmo is converted with `parent_transform⁻¹`
+- Sketch mode: the layer's group carries the plane basis, so geometry is
+  built in 2D on z = 0 and clicks are ray-plane intersections converted
+  back. `SketchDrawing` holds the in-progress shape client-side and only
+  emits a command once a shape is complete — one `add_sketch_entities`
+  per shape (one undo step), and cancelling leaves no orphan points. The
+  line tool reuses point IDs between segments and closes onto the chain's
+  first point, which is what makes `extract_profiles` find a closed loop
+- `tests/command_payloads.rs` applies the JSON the TypeScript builders
+  emit; it is the only check that those field names match `Command`
 - Dev: `npm run tauri dev` (Vite on port 1420); the production build embeds
   `dist/` via the `custom-protocol` feature
 
@@ -204,6 +217,8 @@ the egui frontend once at feature parity):
 - Phase 0: headless `rk-engine` extraction — done
 - Phase 1: MCP server (`rk-mcp`) + headless rendering — done
 - Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
-  part editing + joint UI + mesh/URDF import-export done; sketch/feature
-  UI, gizmo (`apply_interactive`) and egui retirement pending
+  part editing + joint UI + mesh/URDF import-export + gizmo
+  (`apply_interactive`) + sketch/feature UI done; sketch constraints and
+  dimensions, collision shapes, mass/inertia properties and egui
+  retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)
