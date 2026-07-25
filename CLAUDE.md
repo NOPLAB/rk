@@ -166,8 +166,8 @@ the egui frontend once at feature parity):
 - `src-tauri/` (`rk-desktop` crate): owns a `SharedEngine`; IPC commands
   mirror the MCP protocol shape — `engine_apply` (batch of `Command`s,
   validate-all-then-apply), `scene_snapshot` (part metadata + render
-  transforms + body IDs + undo state), `get_part_mesh` / `get_body_mesh`
-  (bulk data pulled by ID)
+  transforms + body IDs + links/joints + undo state), `get_part_mesh` /
+  `get_body_mesh` (bulk data pulled by ID)
 - `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
   command builders, `scene/viewport.ts` Three.js scene manager (Z-up;
   event-driven sync mirroring `rk-frontend/src/sync.rs`), `components/`
@@ -198,6 +198,6 @@ the egui frontend once at feature parity):
 - Phase 0: headless `rk-engine` extraction — done
 - Phase 1: MCP server (`rk-mcp`) + headless rendering — done
 - Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
-  basic part editing done; sketch/joint/feature UI and egui retirement
-  pending
+  part editing + joint UI + mesh/URDF import-export done; sketch/feature
+  UI, gizmo (`apply_interactive`) and egui retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)
