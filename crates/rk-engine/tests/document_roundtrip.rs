@@ -113,9 +113,12 @@ fn rebuild_after_load_restores_bodies_with_stable_ids() {
     let mut sketch = Sketch::new("profile", SketchPlane::xy());
     sketch.add_rectangle(Vec2::ZERO, Vec2::new(10.0, 10.0));
     let sketch_id = doc.cad.history.add_sketch(sketch);
-    doc.cad
-        .history
-        .add_feature(Feature::extrude("E1", sketch_id, 5.0, ExtrudeDirection::Positive));
+    doc.cad.history.add_feature(Feature::extrude(
+        "E1",
+        sketch_id,
+        5.0,
+        ExtrudeDirection::Positive,
+    ));
 
     doc.cad.history.rebuild(&*kernel).unwrap();
     let mut ids_before: Vec<Uuid> = doc.cad.history.bodies().keys().copied().collect();

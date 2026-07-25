@@ -11,9 +11,7 @@ use glam::{Mat4, Vec3};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use rk_cad::{
-    BooleanOp, ExtrudeDirection, SketchConstraint, SketchEntity, SketchPlane, Wire2D,
-};
+use rk_cad::{BooleanOp, ExtrudeDirection, SketchConstraint, SketchEntity, SketchPlane, Wire2D};
 use rk_core::{GeometryType, InertiaMatrix, JointLimits, JointType, Pose, StlUnit};
 
 /// A mutation of the engine document
@@ -22,14 +20,29 @@ use rk_core::{GeometryType, InertiaMatrix, JointLimits, JointType, Pose, StlUnit
 pub enum Command {
     // ---- Document / IO ----
     NewDocument,
-    LoadDocument { path: PathBuf },
+    LoadDocument {
+        path: PathBuf,
+    },
     /// Save to `path`, or to the document's current path when `None`
-    SaveDocument { path: Option<PathBuf> },
-    ImportMesh { path: PathBuf, unit: StlUnit },
+    SaveDocument {
+        path: Option<PathBuf>,
+    },
+    ImportMesh {
+        path: PathBuf,
+        unit: StlUnit,
+    },
     /// Replaces the current document with the imported robot
-    ImportUrdf { path: PathBuf, stl_unit: StlUnit },
-    ExportUrdf { path: PathBuf, robot_name: String },
-    RenameProject { name: String },
+    ImportUrdf {
+        path: PathBuf,
+        stl_unit: StlUnit,
+    },
+    ExportUrdf {
+        path: PathBuf,
+        robot_name: String,
+    },
+    RenameProject {
+        name: String,
+    },
 
     // ---- Part ----
     CreatePrimitive {
@@ -41,25 +54,55 @@ pub enum Command {
         id: Option<Uuid>,
         name: Option<String>,
     },
-    DeletePart { part_id: Uuid },
-    RenamePart { part_id: Uuid, name: String },
-    SetPartTransform { part_id: Uuid, transform: Mat4 },
-    SetPartColor { part_id: Uuid, color: [f32; 4] },
+    DeletePart {
+        part_id: Uuid,
+    },
+    RenamePart {
+        part_id: Uuid,
+        name: String,
+    },
+    SetPartTransform {
+        part_id: Uuid,
+        transform: Mat4,
+    },
+    SetPartColor {
+        part_id: Uuid,
+        color: [f32; 4],
+    },
     SetPartMaterial {
         part_id: Uuid,
         material_name: Option<String>,
     },
-    SetPartMass { part_id: Uuid, mass: f32 },
-    SetPartInertia { part_id: Uuid, inertia: InertiaMatrix },
+    SetPartMass {
+        part_id: Uuid,
+        mass: f32,
+    },
+    SetPartInertia {
+        part_id: Uuid,
+        inertia: InertiaMatrix,
+    },
 
     // ---- Assembly / Joint ----
     /// Connect two parts with a fixed joint, creating links as needed
-    ConnectParts { parent_part: Uuid, child_part: Uuid },
-    DisconnectPart { child_part: Uuid },
-    SetJointPosition { joint_id: Uuid, position: f32 },
-    ResetJointPosition { joint_id: Uuid },
+    ConnectParts {
+        parent_part: Uuid,
+        child_part: Uuid,
+    },
+    DisconnectPart {
+        child_part: Uuid,
+    },
+    SetJointPosition {
+        joint_id: Uuid,
+        position: f32,
+    },
+    ResetJointPosition {
+        joint_id: Uuid,
+    },
     ResetAllJointPositions,
-    SetJointType { joint_id: Uuid, joint_type: JointType },
+    SetJointType {
+        joint_id: Uuid,
+        joint_type: JointType,
+    },
     /// When `keep_child_world_pose` is true the child part's origin is
     /// compensated so its world pose does not change (gizmo semantics)
     SetJointOrigin {
@@ -67,7 +110,10 @@ pub enum Command {
         origin: Pose,
         keep_child_world_pose: bool,
     },
-    SetJointAxis { joint_id: Uuid, axis: Vec3 },
+    SetJointAxis {
+        joint_id: Uuid,
+        axis: Vec3,
+    },
     SetJointLimits {
         joint_id: Uuid,
         limits: Option<JointLimits>,
@@ -79,7 +125,10 @@ pub enum Command {
         geometry: GeometryType,
         origin: Pose,
     },
-    RemoveCollision { link_id: Uuid, index: usize },
+    RemoveCollision {
+        link_id: Uuid,
+        index: usize,
+    },
     SetCollisionOrigin {
         link_id: Uuid,
         index: usize,
@@ -97,7 +146,9 @@ pub enum Command {
         name: Option<String>,
         plane: SketchPlane,
     },
-    DeleteSketch { sketch_id: Uuid },
+    DeleteSketch {
+        sketch_id: Uuid,
+    },
     /// Add entities atomically (a rectangle is 4 points + 4 lines in one
     /// command and therefore one undo step)
     AddSketchEntities {
@@ -121,7 +172,9 @@ pub enum Command {
         sketch_id: Uuid,
         constraint_id: Uuid,
     },
-    SolveSketch { sketch_id: Uuid },
+    SolveSketch {
+        sketch_id: Uuid,
+    },
 
     // ---- Feature ----
     AddExtrude {
@@ -143,10 +196,17 @@ pub enum Command {
         boolean_op: BooleanOp,
         target_body: Option<Uuid>,
     },
-    DeleteFeature { feature_id: Uuid },
-    SetFeatureSuppressed { feature_id: Uuid, suppressed: bool },
+    DeleteFeature {
+        feature_id: Uuid,
+    },
+    SetFeatureSuppressed {
+        feature_id: Uuid,
+        suppressed: bool,
+    },
     /// Roll back to just after the given feature (`None` = to the end)
-    RollbackTo { feature_id: Option<Uuid> },
+    RollbackTo {
+        feature_id: Option<Uuid>,
+    },
     RebuildFeatures,
 
     // ---- History ----

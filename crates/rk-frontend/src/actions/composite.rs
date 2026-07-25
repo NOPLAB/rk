@@ -59,7 +59,12 @@ fn select_plane_and_create_sketch(
 }
 
 fn exit_sketch_mode(ctx: &ActionContext, events: &mut Vec<Event>) {
-    let sketch_id = ctx.app_state.lock().editor_mode.sketch().map(|s| s.active_sketch);
+    let sketch_id = ctx
+        .app_state
+        .lock()
+        .editor_mode
+        .sketch()
+        .map(|s| s.active_sketch);
     if let Some(sketch_id) = sketch_id {
         ctx.apply(Command::SolveSketch { sketch_id }, events);
     }

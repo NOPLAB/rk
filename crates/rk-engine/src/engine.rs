@@ -264,7 +264,14 @@ impl Engine {
                 boolean_op,
                 target_body,
             } => self.exec_add_extrude(
-                id, name, sketch_id, distance, direction, boolean_op, target_body, events,
+                id,
+                name,
+                sketch_id,
+                distance,
+                direction,
+                boolean_op,
+                target_body,
+                events,
             ),
             AddRevolve {
                 id,

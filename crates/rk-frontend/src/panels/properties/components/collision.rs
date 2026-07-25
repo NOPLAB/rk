@@ -50,13 +50,14 @@ impl PropertyComponent for CollisionComponent {
             ui.label(format!("{} collision(s)", ctx.collisions.len()));
             if ui.button("+ Add").clicked() {
                 // Add a default box collision
-                ctx.pending_actions.push(AppAction::Cmd(Command::AddCollision {
-                    link_id,
-                    geometry: GeometryType::Box {
-                        size: [0.1, 0.1, 0.1],
-                    },
-                    origin: Pose::default(),
-                }));
+                ctx.pending_actions
+                    .push(AppAction::Cmd(Command::AddCollision {
+                        link_id,
+                        geometry: GeometryType::Box {
+                            size: [0.1, 0.1, 0.1],
+                        },
+                        origin: Pose::default(),
+                    }));
                 changed = true;
             }
         });

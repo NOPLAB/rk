@@ -108,8 +108,7 @@ impl Document {
     /// Note: CAD bodies are not stored in the file; callers must run
     /// `cad.history.rebuild(kernel)` afterwards to restore geometry.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, DocumentError> {
-        let content =
-            std::fs::read(path.as_ref()).map_err(|e| DocumentError::Io(e.to_string()))?;
+        let content = std::fs::read(path.as_ref()).map_err(|e| DocumentError::Io(e.to_string()))?;
         Self::from_ron_bytes(&content)
     }
 }

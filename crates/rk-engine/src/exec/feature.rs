@@ -226,21 +226,26 @@ impl Engine {
         &self,
         req: &ExtrudePreviewRequest,
     ) -> Result<TessellatedMesh, EngineError> {
-        let sketch = self
-            .doc
-            .cad
-            .history
-            .get_sketch(req.sketch_id)
-            .ok_or(EngineError::NotFound {
-                kind: "sketch",
-                id: req.sketch_id,
-            })?;
+        let sketch =
+            self.doc
+                .cad
+                .history
+                .get_sketch(req.sketch_id)
+                .ok_or(EngineError::NotFound {
+                    kind: "sketch",
+                    id: req.sketch_id,
+                })?;
         if req.profiles.is_empty() {
             return Err(EngineError::InvalidCommand("no profiles selected".into()));
         }
 
-        let mut combined =
-            extrude_solid(&*self.kernel, sketch, &req.profiles[0], req.distance, req.direction)?;
+        let mut combined = extrude_solid(
+            &*self.kernel,
+            sketch,
+            &req.profiles[0],
+            req.distance,
+            req.direction,
+        )?;
         for profile in req.profiles.iter().skip(1) {
             let solid = extrude_solid(&*self.kernel, sketch, profile, req.distance, req.direction)?;
             combined = self

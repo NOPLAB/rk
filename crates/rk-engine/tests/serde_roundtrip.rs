@@ -8,9 +8,7 @@
 use std::path::PathBuf;
 
 use glam::{Mat4, Vec2, Vec3};
-use rk_cad::{
-    BooleanOp, ExtrudeDirection, SketchConstraint, SketchPlane, Wire2D,
-};
+use rk_cad::{BooleanOp, ExtrudeDirection, SketchConstraint, SketchPlane, Wire2D};
 use rk_core::{GeometryType, InertiaMatrix, JointType, Pose, StlUnit};
 use rk_engine::{Command, Event, ExtrudePreviewRequest, PrimitiveSpec, ResetReason};
 use uuid::Uuid;
@@ -229,7 +227,10 @@ fn all_events() -> Vec<Event> {
         Event::PartAppearanceChanged { part_id: id() },
         Event::PartPhysicsChanged { part_id: id() },
         Event::WorldTransformsChanged {
-            transforms: vec![(id(), Mat4::IDENTITY), (id(), Mat4::from_translation(Vec3::X))],
+            transforms: vec![
+                (id(), Mat4::IDENTITY),
+                (id(), Mat4::from_translation(Vec3::X)),
+            ],
         },
         Event::LinkAdded {
             link_id: id(),
@@ -282,21 +283,51 @@ fn all_events() -> Vec<Event> {
 fn assert_command_coverage(cmd: &Command) {
     use Command::*;
     match cmd {
-        NewDocument | LoadDocument { .. } | SaveDocument { .. } | ImportMesh { .. }
-        | ImportUrdf { .. } | ExportUrdf { .. } | RenameProject { .. } | CreatePrimitive { .. }
-        | CreateEmptyPart { .. } | DeletePart { .. } | RenamePart { .. }
-        | SetPartTransform { .. } | SetPartColor { .. } | SetPartMaterial { .. }
+        NewDocument
+        | LoadDocument { .. }
+        | SaveDocument { .. }
+        | ImportMesh { .. }
+        | ImportUrdf { .. }
+        | ExportUrdf { .. }
+        | RenameProject { .. }
+        | CreatePrimitive { .. }
+        | CreateEmptyPart { .. }
+        | DeletePart { .. }
+        | RenamePart { .. }
+        | SetPartTransform { .. }
+        | SetPartColor { .. }
+        | SetPartMaterial { .. }
         | SetPartMass { .. }
-        | SetPartInertia { .. } | ConnectParts { .. } | DisconnectPart { .. }
-        | SetJointPosition { .. } | ResetJointPosition { .. } | ResetAllJointPositions
-        | SetJointType { .. } | SetJointOrigin { .. } | SetJointAxis { .. }
-        | SetJointLimits { .. } | AddCollision { .. } | RemoveCollision { .. }
-        | SetCollisionOrigin { .. } | SetCollisionGeometry { .. } | CreateSketch { .. }
-        | DeleteSketch { .. } | AddSketchEntities { .. } | UpdateSketchEntity { .. }
-        | DeleteSketchEntities { .. } | AddSketchConstraint { .. }
-        | DeleteSketchConstraint { .. } | SolveSketch { .. } | AddExtrude { .. }
-        | AddRevolve { .. } | DeleteFeature { .. } | SetFeatureSuppressed { .. }
-        | RollbackTo { .. } | RebuildFeatures | Undo | Redo => {}
+        | SetPartInertia { .. }
+        | ConnectParts { .. }
+        | DisconnectPart { .. }
+        | SetJointPosition { .. }
+        | ResetJointPosition { .. }
+        | ResetAllJointPositions
+        | SetJointType { .. }
+        | SetJointOrigin { .. }
+        | SetJointAxis { .. }
+        | SetJointLimits { .. }
+        | AddCollision { .. }
+        | RemoveCollision { .. }
+        | SetCollisionOrigin { .. }
+        | SetCollisionGeometry { .. }
+        | CreateSketch { .. }
+        | DeleteSketch { .. }
+        | AddSketchEntities { .. }
+        | UpdateSketchEntity { .. }
+        | DeleteSketchEntities { .. }
+        | AddSketchConstraint { .. }
+        | DeleteSketchConstraint { .. }
+        | SolveSketch { .. }
+        | AddExtrude { .. }
+        | AddRevolve { .. }
+        | DeleteFeature { .. }
+        | SetFeatureSuppressed { .. }
+        | RollbackTo { .. }
+        | RebuildFeatures
+        | Undo
+        | Redo => {}
     }
 }
 

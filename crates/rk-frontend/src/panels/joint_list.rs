@@ -134,19 +134,17 @@ impl JointListPanel {
                                 .clamping(egui::SliderClamping::Never);
                         if ui.add(slider).changed() {
                             let new_rad = angle_mode.to_radians(display_value);
-                            app_state
-                                .lock()
-                                .queue_action(AppAction::Cmd(Command::SetJointPosition {
+                            app_state.lock().queue_action(AppAction::Cmd(
+                                Command::SetJointPosition {
                                     joint_id: joint.id,
                                     position: new_rad,
-                                }));
+                                },
+                            ));
                         }
                         if ui.button("R").on_hover_text("Reset to 0").clicked() {
-                            app_state
-                                .lock()
-                                .queue_action(AppAction::Cmd(Command::ResetJointPosition {
-                                    joint_id: joint.id,
-                                }));
+                            app_state.lock().queue_action(AppAction::Cmd(
+                                Command::ResetJointPosition { joint_id: joint.id },
+                            ));
                         }
                     });
                 }
@@ -168,19 +166,17 @@ impl JointListPanel {
                                 .suffix(angle_mode.suffix());
                         if ui.add(slider).changed() {
                             let new_rad = angle_mode.to_radians(display_value);
-                            app_state
-                                .lock()
-                                .queue_action(AppAction::Cmd(Command::SetJointPosition {
+                            app_state.lock().queue_action(AppAction::Cmd(
+                                Command::SetJointPosition {
                                     joint_id: joint.id,
                                     position: new_rad,
-                                }));
+                                },
+                            ));
                         }
                         if ui.button("R").on_hover_text("Reset to 0").clicked() {
-                            app_state
-                                .lock()
-                                .queue_action(AppAction::Cmd(Command::ResetJointPosition {
-                                    joint_id: joint.id,
-                                }));
+                            app_state.lock().queue_action(AppAction::Cmd(
+                                Command::ResetJointPosition { joint_id: joint.id },
+                            ));
                         }
                     });
                 }
@@ -197,19 +193,17 @@ impl JointListPanel {
                     ui.horizontal(|ui| {
                         let slider = egui::Slider::new(&mut value, lower..=upper).suffix(" m");
                         if ui.add(slider).changed() {
-                            app_state
-                                .lock()
-                                .queue_action(AppAction::Cmd(Command::SetJointPosition {
+                            app_state.lock().queue_action(AppAction::Cmd(
+                                Command::SetJointPosition {
                                     joint_id: joint.id,
                                     position: value,
-                                }));
+                                },
+                            ));
                         }
                         if ui.button("R").on_hover_text("Reset to 0").clicked() {
-                            app_state
-                                .lock()
-                                .queue_action(AppAction::Cmd(Command::ResetJointPosition {
-                                    joint_id: joint.id,
-                                }));
+                            app_state.lock().queue_action(AppAction::Cmd(
+                                Command::ResetJointPosition { joint_id: joint.id },
+                            ));
                         }
                     });
                 }

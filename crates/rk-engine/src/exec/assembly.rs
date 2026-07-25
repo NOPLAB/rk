@@ -80,7 +80,11 @@ impl Engine {
             .assembly
             .disconnect(link_id)
             .map_err(|e| EngineError::InvalidCommand(e.to_string()))?;
-        tracing::info!("disconnected part {}, removed joint {}", child_part, joint.name);
+        tracing::info!(
+            "disconnected part {}, removed joint {}",
+            child_part,
+            joint.name
+        );
         events.push(Event::JointRemoved { joint_id: joint.id });
         self.update_kinematics(events);
         Ok(())
@@ -93,10 +97,13 @@ impl Engine {
         events: &mut Vec<Event>,
     ) -> Result<(), EngineError> {
         let assembly = &mut self.doc.project.assembly;
-        let joint = assembly.joints.get(&joint_id).ok_or(EngineError::NotFound {
-            kind: "joint",
-            id: joint_id,
-        })?;
+        let joint = assembly
+            .joints
+            .get(&joint_id)
+            .ok_or(EngineError::NotFound {
+                kind: "joint",
+                id: joint_id,
+            })?;
         let clamped = match &joint.limits {
             Some(limits) => position.clamp(limits.lower, limits.upper),
             None => position,
@@ -174,10 +181,14 @@ impl Engine {
                 .get_joint(joint_id)
                 .map(|j| j.child_link)
                 .and_then(|child_id| {
-                    self.doc.project.assembly.get_link(child_id).and_then(|link| {
-                        link.part_id
-                            .map(|part_id| (child_id, part_id, link.world_transform))
-                    })
+                    self.doc
+                        .project
+                        .assembly
+                        .get_link(child_id)
+                        .and_then(|link| {
+                            link.part_id
+                                .map(|part_id| (child_id, part_id, link.world_transform))
+                        })
                 })
         } else {
             None

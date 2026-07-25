@@ -156,7 +156,12 @@ pub(super) fn with_sketch_state(ctx: &ActionContext, f: impl FnOnce(&mut SketchM
 }
 
 fn handle_show_extrude_dialog(ctx: &ActionContext, events: &mut Vec<Event>) {
-    let Some(sketch_id) = ctx.app_state.lock().editor_mode.sketch().map(|s| s.active_sketch)
+    let Some(sketch_id) = ctx
+        .app_state
+        .lock()
+        .editor_mode
+        .sketch()
+        .map(|s| s.active_sketch)
     else {
         return;
     };

@@ -104,13 +104,12 @@ impl PropertyComponent for JointComponent {
                     let mut pos = info.joint.origin.xyz;
                     if vector3_row(ui, "Position", &mut pos, 0.01) {
                         let origin = Pose::new(pos, info.joint.origin.rpy);
-                        ctx.pending_actions.push(AppAction::Cmd(
-                            Command::SetJointOrigin {
+                        ctx.pending_actions
+                            .push(AppAction::Cmd(Command::SetJointOrigin {
                                 joint_id: info.joint_id,
                                 origin,
                                 keep_child_world_pose: true,
-                            },
-                        ));
+                            }));
                         changed = true;
                     }
 
@@ -127,13 +126,12 @@ impl PropertyComponent for JointComponent {
                             rot_deg[2].to_radians(),
                         ];
                         let origin = Pose::new(info.joint.origin.xyz, rpy);
-                        ctx.pending_actions.push(AppAction::Cmd(
-                            Command::SetJointOrigin {
+                        ctx.pending_actions
+                            .push(AppAction::Cmd(Command::SetJointOrigin {
                                 joint_id: info.joint_id,
                                 origin,
                                 keep_child_world_pose: true,
-                            },
-                        ));
+                            }));
                         changed = true;
                     }
 
@@ -149,12 +147,11 @@ impl PropertyComponent for JointComponent {
                             } else {
                                 Vec3::Z // Default to Z if zero
                             };
-                            ctx.pending_actions.push(AppAction::Cmd(
-                                Command::SetJointAxis {
+                            ctx.pending_actions
+                                .push(AppAction::Cmd(Command::SetJointAxis {
                                     joint_id: info.joint_id,
                                     axis: new_axis,
-                                },
-                            ));
+                                }));
                             changed = true;
                         }
                     }
@@ -229,8 +226,8 @@ impl PropertyComponent for JointComponent {
                                 lower = lower.to_radians();
                                 upper = upper.to_radians();
                             }
-                            ctx.pending_actions.push(AppAction::Cmd(
-                                Command::SetJointLimits {
+                            ctx.pending_actions
+                                .push(AppAction::Cmd(Command::SetJointLimits {
                                     joint_id: info.joint_id,
                                     limits: Some(JointLimits {
                                         lower,
@@ -238,8 +235,7 @@ impl PropertyComponent for JointComponent {
                                         effort,
                                         velocity,
                                     }),
-                                },
-                            ));
+                                }));
                             changed = true;
                         }
                     }

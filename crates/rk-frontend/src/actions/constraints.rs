@@ -23,9 +23,7 @@ pub fn handle_select_entity_for_constraint(
         let state = ctx.app_state.lock();
         state.editor_mode.sketch().map(|s| {
             let first = match &s.constraint_tool_state {
-                Some(ConstraintToolState::WaitingForSecond { first_entity }) => {
-                    Some(*first_entity)
-                }
+                Some(ConstraintToolState::WaitingForSecond { first_entity }) => Some(*first_entity),
                 _ => None,
             };
             (s.current_tool, s.active_sketch, first)
@@ -66,7 +64,10 @@ pub fn handle_select_entity_for_constraint(
 
         // DimensionDistance on a line = length constraint, single pick
         if tool == SketchTool::DimensionDistance
-            && matches!(sketch.get_entity(entity_id), Some(SketchEntity::Line { .. }))
+            && matches!(
+                sketch.get_entity(entity_id),
+                Some(SketchEntity::Line { .. })
+            )
         {
             let initial_value = compute_initial_value(tool, &[entity_id], &sketch);
             ui::with_sketch_state(ctx, |s| {
@@ -208,15 +209,15 @@ fn create_dimensional_constraint(
                 None
             }
         }
-        SketchTool::DimensionHorizontal => (entities.len() >= 2).then(|| {
-            SketchConstraint::horizontal_distance(entities[0], entities[1], value)
-        }),
+        SketchTool::DimensionHorizontal => (entities.len() >= 2)
+            .then(|| SketchConstraint::horizontal_distance(entities[0], entities[1], value)),
         SketchTool::DimensionVertical => (entities.len() >= 2)
             .then(|| SketchConstraint::vertical_distance(entities[0], entities[1], value)),
         SketchTool::DimensionAngle => (entities.len() >= 2)
             .then(|| SketchConstraint::angle(entities[0], entities[1], value.to_radians())),
-        SketchTool::DimensionRadius => (!entities.is_empty())
-            .then(|| SketchConstraint::radius(entities[0], value)),
+        SketchTool::DimensionRadius => {
+            (!entities.is_empty()).then(|| SketchConstraint::radius(entities[0], value))
+        }
         _ => None,
     }
 }

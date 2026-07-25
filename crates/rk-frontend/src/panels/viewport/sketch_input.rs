@@ -269,11 +269,7 @@ pub fn handle_sketch_mode_input(
 }
 
 /// Queue an atomic add of the given entities to the sketch
-fn commit_entities(
-    app_state: &SharedAppState,
-    sketch_id: uuid::Uuid,
-    entities: Vec<SketchEntity>,
-) {
+fn commit_entities(app_state: &SharedAppState, sketch_id: uuid::Uuid, entities: Vec<SketchEntity>) {
     app_state
         .lock()
         .queue_action(AppAction::Cmd(Command::AddSketchEntities {
@@ -283,10 +279,7 @@ fn commit_entities(
 }
 
 /// Run a closure over the in-progress state (if in sketch mode)
-fn with_in_progress(
-    app_state: &SharedAppState,
-    f: impl FnOnce(&mut Option<InProgressEntity>),
-) {
+fn with_in_progress(app_state: &SharedAppState, f: impl FnOnce(&mut Option<InProgressEntity>)) {
     let mut app = app_state.lock();
     if let Some(sketch_state) = app.editor_mode.sketch_mut() {
         f(&mut sketch_state.in_progress);

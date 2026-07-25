@@ -379,9 +379,7 @@ impl Panel for PartListPanel {
                     state.queue_action(AppAction::Cmd(Command::DeletePart { part_id: id }));
                 }
                 TreeAction::Disconnect(id) => {
-                    state.queue_action(AppAction::Cmd(Command::DisconnectPart {
-                        child_part: id,
-                    }));
+                    state.queue_action(AppAction::Cmd(Command::DisconnectPart { child_part: id }));
                 }
                 TreeAction::Connect { parent, child } => {
                     // The engine disconnects an existing parent if needed

@@ -53,9 +53,8 @@ impl UrdfEditorApp {
         configure_fonts(&cc.egui_ctx);
 
         // Initialize the engine (owns the CAD kernel and all domain state)
-        let engine: SharedEngine = Arc::new(Mutex::new(Engine::new(Arc::from(
-            rk_cad::default_kernel(),
-        ))));
+        let engine: SharedEngine =
+            Arc::new(Mutex::new(Engine::new(Arc::from(rk_cad::default_kernel()))));
 
         // Load configuration
         let config = create_shared_config();

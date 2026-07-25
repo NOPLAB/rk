@@ -132,9 +132,7 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
                     .add_enabled(can_undo, egui::Button::new("Undo  Ctrl+Z"))
                     .clicked()
                 {
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::Cmd(Command::Undo));
+                    app_state.lock().queue_action(AppAction::Cmd(Command::Undo));
                     ui.close();
                 }
 
@@ -142,9 +140,7 @@ pub fn render_menu_bar(ctx: &egui::Context, app_state: &SharedAppState) -> Optio
                     .add_enabled(can_redo, egui::Button::new("Redo  Ctrl+Y"))
                     .clicked()
                 {
-                    app_state
-                        .lock()
-                        .queue_action(AppAction::Cmd(Command::Redo));
+                    app_state.lock().queue_action(AppAction::Cmd(Command::Redo));
                     ui.close();
                 }
 

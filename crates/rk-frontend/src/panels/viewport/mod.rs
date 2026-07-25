@@ -266,8 +266,10 @@ impl Panel for ViewportPanel {
                     .iter()
                     .map(|(id, link)| (*id, link.clone()))
                     .collect();
-                vp_state
-                    .update_collisions(links.iter().map(|(id, link)| (id, link)), selected_collision);
+                vp_state.update_collisions(
+                    links.iter().map(|(id, link)| (id, link)),
+                    selected_collision,
+                );
             }
 
             vp_state.render();
@@ -452,29 +454,34 @@ impl Panel for ViewportPanel {
                 // Deltas arrive in world space; joint origins live in the
                 // parent link frame
                 let link_world_inv = link_world_transform.inverse();
-                engine.lock().assembly().joints.get(&joint_id).and_then(|joint| {
-                    let mut origin = joint.origin;
-                    match transform {
-                        GizmoTransform::Translation(delta) => {
-                            let local_delta = link_world_inv.transform_vector3(delta);
-                            origin.xyz[0] += local_delta.x;
-                            origin.xyz[1] += local_delta.y;
-                            origin.xyz[2] += local_delta.z;
+                engine
+                    .lock()
+                    .assembly()
+                    .joints
+                    .get(&joint_id)
+                    .and_then(|joint| {
+                        let mut origin = joint.origin;
+                        match transform {
+                            GizmoTransform::Translation(delta) => {
+                                let local_delta = link_world_inv.transform_vector3(delta);
+                                origin.xyz[0] += local_delta.x;
+                                origin.xyz[1] += local_delta.y;
+                                origin.xyz[2] += local_delta.z;
+                            }
+                            GizmoTransform::Rotation(rotation) => {
+                                let new_quat = rotation * origin.to_quat();
+                                let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
+                                origin.rpy = [x, y, z];
+                            }
+                            // Joint origins do not scale
+                            GizmoTransform::Scale(_) => return None,
                         }
-                        GizmoTransform::Rotation(rotation) => {
-                            let new_quat = rotation * origin.to_quat();
-                            let (x, y, z) = new_quat.to_euler(glam::EulerRot::XYZ);
-                            origin.rpy = [x, y, z];
-                        }
-                        // Joint origins do not scale
-                        GizmoTransform::Scale(_) => return None,
-                    }
-                    Some(Command::SetJointOrigin {
-                        joint_id,
-                        origin,
-                        keep_child_world_pose: true,
+                        Some(Command::SetJointOrigin {
+                            joint_id,
+                            origin,
+                            keep_child_world_pose: true,
+                        })
                     })
-                })
             } else if let Some((link_id, index)) = editing_collision {
                 let link_world_inv = link_world_transform.inverse();
                 let eng = engine.lock();
@@ -516,13 +523,11 @@ impl Panel for ViewportPanel {
                                 translation + delta,
                             )
                         }
-                        GizmoTransform::Rotation(rot) => {
-                            Mat4::from_scale_rotation_translation(
-                                scale,
-                                rot * rotation,
-                                translation,
-                            )
-                        }
+                        GizmoTransform::Rotation(rot) => Mat4::from_scale_rotation_translation(
+                            scale,
+                            rot * rotation,
+                            translation,
+                        ),
                         GizmoTransform::Scale(scale_delta) => {
                             Mat4::from_scale_rotation_translation(
                                 scale * scale_delta,

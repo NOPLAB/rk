@@ -148,7 +148,13 @@ impl Panel for PropertiesPanel {
                 })
                 .unwrap_or((None, None, Vec::new(), Vec::new()));
 
-            (part, link_id, link_world_transform, collisions, child_joints)
+            (
+                part,
+                link_id,
+                link_world_transform,
+                collisions,
+                child_joints,
+            )
         };
         let mut part = part;
 

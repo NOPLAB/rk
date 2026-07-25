@@ -116,8 +116,12 @@ impl Engine {
             mesh_prefix: "meshes".to_string(),
             use_package_uri: false,
         };
-        export_urdf(&self.doc.project.assembly, self.doc.project.parts(), &options)
-            .map_err(|e| EngineError::Io(e.to_string()))?;
+        export_urdf(
+            &self.doc.project.assembly,
+            self.doc.project.parts(),
+            &options,
+        )
+        .map_err(|e| EngineError::Io(e.to_string()))?;
         tracing::info!("exported URDF to {:?}", options.output_dir);
         Ok(())
     }

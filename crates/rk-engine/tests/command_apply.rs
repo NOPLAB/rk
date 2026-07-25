@@ -57,7 +57,10 @@ fn set_part_transform_emits_world_transforms() {
     let id = create_box(&mut eng);
     let transform = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
     let events = eng
-        .apply(Command::SetPartTransform { part_id: id, transform })
+        .apply(Command::SetPartTransform {
+            part_id: id,
+            transform,
+        })
         .unwrap();
 
     let transforms = events
@@ -249,10 +252,7 @@ fn collision_lifecycle() {
     .unwrap();
 
     let err = eng
-        .apply(Command::RemoveCollision {
-            link_id,
-            index: 99,
-        })
+        .apply(Command::RemoveCollision { link_id, index: 99 })
         .unwrap_err();
     assert!(matches!(err, EngineError::InvalidCommand(_)));
 
@@ -273,6 +273,10 @@ fn revision_increments_on_success_only() {
     let _ = eng.apply(Command::DeletePart {
         part_id: Uuid::new_v4(),
     });
-    assert_eq!(eng.revision(), r0 + 1, "failed command does not bump revision");
+    assert_eq!(
+        eng.revision(),
+        r0 + 1,
+        "failed command does not bump revision"
+    );
     assert_eq!(eng.command_log().len(), 1);
 }
