@@ -4872,6 +4872,7 @@ dependencies = [
  "glam",
  "parking_lot",
  "rk-cad",
+ "rk-core",
  "rk-engine",
  "serde",
  "serde_json",

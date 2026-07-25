@@ -9,6 +9,7 @@ import { Viewport } from "./scene/viewport";
 import { Toolbar } from "./components/Toolbar";
 import { PartList } from "./components/PartList";
 import { PropertiesPanel } from "./components/PropertiesPanel";
+import { JointPanel } from "./components/JointPanel";
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,6 +103,8 @@ export default function App() {
             selected={selected}
             onSelect={select}
           />
+          <div className="panel-title">Joints</div>
+          <JointPanel snapshot={snapshot} run={run} />
         </aside>
         <div className="viewport" ref={containerRef}>
           <canvas ref={canvasRef} />

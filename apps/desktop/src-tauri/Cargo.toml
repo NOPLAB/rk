@@ -11,6 +11,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 rk-cad = { workspace = true }
+rk-core = { workspace = true }
 rk-engine = { workspace = true }
 
 tauri = { workspace = true }

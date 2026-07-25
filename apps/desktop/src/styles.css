@@ -63,6 +63,15 @@ button:disabled {
   cursor: default;
 }
 
+select {
+  background: #2a2f36;
+  color: #d5d9de;
+  border: 1px solid #3a4048;
+  border-radius: 4px;
+  padding: 3px 6px;
+  min-width: 0;
+}
+
 /* ---- layout ---- */
 .main {
   display: flex;
@@ -194,6 +203,115 @@ button:disabled {
   color: #6c757e;
   word-break: break-all;
   user-select: text;
+}
+
+/* ---- joints ---- */
+.joints {
+  display: flex;
+  flex-direction: column;
+}
+
+.connect-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3138;
+}
+
+.connect-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.joint-card {
+  padding: 8px 10px;
+  border-bottom: 1px solid #23272e;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.joint-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.joint-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.slider-value {
+  width: 58px;
+  text-align: right;
+  color: #9aa3ad;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.triple-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.triple-row > span {
+  width: 34px;
+  color: #9aa3ad;
+  flex-shrink: 0;
+}
+
+.triple-row .check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #9aa3ad;
+  flex-shrink: 0;
+}
+
+.mini-num {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  background: #14161a;
+  color: #d5d9de;
+  border: 1px solid #3a4048;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+button.mini {
+  padding: 2px 7px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.joint-actions {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.joints > .joint-actions {
+  padding: 8px 10px;
 }
 
 /* ---- status bar ---- */

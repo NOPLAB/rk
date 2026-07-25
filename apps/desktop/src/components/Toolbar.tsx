@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Command, SceneSnapshot } from "../engine/api";
 import {
@@ -5,14 +6,26 @@ import {
   createCylinder,
   createSphere,
   deletePart,
+  exportUrdf,
+  importMesh,
+  importUrdf,
   loadDocument,
   newDocument,
   redo,
   saveDocument,
   undo,
+  type StlUnit,
 } from "../engine/commands";
 
 const RK_FILTER = [{ name: "RK Project", extensions: ["rk"] }];
+const MESH_FILTER = [{ name: "Mesh", extensions: ["stl", "obj", "dae"] }];
+const URDF_FILTER = [{ name: "URDF", extensions: ["urdf", "xml"] }];
+const STL_UNITS: StlUnit[] = [
+  "Millimeters",
+  "Meters",
+  "Centimeters",
+  "Inches",
+];
 
 interface Props {
   snapshot: SceneSnapshot | null;
@@ -22,6 +35,8 @@ interface Props {
 }
 
 export function Toolbar({ snapshot, selected, run, onDeselect }: Props) {
+  const [unit, setUnit] = useState<StlUnit>("Millimeters");
+
   const onOpen = async () => {
     const path = await open({ filters: RK_FILTER, multiple: false });
     if (typeof path === "string") await run([loadDocument(path)]);
@@ -43,6 +58,25 @@ export function Toolbar({ snapshot, selected, run, onDeselect }: Props) {
     await run([deletePart(selected)]);
   };
 
+  const onImportMesh = async () => {
+    const path = await open({ filters: MESH_FILTER, multiple: false });
+    if (typeof path === "string") await run([importMesh(path, unit)]);
+  };
+
+  const onImportUrdf = async () => {
+    const path = await open({ filters: URDF_FILTER, multiple: false });
+    if (typeof path === "string") await run([importUrdf(path, unit)]);
+  };
+
+  const onExportUrdf = async () => {
+    const path = await save({
+      filters: [{ name: "URDF", extensions: ["urdf"] }],
+    });
+    if (!path) return;
+    const name = (snapshot?.project_name || "robot").replace(/\s+/g, "_");
+    await run([exportUrdf(path, name)]);
+  };
+
   return (
     <header className="toolbar">
       <div className="group">
@@ -61,6 +95,27 @@ export function Toolbar({ snapshot, selected, run, onDeselect }: Props) {
         <button onClick={() => void run([createSphere(0.05)])}>+ Sphere</button>
         <button disabled={!selected} onClick={() => void onDelete()}>
           Delete
+        </button>
+      </div>
+      <div className="group">
+        <select
+          title="Mesh import unit"
+          value={unit}
+          onChange={(e) => setUnit(e.target.value as StlUnit)}
+        >
+          {STL_UNITS.map((u) => (
+            <option key={u} value={u}>
+              {u}
+            </option>
+          ))}
+        </select>
+        <button onClick={() => void onImportMesh()}>Import Mesh</button>
+        <button onClick={() => void onImportUrdf()}>Import URDF</button>
+        <button
+          disabled={!snapshot || snapshot.parts.length === 0}
+          onClick={() => void onExportUrdf()}
+        >
+          Export URDF
         </button>
       </div>
       <div className="group">

@@ -31,6 +31,48 @@ export interface PartInfo {
   origin_transform: Mat4;
 }
 
+/** Serde PascalCase variants of rk_core::JointType */
+export type JointType =
+  | "Fixed"
+  | "Revolute"
+  | "Continuous"
+  | "Prismatic"
+  | "Floating"
+  | "Planar";
+
+export interface JointLimits {
+  lower: number;
+  upper: number;
+  effort: number;
+  velocity: number;
+}
+
+/** rk_core::Pose: translation + roll/pitch/yaw (radians) */
+export interface Pose {
+  xyz: [number, number, number];
+  rpy: [number, number, number];
+}
+
+export interface LinkInfo {
+  id: string;
+  name: string;
+  part_id: string | null;
+}
+
+export interface JointInfo {
+  id: string;
+  name: string;
+  joint_type: JointType;
+  parent_link: string;
+  child_link: string;
+  parent_part: string | null;
+  child_part: string | null;
+  origin: Pose;
+  axis: [number, number, number];
+  limits: JointLimits | null;
+  position: number;
+}
+
 export interface SceneSnapshot {
   project_name: string;
   doc_path: string | null;
@@ -39,6 +81,8 @@ export interface SceneSnapshot {
   parts: PartInfo[];
   transforms: [string, Mat4][];
   body_ids: string[];
+  links: LinkInfo[];
+  joints: JointInfo[];
   history: {
     can_undo: boolean;
     can_redo: boolean;
