@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -40,6 +40,11 @@ truck-meshalgo = "0.4"
 truck-topology = "0.6"
 truck-polymesh = "0.6"
 truck-shapeops = "0.4"
+
+# Tauri desktop app
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 
 # MCP server
 rmcp = { version = "0.9", default-features = false, features = ["base64", "server", "macros", "transport-io"] }

@@ -1,0 +1,307 @@
+// Three.js viewport: the desktop counterpart of the egui renderer glue.
+//
+// Scene sync mirrors rk-frontend/src/sync.rs — engine events drive
+// incremental updates; document_reset triggers a full rebuild from a
+// snapshot. RK is Z-up; Three defaults to Y-up, so the grid is rotated
+// onto the XY plane and every camera/up vector is Z-up.
+
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import {
+  getBodyMesh,
+  getPartMesh,
+  sceneSnapshot,
+  type EngineEvent,
+  type Mat4,
+  type MeshPayload,
+  type Rgba,
+  type SceneSnapshot,
+} from "../engine/api";
+
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+const SELECT_EMISSIVE = new THREE.Color(0x2a5db0);
+const BLACK = new THREE.Color(0x000000);
+
+export class Viewport {
+  private renderer: THREE.WebGLRenderer;
+  private scene = new THREE.Scene();
+  private camera: THREE.PerspectiveCamera;
+  private controls: OrbitControls;
+  private raycaster = new THREE.Raycaster();
+  private partMeshes = new Map<string, THREE.Mesh>();
+  private bodyMeshes = new Map<string, THREE.Mesh>();
+  private selected: string | null = null;
+  private disposed = false;
+
+  /** Fired when the user clicks a part (or empty space → null) */
+  onPick: ((partId: string | null) => void) | null = null;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.scene.background = new THREE.Color(0x191c20);
+
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.001, 1000);
+    this.camera.up.set(0, 0, 1);
+    this.camera.position.set(0.5, -0.5, 0.35);
+
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.target.set(0, 0, 0);
+
+    const grid = new THREE.GridHelper(10, 100, 0x50555c, 0x2b2f34);
+    grid.rotation.x = Math.PI / 2; // XZ (three default) → XY plane
+    this.scene.add(grid);
+    this.scene.add(new THREE.AxesHelper(0.15));
+
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x3a3d42, 0.9);
+    hemi.position.set(0, 0, 1);
+    this.scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 1.6);
+    dir.position.set(1.5, -2.0, 3.0);
+    this.scene.add(dir);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+    fill.position.set(-2.0, 1.5, -1.0);
+    this.scene.add(fill);
+
+    // Click-select with a small drag threshold so orbiting never selects
+    let downAt: [number, number] | null = null;
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.button === 0) downAt = [e.clientX, e.clientY];
+    });
+    canvas.addEventListener("pointerup", (e) => {
+      if (!downAt || e.button !== 0) return;
+      const [x0, y0] = downAt;
+      downAt = null;
+      if (Math.hypot(e.clientX - x0, e.clientY - y0) > 4) return;
+      this.onPick?.(this.pick(e));
+    });
+
+    this.renderer.setAnimationLoop(() => {
+      if (this.disposed) return;
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    });
+  }
+
+  resize(width: number, height: number) {
+    if (width <= 0 || height <= 0) return;
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.renderer.setAnimationLoop(null);
+    this.controls.dispose();
+    this.clearAll();
+    this.renderer.dispose();
+  }
+
+  // ---- engine sync ------------------------------------------------------
+
+  /** Mirror of sync.rs `apply_events` */
+  async applyEvents(events: EngineEvent[]) {
+    for (const ev of events) {
+      switch (ev.type) {
+        case "document_reset":
+          await this.rebuildFromSnapshot(await sceneSnapshot());
+          break;
+        case "part_added":
+        case "part_appearance_changed":
+          await this.addOrUpdatePart(ev.part_id as string);
+          break;
+        case "part_removed":
+          this.removeFrom(this.partMeshes, ev.part_id as string);
+          break;
+        case "world_transforms_changed":
+          this.setTransforms(ev.transforms as [string, Mat4][]);
+          break;
+        case "bodies_rebuilt": {
+          this.clearMap(this.bodyMeshes);
+          for (const id of ev.body_ids as string[]) {
+            await this.addBody(id);
+          }
+          break;
+        }
+        default:
+          // list/history/joint changes are handled by the React layer
+          break;
+      }
+    }
+  }
+
+  async rebuildFromSnapshot(snap: SceneSnapshot) {
+    this.clearAll();
+    for (const part of snap.parts) {
+      if (part.has_mesh) await this.addOrUpdatePart(part.id);
+    }
+    this.setTransforms(snap.transforms);
+    for (const id of snap.body_ids) {
+      await this.addBody(id);
+    }
+    if (snap.parts.length > 0 || snap.body_ids.length > 0) this.fitCamera();
+  }
+
+  setTransforms(transforms: [string, Mat4][]) {
+    for (const [id, m] of transforms) {
+      const mesh = this.partMeshes.get(id);
+      if (mesh) mesh.matrix.fromArray(m);
+    }
+  }
+
+  setSelected(partId: string | null) {
+    this.selected = partId;
+    for (const [id, mesh] of this.partMeshes) {
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      mat.emissive.copy(id === partId ? SELECT_EMISSIVE : BLACK);
+      mat.emissiveIntensity = 0.6;
+    }
+  }
+
+  fitCamera() {
+    const box = new THREE.Box3();
+    let any = false;
+    for (const mesh of [...this.partMeshes.values(), ...this.bodyMeshes.values()]) {
+      box.expandByObject(mesh);
+      any = true;
+    }
+    if (!any || box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.05);
+    const dir = new THREE.Vector3(1, -1, 0.7).normalize();
+    this.camera.position.copy(center.clone().add(dir.multiplyScalar(radius * 2.5)));
+    this.controls.target.copy(center);
+  }
+
+  // ---- mesh management --------------------------------------------------
+
+  private async addOrUpdatePart(partId: string) {
+    const payload = await getPartMesh(partId);
+    const prevMatrix = this.partMeshes.get(partId)?.matrix.clone();
+    this.removeFrom(this.partMeshes, partId);
+    if (payload.vertices.length === 0) return;
+    const mesh = new THREE.Mesh(
+      buildGeometry(payload),
+      makeMaterial(payload.color),
+    );
+    mesh.matrixAutoUpdate = false;
+    if (prevMatrix) mesh.matrix.copy(prevMatrix);
+    mesh.userData.partId = partId;
+    this.partMeshes.set(partId, mesh);
+    this.scene.add(mesh);
+    if (this.selected === partId) this.setSelected(partId);
+  }
+
+  private async addBody(bodyId: string) {
+    try {
+      const payload = await getBodyMesh(bodyId);
+      const mesh = new THREE.Mesh(
+        buildGeometry(payload),
+        makeMaterial(payload.color),
+      );
+      mesh.matrixAutoUpdate = false;
+      this.bodyMeshes.set(bodyId, mesh);
+      this.scene.add(mesh);
+    } catch (e) {
+      console.warn(`skipping body ${bodyId}:`, e);
+    }
+  }
+
+  private pick(e: PointerEvent): string | null {
+    const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hits = this.raycaster.intersectObjects(
+      [...this.partMeshes.values()],
+      false,
+    );
+    return (hits[0]?.object.userData.partId as string | undefined) ?? null;
+  }
+
+  private removeFrom(map: Map<string, THREE.Mesh>, id: string) {
+    const mesh = map.get(id);
+    if (!mesh) return;
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+    map.delete(id);
+  }
+
+  private clearMap(map: Map<string, THREE.Mesh>) {
+    for (const id of [...map.keys()]) this.removeFrom(map, id);
+  }
+
+  private clearAll() {
+    this.clearMap(this.partMeshes);
+    this.clearMap(this.bodyMeshes);
+  }
+}
+
+// ---- geometry helpers ---------------------------------------------------
+
+function makeMaterial(color: Rgba): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color[0], color[1], color[2]),
+    metalness: 0.1,
+    roughness: 0.7,
+    transparent: color[3] < 1,
+    opacity: color[3],
+    side: THREE.DoubleSide,
+  });
+}
+
+/**
+ * Parts carry one normal per triangle; CAD bodies carry one per vertex.
+ * Per-vertex → indexed geometry as-is. Per-triangle → expand to flat-shaded
+ * non-indexed triangles. Missing normals → let Three compute them.
+ */
+function buildGeometry(payload: MeshPayload): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+
+  if (
+    payload.normals.length === payload.vertices.length &&
+    payload.normals.length > 0
+  ) {
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(payload.vertices.flat(), 3),
+    );
+    geo.setAttribute(
+      "normal",
+      new THREE.Float32BufferAttribute(payload.normals.flat(), 3),
+    );
+    if (payload.indices.length > 0) geo.setIndex(payload.indices);
+  } else if (payload.normals.length > 0) {
+    const indices =
+      payload.indices.length > 0
+        ? payload.indices
+        : payload.vertices.map((_, i) => i);
+    const positions: number[] = [];
+    const normals: number[] = [];
+    for (let t = 0; t * 3 < indices.length; t++) {
+      const n = payload.normals[t] ?? [0, 0, 1];
+      for (let k = 0; k < 3; k++) {
+        const v = payload.vertices[indices[t * 3 + k]];
+        positions.push(v[0], v[1], v[2]);
+        normals.push(n[0], n[1], n[2]);
+      }
+    }
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  } else {
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(payload.vertices.flat(), 3),
+    );
+    if (payload.indices.length > 0) geo.setIndex(payload.indices);
+    geo.computeVertexNormals();
+  }
+
+  geo.computeBoundingSphere();
+  return geo;
+}

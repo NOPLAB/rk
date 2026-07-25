@@ -17,6 +17,9 @@ cargo run -p rk-frontend
 # Run the MCP server (stdio; logs go to stderr)
 cargo run -p rk-mcp
 
+# Run the Tauri desktop app (dev: starts Vite + opens the window)
+cd apps/desktop && npm install && npm run tauri dev
+
 # Run tests
 cargo test
 
@@ -48,7 +51,8 @@ cargo build --no-default-features        # No CAD kernel (NullKernel)
 
 RK is a 3D CAD editor built with Rust, evolving into an agentic platform
 where AI agents drive CAD (and later simulation) through a headless
-engine. The codebase is a Cargo workspace with six crates:
+engine. The codebase is a Cargo workspace with six library/binary crates
+under `crates/` plus the Tauri desktop app under `apps/desktop`:
 
 ### Crate Dependencies
 
@@ -63,6 +67,9 @@ rk-frontend (egui application; UI state + rendering glue only)
 rk-mcp (MCP server for agents; stdio transport)
     ├── rk-engine
     └── rk-renderer (headless: offscreen texture + readback)
+
+rk-desktop (apps/desktop/src-tauri: Tauri 2 shell; webview renders with Three.js)
+    └── rk-engine
 ```
 
 ### rk-core
@@ -151,6 +158,23 @@ stdout carries JSON-RPC — log to stderr only:
   `tests/reference_examples.rs` deserializes each ```json example and
   fails compilation when a `Command` variant is added but undocumented
 
+### rk-desktop (apps/desktop)
+
+Tauri 2 + React/TypeScript + Three.js desktop app (Phase 2; will replace
+the egui frontend once at feature parity):
+
+- `src-tauri/` (`rk-desktop` crate): owns a `SharedEngine`; IPC commands
+  mirror the MCP protocol shape — `engine_apply` (batch of `Command`s,
+  validate-all-then-apply), `scene_snapshot` (part metadata + render
+  transforms + body IDs + undo state), `get_part_mesh` / `get_body_mesh`
+  (bulk data pulled by ID)
+- `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
+  command builders, `scene/viewport.ts` Three.js scene manager (Z-up;
+  event-driven sync mirroring `rk-frontend/src/sync.rs`), `components/`
+  panels
+- Dev: `npm run tauri dev` (Vite on port 1420); the production build embeds
+  `dist/` via the `custom-protocol` feature
+
 ## Key Patterns
 
 - **Command/Event**: panels queue `AppAction`s; per frame the dispatcher
@@ -169,9 +193,11 @@ stdout carries JSON-RPC — log to stderr only:
 
 - Native: Linux (X11/Wayland), Windows, macOS (WASM support was removed)
 
-## Roadmap (Phases 0-1 done)
+## Roadmap (Phases 0-1 done, Phase 2 in progress)
 
 - Phase 0: headless `rk-engine` extraction — done
 - Phase 1: MCP server (`rk-mcp`) + headless rendering — done
-- Phase 2: Tauri + React frontend, egui retirement
+- Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
+  basic part editing done; sketch/joint/feature UI and egui retirement
+  pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)
