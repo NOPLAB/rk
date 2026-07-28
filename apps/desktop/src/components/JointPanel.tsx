@@ -7,6 +7,7 @@ import type {
   SceneSnapshot,
 } from "../engine/api";
 import { createCoalescer } from "../engine/interaction";
+import { MiniNum } from "./MiniNum";
 import {
   connectParts,
   disconnectPart,
@@ -297,30 +298,5 @@ function LimitFields({
         </>
       )}
     </div>
-  );
-}
-
-function MiniNum({
-  value,
-  onCommit,
-}: {
-  value: number;
-  onCommit: (v: number) => void;
-}) {
-  const rounded = Math.round(value * 1e4) / 1e4;
-  return (
-    <input
-      className="mini-num"
-      type="number"
-      step="0.1"
-      defaultValue={rounded}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-      }}
-      onBlur={(e) => {
-        const v = parseFloat(e.currentTarget.value);
-        if (Number.isFinite(v) && Math.abs(v - rounded) > 1e-9) onCommit(v);
-      }}
-    />
   );
 }

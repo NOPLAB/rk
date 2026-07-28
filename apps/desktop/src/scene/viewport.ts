@@ -14,6 +14,8 @@ import {
   sceneSnapshot,
   sketchGeometry,
   type EngineEvent,
+  type GeometryType,
+  type LinkInfo,
   type Mat4,
   type MeshPayload,
   type Rgba,
@@ -55,6 +57,13 @@ export class Viewport {
   private selected: string | null = null;
   private sketch = new SketchLayer();
   private sketchInfo: SketchInfo | null = null;
+  private collisions = new THREE.Group();
+  private collisionMaterial = new THREE.MeshBasicMaterial({
+    color: 0x4fd18b,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.8,
+  });
   private disposed = false;
 
   /** Fired when the user clicks a part (or empty space → null) */
@@ -98,6 +107,8 @@ export class Viewport {
     this.scene.add(fill);
 
     this.scene.add(this.sketch.group);
+    this.collisions.visible = false;
+    this.scene.add(this.collisions);
 
     this.gizmo = new TransformControls(this.camera, canvas);
     this.gizmo.size = 0.8;
@@ -181,6 +192,8 @@ export class Viewport {
     this.gizmo.dispose();
     this.controls.dispose();
     this.sketch.dispose();
+    this.setCollisions([]);
+    this.collisionMaterial.dispose();
     this.clearAll();
     this.renderer.dispose();
   }
@@ -215,6 +228,35 @@ export class Viewport {
     }
     this.gizmo.attach(mesh);
     this.gizmo.getHelper().visible = true;
+  }
+
+  // ---- collision shapes -------------------------------------------------
+
+  /**
+   * Rebuild the collision wireframes from the snapshot's links. Their
+   * transforms already fold in the link's world pose, so this is called
+   * on every refresh rather than driven by events.
+   */
+  setCollisions(links: LinkInfo[]) {
+    for (const child of [...this.collisions.children]) {
+      this.collisions.remove(child);
+      const mesh = child as THREE.Mesh;
+      mesh.geometry.dispose();
+    }
+    for (const link of links) {
+      for (const collision of link.collisions) {
+        const geo = collisionGeometry(collision.geometry);
+        if (!geo) continue; // imported meshes have no primitive to draw
+        const mesh = new THREE.Mesh(geo, this.collisionMaterial);
+        mesh.matrixAutoUpdate = false;
+        mesh.matrix.fromArray(collision.transform);
+        this.collisions.add(mesh);
+      }
+    }
+  }
+
+  setCollisionsVisible(visible: boolean) {
+    this.collisions.visible = visible;
   }
 
   // ---- sketch mode ------------------------------------------------------
@@ -463,6 +505,32 @@ export class Viewport {
 }
 
 // ---- geometry helpers ---------------------------------------------------
+
+/**
+ * Wireframe stand-in for a collision element. Three builds cylinders and
+ * capsules along Y; RK (like URDF) stands them on Z.
+ */
+function collisionGeometry(g: GeometryType): THREE.BufferGeometry | null {
+  if ("Box" in g) {
+    const [x, y, z] = g.Box.size;
+    return new THREE.BoxGeometry(x, y, z);
+  }
+  if ("Sphere" in g) return new THREE.SphereGeometry(g.Sphere.radius, 16, 12);
+  if ("Cylinder" in g) {
+    const { radius, length } = g.Cylinder;
+    return standUp(new THREE.CylinderGeometry(radius, radius, length, 20));
+  }
+  if ("Capsule" in g) {
+    const { radius, length } = g.Capsule;
+    return standUp(new THREE.CapsuleGeometry(radius, length, 6, 16));
+  }
+  return null;
+}
+
+function standUp(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  geo.rotateX(Math.PI / 2);
+  return geo;
+}
 
 function makeMaterial(color: Rgba): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({

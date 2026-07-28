@@ -19,6 +19,7 @@ import { PropertiesPanel } from "./components/PropertiesPanel";
 import { JointPanel } from "./components/JointPanel";
 import { SketchPanel } from "./components/SketchPanel";
 import { FeaturePanel } from "./components/FeaturePanel";
+import { CollisionPanel } from "./components/CollisionPanel";
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,6 +33,7 @@ export default function App() {
   const [sketchId, setSketchId] = useState<string | null>(null);
   const [sketchTool, setSketchTool] = useState<SketchTool>("select");
   const [sketchSelection, setSketchSelection] = useState<string | null>(null);
+  const [showCollisions, setShowCollisions] = useState(false);
   const [status, setStatus] = useState("");
 
   const refresh = useCallback(async () => {
@@ -39,6 +41,9 @@ export default function App() {
     snapshotRef.current = snap;
     setSnapshot(snap);
     viewportRef.current?.setTransforms(snap.transforms);
+    // Collision transforms already fold in the link poses, so they are
+    // rebuilt from the snapshot rather than tracked through events
+    viewportRef.current?.setCollisions(snap.links);
     setSelected((sel) =>
       sel && !snap.parts.some((p) => p.id === sel) ? null : sel,
     );
@@ -149,6 +154,7 @@ export default function App() {
       snapshotRef.current = snap;
       setSnapshot(snap);
       await vp.rebuildFromSnapshot(snap);
+      vp.setCollisions(snap.links);
     })();
 
     return () => {
@@ -161,6 +167,10 @@ export default function App() {
   useEffect(() => {
     viewportRef.current?.setGizmoMode(gizmoMode);
   }, [gizmoMode]);
+
+  useEffect(() => {
+    viewportRef.current?.setCollisionsVisible(showCollisions);
+  }, [showCollisions]);
 
   const activeSketch = useMemo(
     () => snapshot?.sketches.find((s) => s.id === sketchId) ?? null,
@@ -251,6 +261,14 @@ export default function App() {
           />
           <div className="panel-title">Joints</div>
           <JointPanel snapshot={snapshot} run={run} />
+          <div className="panel-title">Collisions</div>
+          <CollisionPanel
+            snapshot={snapshot}
+            part={selectedPart}
+            visible={showCollisions}
+            onVisible={setShowCollisions}
+            run={run}
+          />
         </aside>
         <div className="viewport" ref={containerRef}>
           <canvas ref={canvasRef} />

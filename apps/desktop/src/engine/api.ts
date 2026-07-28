@@ -29,6 +29,15 @@ export type Mat4 = number[];
 
 export type Rgba = [number, number, number, number];
 
+export interface InertiaMatrix {
+  ixx: number;
+  ixy: number;
+  ixz: number;
+  iyy: number;
+  iyz: number;
+  izz: number;
+}
+
 export interface PartInfo {
   id: string;
   name: string;
@@ -37,6 +46,11 @@ export interface PartInfo {
   origin_transform: Mat4;
   /** Link world transform; `render = parent_transform × origin_transform` */
   parent_transform: Mat4;
+  mass: number;
+  inertia: InertiaMatrix;
+  /** Mesh bounds in part space, for fitting a collision shape to the part */
+  bbox_min: [number, number, number];
+  bbox_max: [number, number, number];
 }
 
 /** Serde PascalCase variants of rk_core::JointType */
@@ -61,10 +75,30 @@ export interface Pose {
   rpy: [number, number, number];
 }
 
+/** Externally tagged rk_core::GeometryType: `{"Box": {"size": [...]}}` */
+export type GeometryType =
+  | { Mesh: { path: string | null; scale?: [number, number, number] | null } }
+  | { Box: { size: [number, number, number] } }
+  | { Cylinder: { radius: number; length: number } }
+  | { Sphere: { radius: number } }
+  | { Capsule: { radius: number; length: number } };
+
+export interface CollisionInfo {
+  /** Position in the link's collision list — commands address it by index */
+  index: number;
+  name: string | null;
+  origin: Pose;
+  geometry: GeometryType;
+  /** link world × origin, ready to render */
+  transform: Mat4;
+}
+
 export interface LinkInfo {
   id: string;
   name: string;
   part_id: string | null;
+  world_transform: Mat4;
+  collisions: CollisionInfo[];
 }
 
 export interface JointInfo {

@@ -1,11 +1,23 @@
 import { useMemo } from "react";
 import * as THREE from "three";
-import type { PartInfo, Rgba, RunCommands } from "../engine/api";
+import type { InertiaMatrix, PartInfo, Rgba, RunCommands } from "../engine/api";
 import {
   renamePart,
   setPartColor,
+  setPartInertia,
+  setPartMass,
   setPartTransform,
 } from "../engine/commands";
+
+/** Inertia tensor components, in the order URDF writes them */
+const INERTIA_KEYS: (keyof InertiaMatrix)[] = [
+  "ixx",
+  "ixy",
+  "ixz",
+  "iyy",
+  "iyz",
+  "izz",
+];
 
 interface Props {
   part: PartInfo | null;
@@ -93,6 +105,27 @@ export function PropertiesPanel({ part, run }: Props) {
       <NumField id={part.id} label="RY" value={pose.euler.y * RAD2DEG} onCommit={(ry) => commitPose({ ry })} />
       <NumField id={part.id} label="RZ" value={pose.euler.z * RAD2DEG} onCommit={(rz) => commitPose({ rz })} />
 
+      <div className="field-group">Physics</div>
+      <NumField
+        id={part.id}
+        label="Mass"
+        value={part.mass}
+        step="0.01"
+        onCommit={(mass) => void run([setPartMass(part.id, mass)])}
+      />
+      {INERTIA_KEYS.map((key) => (
+        <NumField
+          key={key}
+          id={part.id}
+          label={key}
+          value={part.inertia[key]}
+          step="0.0001"
+          onCommit={(v) =>
+            void run([setPartInertia(part.id, { ...part.inertia, [key]: v })])
+          }
+        />
+      ))}
+
       <div className="field-group">ID</div>
       <div className="mono small">{part.id}</div>
     </div>
@@ -105,11 +138,13 @@ function NumField({
   id,
   label,
   value,
+  step = "0.01",
   onCommit,
 }: {
   id: string;
   label: string;
   value: number;
+  step?: string;
   onCommit: (v: number) => void;
 }) {
   const rounded = Math.round(value * 1e6) / 1e6;
@@ -119,7 +154,7 @@ function NumField({
       <input
         key={`${id}:${label}:${rounded}`}
         type="number"
-        step="0.01"
+        step={step}
         defaultValue={rounded}
         onKeyDown={blurOnEnter}
         onBlur={(e) => {

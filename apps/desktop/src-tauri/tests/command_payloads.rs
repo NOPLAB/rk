@@ -77,6 +77,138 @@ fn rectangle(eng: &mut Engine, sketch_id: Uuid) -> Vec<Uuid> {
     points
 }
 
+/// Two connected boxes, returning the child part and its link. Collisions
+/// hang off links, and links only exist for parts in the assembly.
+fn connected_pair(eng: &mut Engine) -> (Uuid, Uuid) {
+    let mut make_box = || {
+        let events = apply(
+            eng,
+            json!({
+                "type": "create_primitive",
+                "id": null,
+                "primitive": {"shape": "box", "size": [0.1, 0.1, 0.1]},
+                "name": null,
+            }),
+        );
+        events
+            .iter()
+            .find_map(|e| match e {
+                Event::PartAdded { part_id } => Some(*part_id),
+                _ => None,
+            })
+            .expect("PartAdded event")
+    };
+    let parent = make_box();
+    let child = make_box();
+    apply(
+        eng,
+        json!({"type": "connect_parts", "parent_part": parent, "child_part": child}),
+    );
+    let link_id = eng
+        .assembly()
+        .links
+        .values()
+        .find(|l| l.part_id == Some(child))
+        .expect("child link")
+        .id;
+    (child, link_id)
+}
+
+#[test]
+fn collision_payloads_apply() {
+    let mut eng = engine();
+    let (_part, link_id) = connected_pair(&mut eng);
+    let collisions = |eng: &Engine| eng.assembly().links[&link_id].collisions.len();
+    // `Link::from_part` seeds a placeholder box, so a fresh link is not empty
+    let base = collisions(&eng);
+    assert_eq!(base, 1);
+
+    for geometry in [
+        json!({"Box": {"size": [0.05, 0.05, 0.05]}}),
+        json!({"Cylinder": {"radius": 0.025, "length": 0.05}}),
+        json!({"Sphere": {"radius": 0.025}}),
+        json!({"Capsule": {"radius": 0.02, "length": 0.05}}),
+    ] {
+        apply(
+            &mut eng,
+            json!({
+                "type": "add_collision",
+                "link_id": link_id,
+                "geometry": geometry,
+                "origin": {"xyz": [0.0, 0.0, 0.0], "rpy": [0.0, 0.0, 0.0]},
+            }),
+        );
+    }
+    assert_eq!(collisions(&eng), base + 4);
+
+    apply(
+        &mut eng,
+        json!({
+            "type": "set_collision_origin",
+            "link_id": link_id,
+            "index": base,
+            "origin": {"xyz": [0.0, 0.0, 0.02], "rpy": [0.0, 1.5707964, 0.0]},
+        }),
+    );
+    apply(
+        &mut eng,
+        json!({
+            "type": "set_collision_geometry",
+            "link_id": link_id,
+            "index": base + 1,
+            "geometry": {"Sphere": {"radius": 0.06}},
+        }),
+    );
+    apply(
+        &mut eng,
+        json!({"type": "remove_collision", "link_id": link_id, "index": base + 3}),
+    );
+    assert_eq!(collisions(&eng), base + 3);
+
+    let link = &eng.assembly().links[&link_id];
+    assert_eq!(link.collisions[base].origin.xyz, [0.0, 0.0, 0.02]);
+    assert!(matches!(
+        link.collisions[base + 1].geometry,
+        rk_core::GeometryType::Sphere { radius } if (radius - 0.06).abs() < 1e-6
+    ));
+}
+
+#[test]
+fn physics_payloads_apply() {
+    let mut eng = engine();
+    let (part_id, _link) = connected_pair(&mut eng);
+
+    apply(
+        &mut eng,
+        json!({"type": "set_part_mass", "part_id": part_id, "mass": 1.5}),
+    );
+    apply(
+        &mut eng,
+        json!({
+            "type": "set_part_inertia",
+            "part_id": part_id,
+            "inertia": {
+                "ixx": 0.001, "ixy": 0.0, "ixz": 0.0,
+                "iyy": 0.002, "iyz": 0.0, "izz": 0.003,
+            },
+        }),
+    );
+
+    let part = eng.part(part_id).expect("part exists");
+    assert_eq!(part.mass, 1.5);
+    assert_eq!(part.inertia.izz, 0.003);
+
+    // URDF export writes the link's copy, so it has to track the part
+    let link = eng
+        .assembly()
+        .links
+        .values()
+        .find(|l| l.part_id == Some(part_id))
+        .expect("link exists");
+    assert_eq!(link.inertial.mass, 1.5);
+    assert_eq!(link.inertial.inertia.izz, 0.003);
+}
+
 #[test]
 fn sketch_payloads_apply() {
     let mut eng = engine();

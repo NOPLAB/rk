@@ -167,10 +167,10 @@ the egui frontend once at feature parity):
   mirror the MCP protocol shape — `engine_apply` (batch of `Command`s,
   validate-all-then-apply), `engine_apply_interactive` /
   `engine_end_interaction` (drag sessions), `scene_snapshot` (part
-  metadata + render transforms + body IDs + links/joints + sketches +
-  feature history + undo state), `sketch_geometry` (entities with point
-  references resolved to 2D coordinates), `get_part_mesh` /
-  `get_body_mesh` (bulk data pulled by ID)
+  metadata + physics + render transforms + body IDs + links/joints +
+  collisions + sketches + feature history + undo state),
+  `sketch_geometry` (entities with point references resolved to 2D
+  coordinates), `get_part_mesh` / `get_body_mesh` (bulk data pulled by ID)
 - `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
   command builders, `engine/interaction.ts` drag-session helpers
   (latest-wins coalescing) and `newUuid`, `scene/viewport.ts` Three.js
@@ -189,6 +189,10 @@ the egui frontend once at feature parity):
   per shape (one undo step), and cancelling leaves no orphan points. The
   line tool reuses point IDs between segments and closes onto the chain's
   first point, which is what makes `extract_profiles` find a closed loop
+- Collision shapes render as wireframes from `LinkInfo.collisions`, whose
+  transforms already fold in the link pose — they are rebuilt from the
+  snapshot on every refresh instead of tracked through events. Collisions
+  belong to links, so a part only gets them once it is in the assembly
 - `tests/command_payloads.rs` applies the JSON the TypeScript builders
   emit; it is the only check that those field names match `Command`
 - Dev: `npm run tauri dev` (Vite on port 1420); the production build embeds
@@ -218,7 +222,6 @@ the egui frontend once at feature parity):
 - Phase 1: MCP server (`rk-mcp`) + headless rendering — done
 - Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
   part editing + joint UI + mesh/URDF import-export + gizmo
-  (`apply_interactive`) + sketch/feature UI done; sketch constraints and
-  dimensions, collision shapes, mass/inertia properties and egui
-  retirement pending
+  (`apply_interactive`) + sketch/feature UI + collisions and mass/inertia
+  done; sketch constraints and dimensions, and egui retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)

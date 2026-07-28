@@ -3,8 +3,11 @@
 
 import type {
   Command,
+  GeometryType,
+  InertiaMatrix,
   JointLimits,
   JointType,
+  Pose,
   Rgba,
   SketchPlane,
   Vec2,
@@ -85,6 +88,21 @@ export const setPartTransform = (
   transform,
 });
 
+export const setPartMass = (partId: string, mass: number): Command => ({
+  type: "set_part_mass",
+  part_id: partId,
+  mass,
+});
+
+export const setPartInertia = (
+  partId: string,
+  inertia: InertiaMatrix,
+): Command => ({
+  type: "set_part_inertia",
+  part_id: partId,
+  inertia,
+});
+
 export const importMesh = (path: string, unit: StlUnit): Command => ({
   type: "import_mesh",
   path,
@@ -161,6 +179,49 @@ export const setJointLimits = (
   type: "set_joint_limits",
   joint_id: jointId,
   limits,
+});
+
+// ---- collisions ---------------------------------------------------------
+
+export const identityPose = (): Pose => ({ xyz: [0, 0, 0], rpy: [0, 0, 0] });
+
+export const addCollision = (
+  linkId: string,
+  geometry: GeometryType,
+  origin: Pose = identityPose(),
+): Command => ({
+  type: "add_collision",
+  link_id: linkId,
+  geometry,
+  origin,
+});
+
+export const removeCollision = (linkId: string, index: number): Command => ({
+  type: "remove_collision",
+  link_id: linkId,
+  index,
+});
+
+export const setCollisionOrigin = (
+  linkId: string,
+  index: number,
+  origin: Pose,
+): Command => ({
+  type: "set_collision_origin",
+  link_id: linkId,
+  index,
+  origin,
+});
+
+export const setCollisionGeometry = (
+  linkId: string,
+  index: number,
+  geometry: GeometryType,
+): Command => ({
+  type: "set_collision_geometry",
+  link_id: linkId,
+  index,
+  geometry,
 });
 
 // ---- sketches -----------------------------------------------------------

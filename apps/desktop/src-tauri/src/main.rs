@@ -135,6 +135,11 @@ struct PartInfo {
     /// World transform of the link owning this part (identity when the part
     /// is not in the assembly). `render = parent_transform × origin_transform`
     parent_transform: glam::Mat4,
+    mass: f32,
+    inertia: rk_core::InertiaMatrix,
+    /// Mesh bounds in part space, for fitting a collision shape to the part
+    bbox_min: [f32; 3],
+    bbox_max: [f32; 3],
 }
 
 #[derive(serde::Serialize)]
@@ -145,10 +150,24 @@ struct HistoryInfo {
 }
 
 #[derive(serde::Serialize)]
+struct CollisionInfo {
+    /// Position in the link's collision list — commands address it by index
+    index: usize,
+    name: Option<String>,
+    origin: rk_core::Pose,
+    geometry: rk_core::GeometryType,
+    /// `link world × origin`, so the viewport never re-derives the euler
+    /// convention behind `Pose::rpy`
+    transform: glam::Mat4,
+}
+
+#[derive(serde::Serialize)]
 struct LinkInfo {
     id: Uuid,
     name: String,
     part_id: Option<Uuid>,
+    world_transform: glam::Mat4,
+    collisions: Vec<CollisionInfo>,
 }
 
 #[derive(serde::Serialize)]
@@ -233,6 +252,19 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
             id: l.id,
             name: l.name.clone(),
             part_id: l.part_id,
+            world_transform: l.world_transform,
+            collisions: l
+                .collisions
+                .iter()
+                .enumerate()
+                .map(|(index, c)| CollisionInfo {
+                    index,
+                    name: c.name.clone(),
+                    origin: c.origin,
+                    geometry: c.geometry.clone(),
+                    transform: l.world_transform * c.origin.to_mat4(),
+                })
+                .collect(),
         })
         .collect();
     links.sort_by(|a, b| a.name.cmp(&b.name));
@@ -308,6 +340,10 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
                     .get(&p.id)
                     .copied()
                     .unwrap_or(glam::Mat4::IDENTITY),
+                mass: p.mass,
+                inertia: p.inertia,
+                bbox_min: p.bbox_min,
+                bbox_max: p.bbox_max,
             })
             .collect(),
         transforms: engine.part_render_transforms(),

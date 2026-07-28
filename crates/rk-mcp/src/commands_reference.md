@@ -118,6 +118,9 @@ Appearance and physics (`color` is RGBA 0..1; inertia is a symmetric tensor):
 {"type": "set_part_inertia", "part_id": "6b1e7c1e-8d1a-4f4e-9b1a-2f6c3d4e5a6b", "inertia": {"ixx": 0.001, "ixy": 0.0, "ixz": 0.0, "iyy": 0.001, "iyz": 0.0, "izz": 0.001}}
 ```
 
+Mass and inertia are also copied onto the part's link, which is what
+`export_urdf` writes out.
+
 ## Assembly / Joints
 
 Connect two parts with a fixed joint (links are created as needed; returns

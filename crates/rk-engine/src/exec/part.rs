@@ -139,6 +139,7 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let part = self.part_mut(part_id)?;
         part.mass = mass;
+        self.sync_link_inertial(part_id);
         events.push(Event::PartPhysicsChanged { part_id });
         Ok(())
     }
@@ -151,8 +152,25 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let part = self.part_mut(part_id)?;
         part.inertia = inertia;
+        self.sync_link_inertial(part_id);
         events.push(Event::PartPhysicsChanged { part_id });
         Ok(())
+    }
+
+    /// `Link::from_part` copies mass and inertia into the link, and URDF
+    /// export writes that copy — so later edits to the part have to follow.
+    fn sync_link_inertial(&mut self, part_id: Uuid) {
+        let Some(part) = self.doc.project.get_part(part_id) else {
+            return;
+        };
+        let (mass, inertia) = (part.mass, part.inertia);
+        let Some(link_id) = self.link_for_part(part_id) else {
+            return;
+        };
+        if let Some(link) = self.doc.project.assembly.links.get_mut(&link_id) {
+            link.inertial.mass = mass;
+            link.inertial.inertia = inertia;
+        }
     }
 
     fn part_mut(&mut self, part_id: Uuid) -> Result<&mut Part, EngineError> {

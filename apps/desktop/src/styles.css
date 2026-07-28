@@ -405,6 +405,30 @@ button.mini {
   flex: 0 0 54px;
 }
 
+/* ---- collisions ---- */
+.collisions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.collisions > .check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #9aa3ad;
+}
+
+.collisions .joint-card {
+  padding: 6px 0;
+}
+
+.collisions .tool-row select {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ---- status bar ---- */
 .status {
   display: flex;
