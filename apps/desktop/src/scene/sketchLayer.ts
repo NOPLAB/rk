@@ -68,7 +68,7 @@ export class SketchLayer {
   constructor() {
     this.group.matrixAutoUpdate = false;
     this.group.visible = false;
-    this.group.add(
+    const stack = [
       this.grid,
       this.curves,
       this.construction,
@@ -76,10 +76,17 @@ export class SketchLayer {
       this.highlight,
       this.preview,
       this.points,
-      this.cursor,
       this.hoverMarker,
       this.marker,
-    );
+      this.cursor,
+    ];
+    this.group.add(...stack);
+    // These all skip the depth test and sit on the same plane, so nothing but
+    // an explicit order decides who wins — without it a selected line is drawn
+    // under the plain one and the highlight never shows
+    stack.forEach((obj, i) => {
+      obj.renderOrder = 10 + i;
+    });
     setSegments(this.grid, gridSegments());
   }
 
@@ -286,6 +293,7 @@ function lineObject(color: number, depthTest: boolean): THREE.LineSegments {
     new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color, depthTest, transparent: !depthTest }),
   );
+  // SketchLayer's constructor assigns the real order; this is just a floor
   obj.renderOrder = depthTest ? 1 : 10;
   obj.frustumCulled = false;
   return obj;

@@ -182,7 +182,36 @@ the egui frontend once at feature parity):
   scene manager (Z-up; event-driven sync mirroring
   `rk-frontend/src/sync.rs`; TransformControls gizmo),
   `scene/sketchLayer.ts` + `scene/sketchTools.ts` sketch mode,
-  `components/` panels
+  `scene/viewCube.ts` viewport overlays, `ui/` shared state,
+  `components/` chrome
+- **UI shell (modelled on Autodesk Inventor)**: a five-row grid — quick-access
+  title bar, ribbon, workspace (browser | viewport | inspector), document
+  tabs, status bar. `components/Ribbon.tsx` owns the tab strip and the File
+  drop-down, `components/ribbonTabs.tsx` holds what each tab can do (3D
+  Model / Sketch / Assembly / View) and `ribbonParts.tsx` the group plus big
+  and small button primitives. Editing a sketch switches to the Sketch tab
+  and leaving it returns to 3D Model. `components/BrowserPanel.tsx` is the
+  model tree (origin planes, parts, the link/joint chain, sketches, and the
+  feature history ending in an "End of Part" marker that doubles as the
+  rollback control). `components/Inspector.tsx` swaps between part
+  properties and the sketch's constraint list. Icons are inline two-tone SVG
+  in `components/icons.tsx` — no icon font or CDN, since the app ships as one
+  self-contained window
+- Every chrome component takes one `AppApi` (`ui/appApi.ts`) instead of a
+  dozen props; App owns the state and all mutation still goes through `run`.
+  `ui/fileActions.ts` is the single implementation of the document commands,
+  shared by the quick-access bar, the File menu and the Ctrl+S/O shortcuts
+- `scene/viewCube.ts`: the ViewCube and axis triad render into scissored
+  corners of the main canvas (one extra draw call, no second GPU context).
+  A click resolves to a direction from where it lands on the cube — an axis
+  joins in once the hit is far enough along it, so faces, edges and corners
+  all fall out of one test. Three builds box faces for a Y-up world, so each
+  label carries a quarter-turn correction (`FACE_SPIN`)
+- Sketch overlay objects all skip the depth test and sit on the same plane,
+  so `SketchLayer`'s constructor assigns each an explicit `renderOrder`;
+  without it the selection highlight is drawn under the plain curve and
+  never shows. `Viewport` registers its canvas listeners with an
+  `AbortController` so a dev reload does not leave the old ones attached
 - Gizmo drags run through `apply_interactive` under one session ID, so a
   whole drag is one undo step; Escape cancels (engine rolls back).
   Parts store their origin in the owning link's frame, so the world
@@ -235,5 +264,6 @@ the egui frontend once at feature parity):
 - Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
   part editing + joint UI + mesh/URDF import-export + gizmo
   (`apply_interactive`) + sketch/feature UI + collisions and mass/inertia
-  + sketch constraints and dimensions done; egui retirement pending
+  + sketch constraints and dimensions + the Inventor-style shell (ribbon,
+  model browser, ViewCube, navigation bar) done; egui retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)

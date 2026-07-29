@@ -10,18 +10,26 @@ import {
   type SceneSnapshot,
   type SketchGeometry,
 } from "./engine/api";
-import { deleteSketchEntities, setPartTransform } from "./engine/commands";
+import {
+  deleteSketchEntities,
+  redo,
+  setPartTransform,
+  undo,
+  type StlUnit,
+} from "./engine/commands";
 import { applyAtomic, createCoalescer, newUuid } from "./engine/interaction";
 import { Viewport, type GizmoMode } from "./scene/viewport";
 import { SketchDrawing, type SketchTool } from "./scene/sketchTools";
-import { Toolbar } from "./components/Toolbar";
-import { PartList } from "./components/PartList";
-import { PropertiesPanel } from "./components/PropertiesPanel";
-import { JointPanel } from "./components/JointPanel";
-import { SketchPanel } from "./components/SketchPanel";
-import { ConstraintPanel } from "./components/ConstraintPanel";
-import { FeaturePanel } from "./components/FeaturePanel";
-import { CollisionPanel } from "./components/CollisionPanel";
+import { BrowserPanel } from "./components/BrowserPanel";
+import { DimensionEntry } from "./components/DimensionEntry";
+import { FeatureDialog } from "./components/FeatureDialog";
+import { Inspector } from "./components/Inspector";
+import { NavBar } from "./components/NavBar";
+import { Ribbon } from "./components/Ribbon";
+import { DocTabs, StatusBar } from "./components/StatusBar";
+import { TitleBar } from "./components/TitleBar";
+import type { AppApi, DialogKind, PendingDimension } from "./ui/appApi";
+import { fileActions } from "./ui/fileActions";
 
 /** Click behaviour of the sketch select tool: shift accumulates, plain replaces */
 function nextSelection(
@@ -36,6 +44,14 @@ function nextSelection(
     : [...current, entityId];
 }
 
+/** Sketch tool shortcuts, following Inventor's single-letter keys */
+const SKETCH_KEYS: Record<string, SketchTool> = {
+  s: "select",
+  l: "line",
+  r: "rect",
+  c: "circle",
+};
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -49,7 +65,14 @@ export default function App() {
   const [sketchTool, setSketchTool] = useState<SketchTool>("select");
   const [sketchSelection, setSketchSelection] = useState<string[]>([]);
   const [sketchGeom, setSketchGeom] = useState<SketchGeometry | null>(null);
+  const [pendingDimension, setPendingDimension] =
+    useState<PendingDimension | null>(null);
+  const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [showCollisions, setShowCollisions] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showBrowser, setShowBrowser] = useState(true);
+  const [showInspector, setShowInspector] = useState(true);
+  const [meshUnit, setMeshUnit] = useState<StlUnit>("Millimeters");
   const [status, setStatus] = useState("");
 
   const refresh = useCallback(async () => {
@@ -193,6 +216,10 @@ export default function App() {
   }, [showCollisions]);
 
   useEffect(() => {
+    viewportRef.current?.setGridVisible(showGrid);
+  }, [showGrid]);
+
+  useEffect(() => {
     viewportRef.current?.setSketchSelection(sketchSelection);
   }, [sketchSelection]);
 
@@ -207,6 +234,7 @@ export default function App() {
     void viewportRef.current?.setSketch(activeSketch);
     drawingRef.current.setSketch(activeSketch?.id ?? null);
     setSketchSelection([]);
+    setPendingDimension(null);
     if (!activeSketch) {
       setSketchGeom(null);
       setSketchTool("select");
@@ -219,25 +247,83 @@ export default function App() {
     viewportRef.current?.setSketchPreview(null);
   }, [sketchTool]);
 
+  const selectedPart =
+    (selected && snapshot?.parts.find((p) => p.id === selected)) || null;
+
+  const api: AppApi = {
+    snapshot,
+    selected,
+    selectedPart,
+    select,
+    gizmoMode,
+    setGizmoMode,
+    activeSketch,
+    activateSketch: setSketchId,
+    sketchTool,
+    setSketchTool,
+    sketchSelection,
+    setSketchSelection,
+    sketchGeometry: sketchGeom,
+    hoverSketch: (ids) => viewportRef.current?.setSketchHover(ids),
+    pendingDimension,
+    setPendingDimension,
+    dialog,
+    setDialog,
+    showCollisions,
+    setShowCollisions,
+    showGrid,
+    setShowGrid,
+    showBrowser,
+    setShowBrowser,
+    showInspector,
+    setShowInspector,
+    meshUnit,
+    setMeshUnit,
+    viewport: () => viewportRef.current,
+    run,
+    setStatus,
+  };
+
   useEffect(() => {
+    const files = fileActions(api);
+
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName ?? "";
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       const vp = viewportRef.current;
 
-      if (e.key === "Escape") {
-        if (!sketchId) {
-          vp?.cancelDrag();
-        } else if (drawingRef.current.busy) {
-          drawingRef.current.cancel();
-          vp?.setSketchPreview(null);
-        } else {
-          setSketchTool("select");
-          setSketchSelection([]);
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key === "s") {
+          e.preventDefault();
+          void files.onSave();
+        } else if (key === "o") {
+          e.preventDefault();
+          void files.onOpen();
+        } else if (key === "z" && !e.shiftKey) {
+          e.preventDefault();
+          if (snapshot?.history.can_undo) void run([undo()]);
+        } else if (key === "y" || (key === "z" && e.shiftKey)) {
+          e.preventDefault();
+          if (snapshot?.history.can_redo) void run([redo()]);
         }
         return;
       }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === "Escape") {
+        // Unwind whatever is most recent: a value entry, a dialog, the shape
+        // being drawn, the selection, then a gizmo drag
+        if (pendingDimension) setPendingDimension(null);
+        else if (dialog) setDialog(null);
+        else if (!sketchId) vp?.cancelDrag();
+        else if (drawingRef.current.busy) {
+          drawingRef.current.cancel();
+          vp?.setSketchPreview(null);
+        } else if (sketchSelection.length > 0) setSketchSelection([]);
+        else setSketchTool("select");
+        return;
+      }
+      if (e.altKey) return;
 
       if (sketchId) {
         if (
@@ -246,7 +332,10 @@ export default function App() {
         ) {
           setSketchSelection([]);
           void run([deleteSketchEntities(sketchId, sketchSelection)]);
+          return;
         }
+        const tool = SKETCH_KEYS[e.key.toLowerCase()];
+        if (tool) setSketchTool(tool);
         return; // the gizmo shortcuts below are meaningless while sketching
       }
 
@@ -255,92 +344,27 @@ export default function App() {
       else if (key === "w") setGizmoMode("translate");
       else if (key === "e") setGizmoMode("rotate");
     };
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, sketchId, sketchSelection]);
-
-  const selectedPart =
-    (selected && snapshot?.parts.find((p) => p.id === selected)) || null;
-  const title = snapshot
-    ? `${snapshot.project_name}${snapshot.modified ? " *" : ""}`
-    : "…";
+  });
 
   return (
     <div className="app">
-      <Toolbar
-        snapshot={snapshot}
-        selected={selected}
-        gizmoMode={gizmoMode}
-        onGizmoMode={setGizmoMode}
-        run={run}
-        onDeselect={() => select(null)}
-      />
-      <div className="main">
-        <aside className="panel left">
-          <div className="panel-title">Parts — {title}</div>
-          <PartList
-            parts={snapshot?.parts ?? []}
-            bodyCount={snapshot?.body_ids.length ?? 0}
-            selected={selected}
-            onSelect={select}
-          />
-          <div className="panel-title">Joints</div>
-          <JointPanel snapshot={snapshot} run={run} />
-          <div className="panel-title">Collisions</div>
-          <CollisionPanel
-            snapshot={snapshot}
-            part={selectedPart}
-            visible={showCollisions}
-            onVisible={setShowCollisions}
-            run={run}
-          />
-        </aside>
+      <TitleBar api={api} />
+      <Ribbon api={api} />
+      <div className="workspace">
+        {showBrowser && <BrowserPanel api={api} />}
         <div className="viewport" ref={containerRef}>
           <canvas ref={canvasRef} />
+          <NavBar api={api} />
+          {dialog && <FeatureDialog api={api} kind={dialog} />}
+          {pendingDimension && <DimensionEntry api={api} />}
         </div>
-        <aside className="panel right">
-          <div className="panel-title">Sketches</div>
-          <SketchPanel
-            snapshot={snapshot}
-            active={activeSketch}
-            tool={sketchTool}
-            onTool={setSketchTool}
-            onActivate={setSketchId}
-            onAlign={() => viewportRef.current?.alignToSketch()}
-            run={run}
-          />
-          {activeSketch && (
-            <>
-              <div className="panel-title">Constraints</div>
-              <ConstraintPanel
-                sketch={activeSketch}
-                geometry={sketchGeom}
-                selection={sketchSelection}
-                onSelection={setSketchSelection}
-                onHover={(ids) => viewportRef.current?.setSketchHover(ids)}
-                run={run}
-              />
-            </>
-          )}
-          <div className="panel-title">Features</div>
-          <FeaturePanel snapshot={snapshot} sketch={activeSketch} run={run} />
-          <div className="panel-title">Properties</div>
-          <PropertiesPanel part={selectedPart} run={run} />
-        </aside>
+        {showInspector && <Inspector api={api} />}
       </div>
-      <footer className="status">
-        <span className={status.startsWith("Error") ? "error" : ""}>
-          {status || snapshot?.doc_path || "unsaved project"}
-        </span>
-        <span className="spacer" />
-        <span>
-          {activeSketch
-            ? `sketch: ${activeSketch.name} (${sketchTool})`
-            : snapshot?.history.can_undo
-              ? `undo: ${snapshot.history.undo_description ?? ""}`
-              : ""}
-        </span>
-      </footer>
+      <DocTabs api={api} />
+      <StatusBar api={api} status={status} />
     </div>
   );
 }

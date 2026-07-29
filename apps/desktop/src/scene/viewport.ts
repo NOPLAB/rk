@@ -25,14 +25,32 @@ import {
   type Vec2,
 } from "../engine/api";
 import { SketchLayer, type Projector, type SketchPreview } from "./sketchLayer";
+import { AxisTriad, CUBE_MARGIN, CUBE_SIZE, ViewCube } from "./viewCube";
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
 const SELECT_EMISSIVE = new THREE.Color(0x2a5db0);
 const BLACK = new THREE.Color(0x000000);
 
+/** Bottom-left axis marker */
+const TRIAD_SIZE = 74;
+const TRIAD_MARGIN = 8;
+
 /** "none" hides the gizmo and leaves click-selection alone */
 export type GizmoMode = "none" | "translate" | "rotate";
+
+/** Camera directions the ViewCube and the ribbon's view commands share */
+export const STANDARD_VIEWS = {
+  front: [0, -1, 0],
+  back: [0, 1, 0],
+  left: [-1, 0, 0],
+  right: [1, 0, 0],
+  top: [0, 0, 1],
+  bottom: [0, 0, -1],
+  iso: [1, -1, 0.8],
+} as const;
+
+export type StandardView = keyof typeof STANDARD_VIEWS;
 
 /** Pointer position resolved against the active sketch */
 export interface SketchHit {
@@ -58,6 +76,12 @@ export class Viewport {
   private selected: string | null = null;
   private sketch = new SketchLayer();
   private sketchInfo: SketchInfo | null = null;
+  private grid: THREE.GridHelper;
+  private cube = new ViewCube();
+  private triad = new AxisTriad();
+  /** Drops the canvas listeners on dispose — a dev reload builds a new Viewport
+   *  onto the same canvas, and the old one's handlers would linger */
+  private listeners = new AbortController();
   private collisions = new THREE.Group();
   private collisionMaterial = new THREE.MeshBasicMaterial({
     color: 0x4fd18b,
@@ -85,7 +109,7 @@ export class Viewport {
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.scene.background = new THREE.Color(0x191c20);
+    this.scene.background = gradientBackground();
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.001, 1000);
     this.camera.up.set(0, 0, 1);
@@ -94,9 +118,9 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.set(0, 0, 0);
 
-    const grid = new THREE.GridHelper(10, 100, 0x50555c, 0x2b2f34);
-    grid.rotation.x = Math.PI / 2; // XZ (three default) → XY plane
-    this.scene.add(grid);
+    this.grid = new THREE.GridHelper(10, 100, 0x69707b, 0x3f454e);
+    this.grid.rotation.x = Math.PI / 2; // XZ (three default) → XY plane
+    this.scene.add(this.grid);
     this.scene.add(new THREE.AxesHelper(0.15));
 
     const hemi = new THREE.HemisphereLight(0xffffff, 0x3a3d42, 0.9);
@@ -145,6 +169,7 @@ export class Viewport {
     });
 
     // Click-select with a small drag threshold so orbiting never selects
+    const { signal } = this.listeners;
     let downAt: [number, number] | null = null;
     canvas.addEventListener("pointerdown", (e) => {
       // The gizmo's own listener runs first, so a grabbed handle already
@@ -152,32 +177,45 @@ export class Viewport {
       if (e.button === 0 && this.gizmo.axis === null) {
         downAt = [e.clientX, e.clientY];
       }
-    });
+    }, { signal });
     canvas.addEventListener("pointerup", (e) => {
       if (!downAt || e.button !== 0) return;
       const [x0, y0] = downAt;
       downAt = null;
       // A drag orbited the view; only a click edits
       if (Math.hypot(e.clientX - x0, e.clientY - y0) > 4) return;
+      // The ViewCube sits on top of the scene, so it gets the click first
+      const onCube = this.cubeLocal(e);
+      if (onCube) {
+        const dir = this.cube.hit(onCube.x, onCube.y);
+        if (dir) this.lookFrom(dir);
+        return;
+      }
       if (this.sketch.active) {
         const hit = this.sketchHit(e);
         if (hit) this.onSketchClick?.(hit, e.shiftKey);
         return;
       }
       this.onPick?.(this.pick(e));
-    });
+    }, { signal });
     canvas.addEventListener("pointermove", (e) => {
+      const onCube = this.cubeLocal(e);
+      this.cube.setHover(onCube ? onCube.x : null, onCube?.y ?? 0);
       if (!this.sketch.active) return;
       const hit = this.sketchHit(e);
       if (!hit) return;
       this.sketch.setCursor(hit.pointId ? hit.position : null);
       this.onSketchMove?.(hit);
+    }, { signal });
+    canvas.addEventListener("pointerleave", () => this.cube.setHover(null, 0), {
+      signal,
     });
 
     this.renderer.setAnimationLoop(() => {
       if (this.disposed) return;
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
+      this.renderOverlays();
     });
   }
 
@@ -190,15 +228,96 @@ export class Viewport {
 
   dispose() {
     this.disposed = true;
+    this.listeners.abort();
     this.renderer.setAnimationLoop(null);
     this.gizmo.detach();
     this.gizmo.dispose();
     this.controls.dispose();
     this.sketch.dispose();
+    this.cube.dispose();
+    this.triad.dispose();
     this.setCollisions([]);
     this.collisionMaterial.dispose();
     this.clearAll();
     this.renderer.dispose();
+  }
+
+  // ---- overlays & standard views ----------------------------------------
+
+  /** Draw the ViewCube and axis triad into their corners of the canvas */
+  private renderOverlays() {
+    const size = this.renderer.getSize(new THREE.Vector2());
+    this.renderer.autoClear = false;
+
+    this.cube.sync(this.camera, this.controls.target);
+    // Three's viewport origin is bottom-left; the cube reads as top-right
+    this.corner(
+      size.x - CUBE_SIZE - CUBE_MARGIN,
+      size.y - CUBE_SIZE - CUBE_MARGIN,
+      CUBE_SIZE,
+    );
+    this.renderer.render(this.cube.scene, this.cube.camera);
+
+    this.triad.sync(this.camera, this.controls.target);
+    this.corner(TRIAD_MARGIN, TRIAD_MARGIN, TRIAD_SIZE);
+    this.renderer.render(this.triad.scene, this.triad.camera);
+
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, size.x, size.y);
+    this.renderer.autoClear = true;
+  }
+
+  private corner(x: number, y: number, size: number) {
+    this.renderer.setViewport(x, y, size, size);
+    this.renderer.setScissor(x, y, size, size);
+    this.renderer.setScissorTest(true);
+    this.renderer.clearDepth();
+  }
+
+  /** Pointer position inside the ViewCube's square, or `null` if outside */
+  private cubeLocal(e: PointerEvent): { x: number; y: number } | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const x = e.clientX - rect.left - (rect.width - CUBE_SIZE - CUBE_MARGIN);
+    const y = e.clientY - rect.top - CUBE_MARGIN;
+    const inside = x >= 0 && y >= 0 && x <= CUBE_SIZE && y <= CUBE_SIZE;
+    return inside ? { x, y } : null;
+  }
+
+  /** Orbit to look from `dir` towards the current target, keeping the zoom */
+  lookFrom(dir: THREE.Vector3 | readonly [number, number, number]) {
+    const v = (Array.isArray(dir) ? new THREE.Vector3(...dir) : (dir as THREE.Vector3).clone())
+      .normalize();
+    const dist = Math.max(
+      this.camera.position.distanceTo(this.controls.target),
+      0.05,
+    );
+    // Straight down Z would leave `up` parallel to the view direction
+    if (Math.abs(v.z) > 0.99) this.camera.up.set(0, 1, 0);
+    else this.camera.up.set(0, 0, 1);
+    this.camera.position.copy(
+      this.controls.target.clone().add(v.multiplyScalar(dist)),
+    );
+    this.camera.lookAt(this.controls.target);
+    this.controls.update();
+  }
+
+  setStandardView(view: StandardView) {
+    this.lookFrom(STANDARD_VIEWS[view]);
+  }
+
+  /** Isometric view framing everything in the scene */
+  homeView() {
+    this.camera.up.set(0, 0, 1);
+    if (!this.fitCamera()) {
+      this.controls.target.set(0, 0, 0);
+      this.camera.position.set(0.5, -0.5, 0.35);
+      this.camera.lookAt(this.controls.target);
+    }
+    this.controls.update();
+  }
+
+  setGridVisible(visible: boolean) {
+    this.grid.visible = visible;
   }
 
   // ---- gizmo ------------------------------------------------------------
@@ -430,19 +549,21 @@ export class Viewport {
     this.attachGizmo();
   }
 
-  fitCamera() {
+  /** Frame everything; `false` when the scene is empty and nothing moved */
+  fitCamera(): boolean {
     const box = new THREE.Box3();
     let any = false;
     for (const mesh of [...this.partMeshes.values(), ...this.bodyMeshes.values()]) {
       box.expandByObject(mesh);
       any = true;
     }
-    if (!any || box.isEmpty()) return;
+    if (!any || box.isEmpty()) return false;
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.05);
     const dir = new THREE.Vector3(1, -1, 0.7).normalize();
     this.camera.position.copy(center.clone().add(dir.multiplyScalar(radius * 2.5)));
     this.controls.target.copy(center);
+    return true;
   }
 
   // ---- mesh management --------------------------------------------------
@@ -517,6 +638,22 @@ export class Viewport {
 }
 
 // ---- geometry helpers ---------------------------------------------------
+
+/** Vertical gradient behind the model, the way Inventor lights its canvas */
+function gradientBackground(): THREE.Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 256;
+  const g = canvas.getContext("2d")!;
+  const gradient = g.createLinearGradient(0, 0, 0, 256);
+  gradient.addColorStop(0, "#2a2f38");
+  gradient.addColorStop(1, "#525c6b");
+  g.fillStyle = gradient;
+  g.fillRect(0, 0, 2, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
 
 /**
  * Wireframe stand-in for a collision element. Three builds cylinders and

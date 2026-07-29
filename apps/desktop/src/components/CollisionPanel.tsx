@@ -17,16 +17,17 @@ import {
 } from "../engine/commands";
 import { MiniNum } from "./MiniNum";
 
-type ShapeKind = "Box" | "Cylinder" | "Sphere" | "Capsule";
+export type ShapeKind = "Box" | "Cylinder" | "Sphere" | "Capsule";
 
-const SHAPES: ShapeKind[] = ["Box", "Cylinder", "Sphere", "Capsule"];
+export const SHAPES: ShapeKind[] = ["Box", "Cylinder", "Sphere", "Capsule"];
 
 /** Sizes are edited in mm; the engine works in meters */
 const M2MM = 1000;
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
 
-const defaultGeometry = (kind: ShapeKind): GeometryType => {
+/** Starting size for a shape added from the ribbon or this panel */
+export const defaultGeometry = (kind: ShapeKind): GeometryType => {
   switch (kind) {
     case "Box":
       return { Box: { size: [0.05, 0.05, 0.05] } };

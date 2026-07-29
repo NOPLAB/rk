@@ -1,0 +1,62 @@
+// Document tab strip and the status line along the bottom of the window.
+
+import type { SketchTool } from "../scene/sketchTools";
+import type { AppApi } from "../ui/appApi";
+import { Icon } from "./icons";
+
+const TOOL_HINTS: Record<SketchTool, string> = {
+  select: "Select: click an entity, Shift adds — then pick a constraint",
+  line: "Line: click point to point, close on the first point to end the loop",
+  rect: "Rectangle: click two opposite corners",
+  circle: "Circle: click the centre, then a point on the radius",
+};
+
+export function DocTabs({ api }: { api: AppApi }) {
+  const snapshot = api.snapshot;
+  const name = snapshot?.project_name || "Untitled";
+  return (
+    <div className="doc-tabs">
+      <button className="doc-tab active" title={snapshot?.doc_path ?? "Unsaved"}>
+        <Icon name="new" size={13} />
+        <span>
+          {name}
+          {snapshot?.modified ? " *" : ""}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+export function StatusBar({ api, status }: { api: AppApi; status: string }) {
+  const snapshot = api.snapshot;
+  const sketch = api.activeSketch;
+  const failed = status.startsWith("Error");
+
+  const message = status
+    ? status
+    : sketch
+      ? TOOL_HINTS[api.sketchTool]
+      : api.selectedPart
+        ? `${api.selectedPart.name} selected`
+        : "Ready";
+
+  return (
+    <footer className="status">
+      <span className={failed ? "error" : ""}>{message}</span>
+      <span className="spacer" />
+      {sketch && (
+        <span className="chip">
+          {sketch.name} · {sketch.dof} DOF
+          {sketch.profile_count > 0 && ` · ${sketch.profile_count}p`}
+        </span>
+      )}
+      {snapshot && (
+        <span className="chip">
+          {snapshot.parts.length}p {snapshot.joints.length}j{" "}
+          {snapshot.body_ids.length}b
+        </span>
+      )}
+      <span className="chip">{snapshot?.doc_path ?? "unsaved"}</span>
+    </footer>
+  );
+}
