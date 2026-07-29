@@ -9,6 +9,7 @@ import type {
   JointType,
   Pose,
   Rgba,
+  SketchConstraint,
   SketchPlane,
   Vec2,
   Vec3,
@@ -316,6 +317,28 @@ export const deleteSketchEntities = (
   type: "delete_sketch_entities",
   sketch_id: sketchId,
   entity_ids: entityIds,
+});
+
+/**
+ * Constraints are keyed by ID, so re-adding one with the same ID replaces it —
+ * that is how a dimension's value is edited.
+ */
+export const addSketchConstraint = (
+  sketchId: string,
+  constraint: SketchConstraint,
+): Command => ({
+  type: "add_sketch_constraint",
+  sketch_id: sketchId,
+  constraint,
+});
+
+export const deleteSketchConstraint = (
+  sketchId: string,
+  constraintId: string,
+): Command => ({
+  type: "delete_sketch_constraint",
+  sketch_id: sketchId,
+  constraint_id: constraintId,
 });
 
 export const solveSketch = (sketchId: string): Command => ({

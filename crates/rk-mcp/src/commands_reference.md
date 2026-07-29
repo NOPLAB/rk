@@ -250,14 +250,18 @@ entities:
 Constraints (solved by `solve_sketch`). Geometric:
 `Coincident {point1, point2}`, `Horizontal {line}`, `Vertical {line}`,
 `Parallel {line1, line2}`, `Perpendicular {line1, line2}`,
-`Tangent {line, circle}`, `EqualLength {line1, line2}`,
-`EqualRadius {circle1, circle2}`, `PointOnCurve {point, curve}`,
-`Midpoint {point, line}`, `Symmetric {entity1, entity2, axis}`,
-`Fixed {point}`. Dimensional: `Distance {entity1, entity2, value}`,
-`HorizontalDistance {point1, point2, value}`,
-`VerticalDistance {point1, point2, value}`, `Angle {line1, line2, value}`,
+`Tangent {curve1, curve2}` (one of them a circle or arc),
+`EqualLength {line1, line2}`, `EqualRadius {circle1, circle2}`,
+`PointOnCurve {point, curve}`, `Midpoint {point, line}`,
+`Symmetric {entity1, entity2, axis}`, `Fixed {point, x, y}`. Dimensional:
+`Distance {entity1, entity2, value}`,
+`HorizontalDistance {point1, point2, value}` (signed, `point2 - point1`),
+`VerticalDistance {point1, point2, value}`, `Angle {line1, line2, value}`
+(radians, measured the shortest way round),
 `Radius {circle, value}`, `Diameter {circle, value}`, `Length {line, value}`.
-All take an `id` (may be a fresh UUID):
+Lengths are in meters. All take an `id` (may be a fresh UUID); constraints are
+keyed by it, so re-sending one with the same `id` and a new `value` edits the
+dimension instead of adding a second one:
 
 ```json
 {"type": "add_sketch_constraint", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "constraint": {"Horizontal": {"id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "line": "55555555-5555-4555-8555-555555555555"}}}

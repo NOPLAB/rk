@@ -405,6 +405,57 @@ button.mini {
   flex: 0 0 54px;
 }
 
+/* ---- sketch constraints ---- */
+.constraints {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.cn-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.cn-grid button {
+  padding: 4px 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.constraints .tool-row {
+  align-items: center;
+}
+
+.constraints .tool-row .small {
+  flex: 0 0 auto;
+}
+
+.constraint-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.constraint-row:hover {
+  background: #23272e;
+}
+
+.constraint-row .name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.constraint-row .mini-num {
+  flex: 0 0 60px;
+}
+
 /* ---- collisions ---- */
 .collisions {
   display: flex;

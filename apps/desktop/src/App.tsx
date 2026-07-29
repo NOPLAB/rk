@@ -8,9 +8,10 @@ import {
   type Command,
   type EngineEvent,
   type SceneSnapshot,
+  type SketchGeometry,
 } from "./engine/api";
 import { deleteSketchEntities, setPartTransform } from "./engine/commands";
-import { createCoalescer, newUuid } from "./engine/interaction";
+import { applyAtomic, createCoalescer, newUuid } from "./engine/interaction";
 import { Viewport, type GizmoMode } from "./scene/viewport";
 import { SketchDrawing, type SketchTool } from "./scene/sketchTools";
 import { Toolbar } from "./components/Toolbar";
@@ -18,8 +19,22 @@ import { PartList } from "./components/PartList";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { JointPanel } from "./components/JointPanel";
 import { SketchPanel } from "./components/SketchPanel";
+import { ConstraintPanel } from "./components/ConstraintPanel";
 import { FeaturePanel } from "./components/FeaturePanel";
 import { CollisionPanel } from "./components/CollisionPanel";
+
+/** Click behaviour of the sketch select tool: shift accumulates, plain replaces */
+function nextSelection(
+  current: string[],
+  entityId: string | null,
+  additive: boolean,
+): string[] {
+  if (!entityId) return additive ? current : [];
+  if (!additive) return [entityId];
+  return current.includes(entityId)
+    ? current.filter((id) => id !== entityId)
+    : [...current, entityId];
+}
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,7 +47,8 @@ export default function App() {
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("none");
   const [sketchId, setSketchId] = useState<string | null>(null);
   const [sketchTool, setSketchTool] = useState<SketchTool>("select");
-  const [sketchSelection, setSketchSelection] = useState<string | null>(null);
+  const [sketchSelection, setSketchSelection] = useState<string[]>([]);
+  const [sketchGeom, setSketchGeom] = useState<SketchGeometry | null>(null);
   const [showCollisions, setShowCollisions] = useState(false);
   const [status, setStatus] = useState("");
 
@@ -52,9 +68,11 @@ export default function App() {
 
   /** Apply a command batch, sync the 3D scene from the events, refresh UI state */
   const run = useCallback(
-    async (commands: Command[]): Promise<EngineEvent[]> => {
+    async (commands: Command[], atomic = false): Promise<EngineEvent[]> => {
       try {
-        const outcome = await applyCommands(commands);
+        const outcome = atomic
+          ? await applyAtomic(commands)
+          : await applyCommands(commands);
         setStatus(outcome.error ? `Error: ${outcome.error.message}` : "");
         await viewportRef.current?.applyEvents(outcome.events);
         await refresh();
@@ -128,11 +146,11 @@ export default function App() {
 
     // Sketch drawing: the tool state machine turns clicks into whole shapes,
     // so a rectangle reaches the engine as one command and one undo step
-    vp.onSketchClick = (hit) => {
+    vp.onSketchClick = (hit, additive) => {
       const drawing = drawingRef.current;
       if (drawing.activeTool === "select") {
-        setSketchSelection(hit.entityId);
-        vp.setSketchSelection(hit.entityId);
+        // Constraints act on several entities, so picking accumulates
+        setSketchSelection((prev) => nextSelection(prev, hit.entityId, additive));
         return;
       }
       const commands = drawing.click(hit);
@@ -142,6 +160,8 @@ export default function App() {
     vp.onSketchMove = (hit) => {
       vp.setSketchPreview(drawingRef.current.preview(hit));
     };
+    // The panels classify and measure the same geometry the viewport draws
+    vp.onSketchGeometry = setSketchGeom;
 
     const ro = new ResizeObserver(() =>
       vp.resize(container.clientWidth, container.clientHeight),
@@ -172,6 +192,10 @@ export default function App() {
     viewportRef.current?.setCollisionsVisible(showCollisions);
   }, [showCollisions]);
 
+  useEffect(() => {
+    viewportRef.current?.setSketchSelection(sketchSelection);
+  }, [sketchSelection]);
+
   const activeSketch = useMemo(
     () => snapshot?.sketches.find((s) => s.id === sketchId) ?? null,
     [snapshot, sketchId],
@@ -182,8 +206,9 @@ export default function App() {
   useEffect(() => {
     void viewportRef.current?.setSketch(activeSketch);
     drawingRef.current.setSketch(activeSketch?.id ?? null);
+    setSketchSelection([]);
     if (!activeSketch) {
-      setSketchSelection(null);
+      setSketchGeom(null);
       setSketchTool("select");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -208,6 +233,7 @@ export default function App() {
           vp?.setSketchPreview(null);
         } else {
           setSketchTool("select");
+          setSketchSelection([]);
         }
         return;
       }
@@ -216,11 +242,10 @@ export default function App() {
       if (sketchId) {
         if (
           (e.key === "Delete" || e.key === "Backspace") &&
-          sketchSelection !== null
+          sketchSelection.length > 0
         ) {
-          setSketchSelection(null);
-          vp?.setSketchSelection(null);
-          void run([deleteSketchEntities(sketchId, [sketchSelection])]);
+          setSketchSelection([]);
+          void run([deleteSketchEntities(sketchId, sketchSelection)]);
         }
         return; // the gizmo shortcuts below are meaningless while sketching
       }
@@ -284,6 +309,19 @@ export default function App() {
             onAlign={() => viewportRef.current?.alignToSketch()}
             run={run}
           />
+          {activeSketch && (
+            <>
+              <div className="panel-title">Constraints</div>
+              <ConstraintPanel
+                sketch={activeSketch}
+                geometry={sketchGeom}
+                selection={sketchSelection}
+                onSelection={setSketchSelection}
+                onHover={(ids) => viewportRef.current?.setSketchHover(ids)}
+                run={run}
+              />
+            </>
+          )}
           <div className="panel-title">Features</div>
           <FeaturePanel snapshot={snapshot} sketch={activeSketch} run={run} />
           <div className="panel-title">Properties</div>

@@ -21,8 +21,14 @@ export interface ApplyOutcome {
 /**
  * Apply a batch and sync the scene, returning the events it produced (empty
  * on failure). Panels read the events to learn engine-minted IDs.
+ *
+ * `atomic` collapses the batch into a single undo step, for command pairs
+ * that are one action to the user (adding a constraint and re-solving).
  */
-export type RunCommands = (commands: Command[]) => Promise<EngineEvent[]>;
+export type RunCommands = (
+  commands: Command[],
+  atomic?: boolean,
+) => Promise<EngineEvent[]>;
 
 /** Column-major 4x4 matrix, 16 elements (glam serde layout) */
 export type Mat4 = number[];
@@ -160,6 +166,64 @@ export interface FeatureInfo {
   created_bodies: string[];
 }
 
+/**
+ * Externally tagged rk_cad::SketchConstraint: `{"Horizontal": {...}}`.
+ * Constraints are keyed by ID, so re-adding one with the same ID and a new
+ * value edits it in place.
+ */
+export type SketchConstraint =
+  | { Coincident: { id: string; point1: string; point2: string } }
+  | { Horizontal: { id: string; line: string } }
+  | { Vertical: { id: string; line: string } }
+  | { Parallel: { id: string; line1: string; line2: string } }
+  | { Perpendicular: { id: string; line1: string; line2: string } }
+  | { Tangent: { id: string; curve1: string; curve2: string } }
+  | { EqualLength: { id: string; line1: string; line2: string } }
+  | { EqualRadius: { id: string; circle1: string; circle2: string } }
+  | { PointOnCurve: { id: string; point: string; curve: string } }
+  | { Midpoint: { id: string; point: string; line: string } }
+  | { Symmetric: { id: string; entity1: string; entity2: string; axis: string } }
+  | { Fixed: { id: string; point: string; x: number; y: number } }
+  | {
+      Distance: { id: string; entity1: string; entity2: string; value: number };
+    }
+  | {
+      HorizontalDistance: {
+        id: string;
+        point1: string;
+        point2: string;
+        value: number;
+      };
+    }
+  | {
+      VerticalDistance: {
+        id: string;
+        point1: string;
+        point2: string;
+        value: number;
+      };
+    }
+  | { Angle: { id: string; line1: string; line2: string; value: number } }
+  | { Radius: { id: string; circle: string; value: number } }
+  | { Diameter: { id: string; circle: string; value: number } }
+  | { Length: { id: string; line: string; value: number } };
+
+type VariantOf<T> = T extends object ? keyof T : never;
+/** Serde variant name of a constraint, e.g. `"EqualLength"` */
+export type ConstraintKind = VariantOf<SketchConstraint>;
+
+export interface SketchConstraintInfo {
+  id: string;
+  /** Send this back with a new value to edit the constraint in place */
+  constraint: SketchConstraint;
+  /** Display name from the engine, e.g. "Equal Length" */
+  label: string;
+  /** Entities the constraint references, for highlighting */
+  entities: string[];
+  /** `null` for geometric constraints */
+  value: number | null;
+}
+
 /** Sketch entities with point references resolved to coordinates */
 export interface SketchGeometry {
   points: {
@@ -189,6 +253,7 @@ export interface SketchGeometry {
     end_angle: number;
     construction: boolean;
   }[];
+  constraints: SketchConstraintInfo[];
 }
 
 export interface SceneSnapshot {

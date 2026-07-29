@@ -31,7 +31,13 @@ export interface SnapResult {
 /** Sketch coordinates → canvas pixels */
 export type Projector = (u: number, v: number) => [number, number];
 
-const EMPTY: SketchGeometry = { points: [], lines: [], circles: [], arcs: [] };
+const EMPTY: SketchGeometry = {
+  points: [],
+  lines: [],
+  circles: [],
+  arcs: [],
+  constraints: [],
+};
 
 export class SketchLayer {
   readonly group = new THREE.Group();
@@ -40,15 +46,20 @@ export class SketchLayer {
   private curves = lineObject(0x8fb8ff, false);
   private construction = lineObject(0x5d6570, false);
   private highlight = lineObject(0xffa53c, false);
+  /** Entities of the constraint the pointer is over in the panel */
+  private hover = lineObject(0x4fd18b, false);
   private preview = lineObject(0xffc857, false);
   private points = pointObject(0xc8d2e0, 5);
   /** Snap indicator under the pointer */
   private cursor = pointObject(0xffc857, 9);
-  /** The selected entity when it is a bare point */
+  /** Selected and hovered entities that are bare points */
   private marker = pointObject(0xffa53c, 9);
+  private hoverMarker = pointObject(0x4fd18b, 9);
 
   private info: SketchInfo | null = null;
   private geom: SketchGeometry = EMPTY;
+  private selection: string[] = [];
+  private hovered: string[] = [];
   private plane = new THREE.Plane();
   private toLocal = new THREE.Matrix4();
   /** Hit-test polylines in sketch coordinates, one per curve entity */
@@ -61,10 +72,12 @@ export class SketchLayer {
       this.grid,
       this.curves,
       this.construction,
+      this.hover,
       this.highlight,
       this.preview,
       this.points,
       this.cursor,
+      this.hoverMarker,
       this.marker,
     );
     setSegments(this.grid, gridSegments());
@@ -82,6 +95,8 @@ export class SketchLayer {
     this.info = info;
     this.group.visible = info !== null;
     if (!info) {
+      this.selection = [];
+      this.hovered = [];
       this.setGeometry(EMPTY);
       this.setPreview(null);
       this.setCursor(null);
@@ -126,7 +141,10 @@ export class SketchLayer {
       this.points,
       geom.points.flatMap((p) => [p.position[0], p.position[1], 0]),
     );
-    this.setHighlight(null);
+    // Re-apply against the rebuilt outlines; entities that were deleted or
+    // undone away simply stop matching
+    this.setHighlight(this.selection);
+    this.setHover(this.hovered);
   }
 
   setPreview(preview: SketchPreview | null) {
@@ -154,20 +172,38 @@ export class SketchLayer {
     setPoints(this.cursor, position ? [position[0], position[1], 0] : []);
   }
 
-  setHighlight(entityId: string | null) {
+  /** The current selection (constraints act on several entities at once) */
+  setHighlight(entityIds: string[]) {
+    this.selection = entityIds;
+    this.paint(this.highlight, this.marker, entityIds);
+  }
+
+  /** Entities of the constraint being pointed at, shown alongside the selection */
+  setHover(entityIds: string[]) {
+    this.hovered = entityIds;
+    this.paint(this.hover, this.hoverMarker, entityIds);
+  }
+
+  private paint(
+    curves: THREE.LineSegments,
+    points: THREE.Points,
+    entityIds: string[],
+  ) {
+    const wanted = new Set(entityIds);
     const out: number[] = [];
-    const outline = this.outlines.find((o) => o.id === entityId);
-    if (outline) {
+    for (const outline of this.outlines) {
+      if (!wanted.has(outline.id)) continue;
       const closed =
-        this.geom.circles.some((c) => c.id === entityId) &&
+        this.geom.circles.some((c) => c.id === outline.id) &&
         outline.pts.length > 2;
       pushPolyline(out, outline.pts, closed);
     }
-    const point = this.geom.points.find((p) => p.id === entityId);
-    setSegments(this.highlight, out);
+    setSegments(curves, out);
     setPoints(
-      this.marker,
-      point ? [point.position[0], point.position[1], 0] : [],
+      points,
+      this.geom.points
+        .filter((p) => wanted.has(p.id))
+        .flatMap((p) => [p.position[0], p.position[1], 0]),
     );
   }
 
@@ -229,10 +265,12 @@ export class SketchLayer {
       this.curves,
       this.construction,
       this.highlight,
+      this.hover,
       this.preview,
       this.points,
       this.cursor,
       this.marker,
+      this.hoverMarker,
     ]) {
       obj.geometry.dispose();
       (obj.material as THREE.Material).dispose();

@@ -88,7 +88,10 @@ CAD kernel abstraction and parametric modeling:
 
 - **Kernel abstraction** (`CadKernel` trait): Interface for geometry backends (OpenCASCADE, Truck, or NullKernel)
 - **Sketch system**: 2D sketches with entities (points, lines, arcs, circles) and constraints (coincident, parallel, perpendicular, dimensions)
-- **Constraint solver**: Newton-Raphson iteration for sketch constraint solving
+- **Constraint solver**: Newton-Raphson iteration for sketch constraint
+  solving. Only point coordinates are variables, so radius/diameter/equal-radius
+  dimensions are applied to the circle as assignments before the iteration
+  (and left out of the DOF count) instead of being solved for
 - **Feature operations**: Extrude, revolve, boolean operations on sketches to create 3D solids
 - **Parametric history**: Ordered feature list with rollback/rebuild support
 
@@ -170,10 +173,12 @@ the egui frontend once at feature parity):
   metadata + physics + render transforms + body IDs + links/joints +
   collisions + sketches + feature history + undo state),
   `sketch_geometry` (entities with point references resolved to 2D
-  coordinates), `get_part_mesh` / `get_body_mesh` (bulk data pulled by ID)
+  coordinates, plus the constraint list), `get_part_mesh` /
+  `get_body_mesh` (bulk data pulled by ID)
 - `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
-  command builders, `engine/interaction.ts` drag-session helpers
-  (latest-wins coalescing) and `newUuid`, `scene/viewport.ts` Three.js
+  command builders, `engine/constraints.ts` the sketch-constraint catalog,
+  `engine/interaction.ts` drag-session helpers (latest-wins coalescing),
+  `applyAtomic` and `newUuid`, `scene/viewport.ts` Three.js
   scene manager (Z-up; event-driven sync mirroring
   `rk-frontend/src/sync.rs`; TransformControls gizmo),
   `scene/sketchLayer.ts` + `scene/sketchTools.ts` sketch mode,
@@ -189,6 +194,13 @@ the egui frontend once at feature parity):
   per shape (one undo step), and cancelling leaves no orphan points. The
   line tool reuses point IDs between segments and closes onto the chain's
   first point, which is what makes `extract_profiles` find a closed loop
+- Constraints: pick entities with the select tool (Shift adds), then hit a
+  constraint — `engine/constraints.ts` is the single table of what each
+  one needs, what the geometry measures now (so a dimension opens on a
+  no-op) and the payload to send. Constraints are keyed by ID, so the
+  dimension list edits a value by re-sending the same constraint with a
+  new one. Adding and re-solving go through `applyAtomic`, which runs the
+  pair in one interaction session and therefore one undo step
 - Collision shapes render as wireframes from `LinkInfo.collisions`, whose
   transforms already fold in the link pose — they are rebuilt from the
   snapshot on every refresh instead of tracked through events. Collisions
@@ -223,5 +235,5 @@ the egui frontend once at feature parity):
 - Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
   part editing + joint UI + mesh/URDF import-export + gizmo
   (`apply_interactive`) + sketch/feature UI + collisions and mass/inertia
-  done; sketch constraints and dimensions, and egui retirement pending
+  + sketch constraints and dimensions done; egui retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)

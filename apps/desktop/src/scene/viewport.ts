@@ -20,6 +20,7 @@ import {
   type MeshPayload,
   type Rgba,
   type SceneSnapshot,
+  type SketchGeometry,
   type SketchInfo,
   type Vec2,
 } from "../engine/api";
@@ -74,10 +75,12 @@ export class Viewport {
   onTransform: ((partId: string, world: number[]) => void) | null = null;
   /** Drag finished; `canceled` means the engine session must be rolled back */
   onTransformEnd: ((canceled: boolean) => void) | null = null;
-  /** Click on the active sketch plane */
-  onSketchClick: ((hit: SketchHit) => void) | null = null;
+  /** Click on the active sketch plane; `additive` is a shift-click */
+  onSketchClick: ((hit: SketchHit, additive: boolean) => void) | null = null;
   /** Pointer moved over the active sketch plane (drives the drawing preview) */
   onSketchMove: ((hit: SketchHit) => void) | null = null;
+  /** The active sketch's geometry, whenever it is (re-)pulled from the engine */
+  onSketchGeometry: ((geometry: SketchGeometry) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -158,7 +161,7 @@ export class Viewport {
       if (Math.hypot(e.clientX - x0, e.clientY - y0) > 4) return;
       if (this.sketch.active) {
         const hit = this.sketchHit(e);
-        if (hit) this.onSketchClick?.(hit);
+        if (hit) this.onSketchClick?.(hit, e.shiftKey);
         return;
       }
       this.onPick?.(this.pick(e));
@@ -280,7 +283,11 @@ export class Viewport {
     const id = this.sketch.sketchId;
     if (!id) return;
     try {
-      this.sketch.setGeometry(await sketchGeometry(id));
+      const geometry = await sketchGeometry(id);
+      this.sketch.setGeometry(geometry);
+      // The panels need the same geometry to classify a selection and to
+      // measure dimensions; handing it over saves a second round trip
+      this.onSketchGeometry?.(geometry);
     } catch (e) {
       console.warn(`sketch ${id} geometry:`, e);
     }
@@ -290,8 +297,13 @@ export class Viewport {
     this.sketch.setPreview(preview);
   }
 
-  setSketchSelection(entityId: string | null) {
-    this.sketch.setHighlight(entityId);
+  setSketchSelection(entityIds: string[]) {
+    this.sketch.setHighlight(entityIds);
+  }
+
+  /** Entities of the constraint the pointer is over in the panel */
+  setSketchHover(entityIds: string[]) {
+    this.sketch.setHover(entityIds);
   }
 
   /** Look straight down the sketch plane's normal, keeping the zoom level */

@@ -398,6 +398,20 @@ struct SketchArcGeom {
     construction: bool,
 }
 
+#[derive(serde::Serialize)]
+struct SketchConstraintInfo {
+    id: Uuid,
+    /// The constraint exactly as `add_sketch_constraint` takes it. Sending it
+    /// back with a different value replaces it — constraints are keyed by ID
+    constraint: rk_cad::SketchConstraint,
+    /// `SketchConstraint::type_name()`, e.g. "Equal Length"
+    label: &'static str,
+    /// Referenced entities, for highlighting the constraint in the viewport
+    entities: Vec<Uuid>,
+    /// The driven value, or `None` for a purely geometric constraint
+    value: Option<f32>,
+}
+
 /// Sketch entities with point references already resolved to coordinates —
 /// the viewport draws straight from this without chasing IDs.
 #[derive(serde::Serialize)]
@@ -406,6 +420,7 @@ struct SketchGeometry {
     lines: Vec<SketchLineGeom>,
     circles: Vec<SketchCircleGeom>,
     arcs: Vec<SketchArcGeom>,
+    constraints: Vec<SketchConstraintInfo>,
 }
 
 #[tauri::command]
@@ -428,6 +443,7 @@ fn sketch_geometry(
         lines: Vec::new(),
         circles: Vec::new(),
         arcs: Vec::new(),
+        constraints: Vec::new(),
     };
     for entity in sketch.entities_iter() {
         let construction = sketch.is_construction(entity.id());
@@ -481,6 +497,22 @@ fn sketch_geometry(
             _ => {}
         }
     }
+
+    geom.constraints = sketch
+        .constraints_iter()
+        .map(|c| SketchConstraintInfo {
+            id: c.id(),
+            constraint: c.clone(),
+            label: c.type_name(),
+            entities: c.referenced_entities(),
+            value: c.value(),
+        })
+        .collect();
+    // Constraints live in a hash map; the list would otherwise reshuffle on
+    // every refresh
+    geom.constraints
+        .sort_by(|a, b| a.label.cmp(b.label).then(a.id.cmp(&b.id)));
+
     Ok(geom)
 }
 

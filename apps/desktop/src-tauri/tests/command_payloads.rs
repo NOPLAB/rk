@@ -50,10 +50,12 @@ fn create_sketch(eng: &mut Engine) -> Uuid {
 }
 
 /// The rectangle tool: four points and four lines sharing point IDs, in a
-/// single command — that sharing is what makes the profile closed
-fn rectangle(eng: &mut Engine, sketch_id: Uuid) -> Vec<Uuid> {
+/// single command — that sharing is what makes the profile closed.
+/// Returns the corner points and the edges, counter-clockwise from the origin.
+fn rectangle(eng: &mut Engine, sketch_id: Uuid) -> (Vec<Uuid>, Vec<Uuid>) {
     let corners = [[0.0, 0.0], [0.05, 0.0], [0.05, 0.03], [0.0, 0.03]];
     let points: Vec<Uuid> = (0..4).map(|_| Uuid::new_v4()).collect();
+    let lines: Vec<Uuid> = (0..4).map(|_| Uuid::new_v4()).collect();
     let mut entities: Vec<Value> = points
         .iter()
         .zip(corners)
@@ -61,7 +63,7 @@ fn rectangle(eng: &mut Engine, sketch_id: Uuid) -> Vec<Uuid> {
         .collect();
     for i in 0..4 {
         entities.push(json!({"Line": {
-            "id": Uuid::new_v4(),
+            "id": lines[i],
             "start": points[i],
             "end": points[(i + 1) % 4],
         }}));
@@ -74,7 +76,36 @@ fn rectangle(eng: &mut Engine, sketch_id: Uuid) -> Vec<Uuid> {
             "entities": entities,
         }),
     );
-    points
+    (points, lines)
+}
+
+/// `sketchPoint` for a standalone line: two points plus the line between them
+fn line(eng: &mut Engine, sketch_id: Uuid, from: [f32; 2], to: [f32; 2]) -> (Uuid, Uuid, Uuid) {
+    let (a, b, id) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    apply(
+        eng,
+        json!({
+            "type": "add_sketch_entities",
+            "sketch_id": sketch_id,
+            "entities": [
+                {"Point": {"id": a, "position": from}},
+                {"Point": {"id": b, "position": to}},
+                {"Line": {"id": id, "start": a, "end": b}},
+            ],
+        }),
+    );
+    (a, b, id)
+}
+
+fn point_position(eng: &Engine, sketch_id: Uuid, point_id: Uuid) -> glam::Vec2 {
+    match eng.sketch(sketch_id).unwrap().get_entity(point_id) {
+        Some(rk_cad::SketchEntity::Point { position, .. }) => *position,
+        other => panic!("{point_id} is not a point: {other:?}"),
+    }
+}
+
+fn constraint_count(eng: &Engine, sketch_id: Uuid) -> usize {
+    eng.sketch(sketch_id).unwrap().constraints().len()
 }
 
 /// Two connected boxes, returning the child part and its link. Collisions
@@ -209,11 +240,170 @@ fn physics_payloads_apply() {
     assert_eq!(link.inertial.inertia.izz, 0.003);
 }
 
+/// Every payload shape `src/engine/constraints.ts` can emit
+#[test]
+fn constraint_payloads_apply() {
+    let mut eng = engine();
+    let sketch_id = create_sketch(&mut eng);
+    let (points, lines) = rectangle(&mut eng, sketch_id);
+    let center = Uuid::new_v4();
+    let circle = Uuid::new_v4();
+    let hole = Uuid::new_v4();
+    apply(
+        &mut eng,
+        json!({
+            "type": "add_sketch_entities",
+            "sketch_id": sketch_id,
+            "entities": [
+                {"Point": {"id": center, "position": [0.025, 0.015]}},
+                {"Circle": {"id": circle, "center": center, "radius": 0.006}},
+                {"Point": {"id": hole, "position": [0.1, 0.0]}},
+                {"Circle": {"id": Uuid::new_v4(), "center": hole, "radius": 0.004}},
+            ],
+        }),
+    );
+    let circle2 = match eng
+        .sketch(sketch_id)
+        .unwrap()
+        .entities()
+        .values()
+        .find(|e| matches!(e, rk_cad::SketchEntity::Circle { center, .. } if *center == hole))
+    {
+        Some(e) => e.id(),
+        None => panic!("second circle"),
+    };
+
+    let constraints = [
+        json!({"Horizontal": {"id": Uuid::new_v4(), "line": lines[0]}}),
+        json!({"Vertical": {"id": Uuid::new_v4(), "line": lines[1]}}),
+        json!({"Parallel": {"id": Uuid::new_v4(), "line1": lines[0], "line2": lines[2]}}),
+        json!({"Perpendicular": {"id": Uuid::new_v4(), "line1": lines[0], "line2": lines[3]}}),
+        json!({"EqualLength": {"id": Uuid::new_v4(), "line1": lines[0], "line2": lines[2]}}),
+        json!({"EqualRadius": {"id": Uuid::new_v4(), "circle1": circle, "circle2": circle2}}),
+        json!({"Tangent": {"id": Uuid::new_v4(), "curve1": circle, "curve2": lines[0]}}),
+        json!({"PointOnCurve": {"id": Uuid::new_v4(), "point": center, "curve": lines[1]}}),
+        json!({"Midpoint": {"id": Uuid::new_v4(), "point": center, "line": lines[2]}}),
+        json!({"Coincident": {"id": Uuid::new_v4(), "point1": points[0], "point2": points[1]}}),
+        json!({"Fixed": {"id": Uuid::new_v4(), "point": points[0], "x": 0.0, "y": 0.0}}),
+        json!({"Length": {"id": Uuid::new_v4(), "line": lines[0], "value": 0.05}}),
+        json!({"Distance": {"id": Uuid::new_v4(), "entity1": points[0], "entity2": points[2], "value": 0.058}}),
+        json!({"HorizontalDistance": {"id": Uuid::new_v4(), "point1": points[0], "point2": points[1], "value": 0.05}}),
+        json!({"VerticalDistance": {"id": Uuid::new_v4(), "point1": points[1], "point2": points[2], "value": 0.03}}),
+        json!({"Angle": {"id": Uuid::new_v4(), "line1": lines[0], "line2": lines[1], "value": 1.5707964}}),
+        json!({"Radius": {"id": Uuid::new_v4(), "circle": circle, "value": 0.006}}),
+        json!({"Diameter": {"id": Uuid::new_v4(), "circle": circle2, "value": 0.008}}),
+    ];
+    let expected = constraints.len();
+    for constraint in constraints {
+        apply(
+            &mut eng,
+            json!({
+                "type": "add_sketch_constraint",
+                "sketch_id": sketch_id,
+                "constraint": constraint,
+            }),
+        );
+    }
+    assert_eq!(constraint_count(&eng, sketch_id), expected);
+
+    // Solving with the whole set applied must not error out
+    apply(
+        &mut eng,
+        json!({"type": "solve_sketch", "sketch_id": sketch_id}),
+    );
+
+    let victim = eng
+        .sketch(sketch_id)
+        .unwrap()
+        .constraints_iter()
+        .next()
+        .unwrap()
+        .id();
+    apply(
+        &mut eng,
+        json!({
+            "type": "delete_sketch_constraint",
+            "sketch_id": sketch_id,
+            "constraint_id": victim,
+        }),
+    );
+    assert_eq!(constraint_count(&eng, sketch_id), expected - 1);
+}
+
+/// The dimension list edits a value by re-sending the constraint with the same
+/// ID, which is only an edit because constraints are keyed by ID
+#[test]
+fn dimension_edit_replaces_the_constraint() {
+    let mut eng = engine();
+    let sketch_id = create_sketch(&mut eng);
+    let (a, b, line_id) = line(&mut eng, sketch_id, [0.0, 0.0], [0.04, 0.0]);
+    let constraint_id = Uuid::new_v4();
+
+    let set_length = |eng: &mut Engine, value: f32| {
+        apply(
+            eng,
+            json!({
+                "type": "add_sketch_constraint",
+                "sketch_id": sketch_id,
+                "constraint": {"Length": {"id": constraint_id, "line": line_id, "value": value}},
+            }),
+        );
+        apply(eng, json!({"type": "solve_sketch", "sketch_id": sketch_id}));
+        (point_position(eng, sketch_id, b) - point_position(eng, sketch_id, a)).length()
+    };
+
+    assert!((set_length(&mut eng, 0.08) - 0.08).abs() < 1e-3);
+    assert!((set_length(&mut eng, 0.06) - 0.06).abs() < 1e-3);
+    assert_eq!(
+        constraint_count(&eng, sketch_id),
+        1,
+        "the same ID replaces instead of adding"
+    );
+}
+
+/// Radius is not a solver variable, so this only works because the solver
+/// assigns radius dimensions directly
+#[test]
+fn radius_payload_drives_the_circle() {
+    let mut eng = engine();
+    let sketch_id = create_sketch(&mut eng);
+    let (center, circle) = (Uuid::new_v4(), Uuid::new_v4());
+    apply(
+        &mut eng,
+        json!({
+            "type": "add_sketch_entities",
+            "sketch_id": sketch_id,
+            "entities": [
+                {"Point": {"id": center, "position": [0.0, 0.0]}},
+                {"Circle": {"id": circle, "center": center, "radius": 0.005}},
+            ],
+        }),
+    );
+    apply(
+        &mut eng,
+        json!({
+            "type": "add_sketch_constraint",
+            "sketch_id": sketch_id,
+            "constraint": {"Radius": {"id": Uuid::new_v4(), "circle": circle, "value": 0.012}},
+        }),
+    );
+    apply(
+        &mut eng,
+        json!({"type": "solve_sketch", "sketch_id": sketch_id}),
+    );
+
+    let radius = match eng.sketch(sketch_id).unwrap().get_entity(circle) {
+        Some(rk_cad::SketchEntity::Circle { radius, .. }) => *radius,
+        other => panic!("not a circle: {other:?}"),
+    };
+    assert!((radius - 0.012).abs() < 1e-6, "radius is {radius}");
+}
+
 #[test]
 fn sketch_payloads_apply() {
     let mut eng = engine();
     let sketch_id = create_sketch(&mut eng);
-    let points = rectangle(&mut eng, sketch_id);
+    let (points, _lines) = rectangle(&mut eng, sketch_id);
 
     // The circle tool: a center point plus the circle referencing it
     let center = Uuid::new_v4();

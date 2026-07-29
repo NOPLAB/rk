@@ -81,6 +81,9 @@ impl ConstraintSolver {
 
     /// Solve the constraints in the given sketch
     pub fn solve(&mut self, sketch: &mut Sketch) -> SolveResult {
+        // Radius dimensions are assignments, not equations (see below)
+        apply_radius_constraints(sketch);
+
         // Build variable vector (point positions)
         let mut var_map = VariableMap::new();
         var_map.build_from_sketch(sketch);
@@ -93,8 +96,13 @@ impl ConstraintSolver {
         let mut x = var_map.get_values(sketch);
         let n_vars = x.len();
 
-        // Count constraint equations
-        let n_equations: usize = sketch.constraints_iter().map(|c| c.equation_count()).sum();
+        // Count constraint equations, minus the ones already satisfied by
+        // assignment — counting those would understate the remaining DOF
+        let n_equations: usize = sketch
+            .constraints_iter()
+            .filter(|c| !drives_radius(c))
+            .map(|c| c.equation_count())
+            .sum();
 
         // Check for over/under constrained
         let dof = n_vars as i32 - n_equations as i32;
@@ -301,7 +309,10 @@ impl ConstraintSolver {
                         let d2 = var_map.get_point_position(sketch, e2)
                             - var_map.get_point_position(sketch, s2);
                         let angle = d1.y.atan2(d1.x) - d2.y.atan2(d2.x);
-                        errors.push(angle - value);
+                        // Both terms come off atan2's branch cut, so the
+                        // difference can sit a full turn from an equivalent
+                        // value; compare the shortest way round
+                        errors.push(wrap_angle(angle - value));
                     }
                 }
 
@@ -622,6 +633,71 @@ impl ConstraintSolver {
     }
 }
 
+/// Radii would never move under Newton iteration — only point coordinates are
+/// variables — so a radius dimension that disagrees with its circle could
+/// never converge and the whole sketch would report a solver failure. These
+/// constraints drive their circle directly instead.
+fn drives_radius(constraint: &SketchConstraint) -> bool {
+    matches!(
+        constraint,
+        SketchConstraint::Radius { .. }
+            | SketchConstraint::Diameter { .. }
+            | SketchConstraint::EqualRadius { .. }
+    )
+}
+
+/// Fold an angle into (-π, π]
+fn wrap_angle(angle: f32) -> f32 {
+    use std::f32::consts::TAU;
+    angle - TAU * (angle / TAU).round()
+}
+
+/// Radius below which a circle would collapse into nothing
+const MIN_RADIUS: f32 = 1e-6;
+
+/// Apply every radius dimension to its circle or arc
+fn apply_radius_constraints(sketch: &mut Sketch) {
+    let mut sizes: Vec<(Uuid, f32)> = Vec::new();
+    let mut equal: Vec<(Uuid, Uuid)> = Vec::new();
+    for constraint in sketch.constraints_iter() {
+        match constraint {
+            SketchConstraint::Radius { circle, value, .. } => sizes.push((*circle, *value)),
+            SketchConstraint::Diameter { circle, value, .. } => sizes.push((*circle, value * 0.5)),
+            SketchConstraint::EqualRadius {
+                circle1, circle2, ..
+            } => equal.push((*circle1, *circle2)),
+            _ => {}
+        }
+    }
+
+    for (id, radius) in sizes {
+        set_radius(sketch, id, radius);
+    }
+    // After the explicit sizes, so a Radius on either circle wins
+    for (from, to) in equal {
+        if let Some(radius) = radius_of(sketch, from) {
+            set_radius(sketch, to, radius);
+        }
+    }
+}
+
+fn radius_of(sketch: &Sketch, id: Uuid) -> Option<f32> {
+    match sketch.get_entity(id) {
+        Some(SketchEntity::Circle { radius, .. } | SketchEntity::Arc { radius, .. }) => {
+            Some(*radius)
+        }
+        _ => None,
+    }
+}
+
+fn set_radius(sketch: &mut Sketch, id: Uuid, value: f32) {
+    if let Some(SketchEntity::Circle { radius, .. } | SketchEntity::Arc { radius, .. }) =
+        sketch.get_entity_mut(id)
+    {
+        *radius = value.max(MIN_RADIUS);
+    }
+}
+
 /// Maps point IDs to variable indices
 struct VariableMap {
     /// Map from point ID to variable index (x = index, y = index + 1)
@@ -763,6 +839,101 @@ mod tests {
         let pos = sketch.get_entity(p).unwrap().position().unwrap();
         assert!(pos.x.abs() < 0.01, "Point should be at x=0, got {}", pos.x);
         assert!(pos.y.abs() < 0.01, "Point should be at y=0, got {}", pos.y);
+    }
+
+    fn circle_radius(sketch: &Sketch, id: Uuid) -> f32 {
+        radius_of(sketch, id).expect("entity has a radius")
+    }
+
+    #[test]
+    fn test_radius_constraint_drives_the_circle() {
+        let mut sketch = Sketch::new("test", SketchPlane::xy());
+        let center = sketch.add_point(Vec2::new(0.0, 0.0));
+        let circle = sketch.add_circle(center, 0.01);
+
+        sketch
+            .add_constraint(SketchConstraint::radius(circle, 0.025))
+            .unwrap();
+
+        // Radius is not a solver variable, so this can only be satisfied by
+        // assignment — before that it ran to the iteration limit and failed
+        let result = sketch.solve();
+        assert!(
+            !matches!(result, SolveResult::Failed { .. }),
+            "solver should not fail: {result:?}"
+        );
+        assert!((circle_radius(&sketch, circle) - 0.025).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_diameter_and_equal_radius() {
+        let mut sketch = Sketch::new("test", SketchPlane::xy());
+        let c1 = sketch.add_point(Vec2::new(0.0, 0.0));
+        let big = sketch.add_circle(c1, 0.01);
+        let c2 = sketch.add_point(Vec2::new(0.1, 0.0));
+        let small = sketch.add_circle(c2, 0.002);
+
+        sketch
+            .add_constraint(SketchConstraint::Diameter {
+                id: Uuid::new_v4(),
+                circle: big,
+                value: 0.06,
+            })
+            .unwrap();
+        sketch
+            .add_constraint(SketchConstraint::equal_radius(big, small))
+            .unwrap();
+
+        let result = sketch.solve();
+        assert!(
+            !matches!(result, SolveResult::Failed { .. }),
+            "solver should not fail: {result:?}"
+        );
+        assert!((circle_radius(&sketch, big) - 0.03).abs() < 1e-6);
+        assert!(
+            (circle_radius(&sketch, small) - 0.03).abs() < 1e-6,
+            "equal radius copies from the dimensioned circle"
+        );
+    }
+
+    #[test]
+    fn test_angle_constraint_takes_the_shortest_way_round() {
+        let mut sketch = Sketch::new("test", SketchPlane::xy());
+        // Two lines straddling the atan2 branch cut: 170° and -170°, so the
+        // raw difference is 340° where the angle between them is -20°
+        let a = sketch.add_point(Vec2::new(0.0, 0.0));
+        let b = sketch.add_point(Vec2::new(-1.0, 0.176));
+        let c = sketch.add_point(Vec2::new(0.0, 0.5));
+        let d = sketch.add_point(Vec2::new(-1.0, 0.324));
+        let line1 = sketch.add_line(a, b);
+        let line2 = sketch.add_line(c, d);
+
+        sketch
+            .add_constraint(SketchConstraint::angle(
+                line1,
+                line2,
+                (-20.0f32).to_radians(),
+            ))
+            .unwrap();
+
+        let before: Vec<Vec2> = [a, b, c, d]
+            .iter()
+            .map(|id| sketch.get_entity(*id).unwrap().position().unwrap())
+            .collect();
+        let result = sketch.solve();
+        assert!(
+            !matches!(result, SolveResult::Failed { .. }),
+            "solver should not fail: {result:?}"
+        );
+
+        // The angle is already what was asked for, so nothing should move
+        for (id, was) in [a, b, c, d].iter().zip(before) {
+            let now = sketch.get_entity(*id).unwrap().position().unwrap();
+            assert!(
+                (now - was).length() < 1e-3,
+                "point moved from {was:?} to {now:?}"
+            );
+        }
     }
 
     #[test]
