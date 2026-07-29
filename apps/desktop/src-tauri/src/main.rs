@@ -300,7 +300,7 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
             constraint_count: s.constraints().len(),
             is_solved: s.is_solved(),
             dof: s.degrees_of_freedom(),
-            profile_count: s.extract_profiles().map(|p| p.len()).unwrap_or(0),
+            profile_count: s.profiles().len(),
         })
         .collect();
     sketches.sort_by(|a, b| a.name.cmp(&b.name));
@@ -383,6 +383,8 @@ struct SketchLineGeom {
 struct SketchCircleGeom {
     id: Uuid,
     center: [f32; 2],
+    /// The centre as an entity, so an edit can reuse or move it
+    center_id: Uuid,
     radius: f32,
     construction: bool,
 }
@@ -391,11 +393,51 @@ struct SketchCircleGeom {
 struct SketchArcGeom {
     id: Uuid,
     center: [f32; 2],
+    center_id: Uuid,
     radius: f32,
     /// Sweep from `start_angle` counter-clockwise to `end_angle` (radians)
     start_angle: f32,
     end_angle: f32,
+    start_id: Uuid,
+    end_id: Uuid,
     construction: bool,
+}
+
+#[derive(serde::Serialize)]
+struct SketchEllipseGeom {
+    id: Uuid,
+    center: [f32; 2],
+    center_id: Uuid,
+    major_radius: f32,
+    minor_radius: f32,
+    /// Rotation of the major axis, radians
+    rotation: f32,
+    construction: bool,
+}
+
+#[derive(serde::Serialize)]
+struct SketchSplineGeom {
+    id: Uuid,
+    /// Control point positions, in order
+    points: Vec<[f32; 2]>,
+    /// The same points by ID, so a click can grab one
+    point_ids: Vec<Uuid>,
+    closed: bool,
+    construction: bool,
+}
+
+/// One closed area of the sketch — what the user clicks to extrude
+#[derive(serde::Serialize)]
+struct SketchRegionGeom {
+    /// Named by the curves bounding it, so a feature can hold on to it
+    id: Uuid,
+    /// Outer boundary, counter-clockwise
+    outer: Vec<[f32; 2]>,
+    /// Islands, each clockwise
+    holes: Vec<Vec<[f32; 2]>>,
+    area: f32,
+    /// A point inside the region, for labels
+    centroid: [f32; 2],
 }
 
 #[derive(serde::Serialize)]
@@ -420,7 +462,20 @@ struct SketchGeometry {
     lines: Vec<SketchLineGeom>,
     circles: Vec<SketchCircleGeom>,
     arcs: Vec<SketchArcGeom>,
+    ellipses: Vec<SketchEllipseGeom>,
+    splines: Vec<SketchSplineGeom>,
+    /// Closed areas, largest first
+    regions: Vec<SketchRegionGeom>,
     constraints: Vec<SketchConstraintInfo>,
+}
+
+/// A sketch and everything needed to draw it, including its own plane basis
+#[derive(serde::Serialize)]
+struct SketchEntry {
+    id: Uuid,
+    name: String,
+    transform: glam::Mat4,
+    geometry: SketchGeometry,
 }
 
 #[tauri::command]
@@ -432,6 +487,32 @@ fn sketch_geometry(
     let sketch = engine
         .sketch(sketch_id)
         .ok_or_else(|| format!("unknown sketch: {sketch_id}"))?;
+    Ok(build_sketch_geometry(sketch))
+}
+
+/// Every sketch in the document — finished sketches stay visible in the
+/// viewport, and their regions are what a later extrude is picked from
+#[tauri::command]
+fn all_sketch_geometry(state: State<'_, EngineState>) -> Vec<SketchEntry> {
+    let engine = state.engine.lock();
+    let mut entries: Vec<SketchEntry> = engine
+        .document()
+        .cad
+        .history
+        .sketches()
+        .values()
+        .map(|s| SketchEntry {
+            id: s.id,
+            name: s.name.clone(),
+            transform: s.plane.transform(),
+            geometry: build_sketch_geometry(s),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
+}
+
+fn build_sketch_geometry(sketch: &rk_cad::Sketch) -> SketchGeometry {
     let pos = |id: Uuid| match sketch.get_entity(id) {
         Some(rk_cad::SketchEntity::Point { position, .. }) => Some(position.to_array()),
         _ => None,
@@ -443,6 +524,9 @@ fn sketch_geometry(
         lines: Vec::new(),
         circles: Vec::new(),
         arcs: Vec::new(),
+        ellipses: Vec::new(),
+        splines: Vec::new(),
+        regions: Vec::new(),
         constraints: Vec::new(),
     };
     for entity in sketch.entities_iter() {
@@ -470,6 +554,7 @@ fn sketch_geometry(
                     geom.circles.push(SketchCircleGeom {
                         id: *id,
                         center: c,
+                        center_id: *center,
                         radius: *radius,
                         construction,
                     });
@@ -486,17 +571,69 @@ fn sketch_geometry(
                     geom.arcs.push(SketchArcGeom {
                         id: *id,
                         center: c,
+                        center_id: *center,
                         radius: *radius,
                         start_angle: angle(c, a),
                         end_angle: angle(c, b),
+                        start_id: *start,
+                        end_id: *end,
                         construction,
                     });
                 }
             }
-            // Ellipses and splines have no UI yet
-            _ => {}
+            rk_cad::SketchEntity::Ellipse {
+                id,
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+            } => {
+                if let Some(c) = pos(*center) {
+                    geom.ellipses.push(SketchEllipseGeom {
+                        id: *id,
+                        center: c,
+                        center_id: *center,
+                        major_radius: *major_radius,
+                        minor_radius: *minor_radius,
+                        rotation: *rotation,
+                        construction,
+                    });
+                }
+            }
+            rk_cad::SketchEntity::Spline {
+                id,
+                control_points,
+                closed,
+            } => {
+                let points: Vec<[f32; 2]> = control_points.iter().filter_map(|p| pos(*p)).collect();
+                if points.len() == control_points.len() && points.len() >= 2 {
+                    geom.splines.push(SketchSplineGeom {
+                        id: *id,
+                        points,
+                        point_ids: control_points.clone(),
+                        closed: *closed,
+                        construction,
+                    });
+                }
+            }
         }
     }
+
+    geom.regions = sketch
+        .profiles()
+        .into_iter()
+        .map(|p| SketchRegionGeom {
+            id: p.id,
+            outer: p.outer.iter().map(|v| v.to_array()).collect(),
+            holes: p
+                .holes
+                .iter()
+                .map(|h| h.iter().map(|v| v.to_array()).collect())
+                .collect(),
+            area: p.area,
+            centroid: p.centroid.to_array(),
+        })
+        .collect();
 
     geom.constraints = sketch
         .constraints_iter()
@@ -513,7 +650,7 @@ fn sketch_geometry(
     geom.constraints
         .sort_by(|a, b| a.label.cmp(b.label).then(a.id.cmp(&b.id)));
 
-    Ok(geom)
+    geom
 }
 
 #[derive(serde::Serialize)]
@@ -570,6 +707,7 @@ fn main() {
             engine_end_interaction,
             scene_snapshot,
             sketch_geometry,
+            all_sketch_geometry,
             get_part_mesh,
             get_body_mesh
         ])

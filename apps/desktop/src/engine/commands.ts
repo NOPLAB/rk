@@ -240,7 +240,17 @@ export type SketchEntity =
         end: string;
         radius: number;
       };
-    };
+    }
+  | {
+      Ellipse: {
+        id: string;
+        center: string;
+        major_radius: number;
+        minor_radius: number;
+        rotation: number;
+      };
+    }
+  | { Spline: { id: string; control_points: string[]; closed: boolean } };
 
 export const sketchPoint = (id: string, position: Vec2): SketchEntity => ({
   Point: { id, position },
@@ -258,6 +268,39 @@ export const sketchCircle = (
   center: string,
   radius: number,
 ): SketchEntity => ({ Circle: { id, center, radius } });
+
+/** Sweeps counter-clockwise from `start` to `end`; swap them to go the other way */
+export const sketchArc = (
+  id: string,
+  center: string,
+  start: string,
+  end: string,
+  radius: number,
+): SketchEntity => ({ Arc: { id, center, start, end, radius } });
+
+export const sketchEllipse = (
+  id: string,
+  center: string,
+  majorRadius: number,
+  minorRadius: number,
+  rotation: number,
+): SketchEntity => ({
+  Ellipse: {
+    id,
+    center,
+    major_radius: majorRadius,
+    minor_radius: minorRadius,
+    rotation,
+  },
+});
+
+export const sketchSpline = (
+  id: string,
+  controlPoints: string[],
+  closed: boolean,
+): SketchEntity => ({
+  Spline: { id, control_points: controlPoints, closed },
+});
 
 /** The three standard planes, optionally offset along their normal */
 export const standardPlane = (
@@ -293,7 +336,8 @@ export const standardPlane = (
 export const createSketch = (
   plane: SketchPlane,
   name: string | null = null,
-): Command => ({ type: "create_sketch", id: null, name, plane });
+  id: string | null = null,
+): Command => ({ type: "create_sketch", id, name, plane });
 
 export const deleteSketch = (sketchId: string): Command => ({
   type: "delete_sketch",
@@ -308,6 +352,16 @@ export const addSketchEntities = (
   type: "add_sketch_entities",
   sketch_id: sketchId,
   entities,
+});
+
+/** Replace an entity that already exists (moving a point, resizing a circle) */
+export const updateSketchEntity = (
+  sketchId: string,
+  entity: SketchEntity,
+): Command => ({
+  type: "update_sketch_entity",
+  sketch_id: sketchId,
+  entity,
 });
 
 export const deleteSketchEntities = (
@@ -346,12 +400,25 @@ export const solveSketch = (sketchId: string): Command => ({
   sketch_id: sketchId,
 });
 
+/** Construction geometry guides the sketch but encloses no region */
+export const setSketchConstruction = (
+  sketchId: string,
+  entityIds: string[],
+  construction: boolean,
+): Command => ({
+  type: "set_sketch_construction",
+  sketch_id: sketchId,
+  entity_ids: entityIds,
+  construction,
+});
+
 // ---- features -----------------------------------------------------------
 
 /** Relative to the sketch plane normal */
 export type ExtrudeDirection = "Positive" | "Negative" | "Symmetric";
 export type BooleanOp = "New" | "Join" | "Cut" | "Intersect";
 
+/** `profiles` are region IDs; an empty list takes every region in the sketch */
 export const addExtrude = (
   sketchId: string,
   distance: number,
@@ -359,11 +426,13 @@ export const addExtrude = (
   booleanOp: BooleanOp,
   targetBody: string | null,
   name: string | null = null,
+  profiles: string[] = [],
 ): Command => ({
   type: "add_extrude",
   id: null,
   name,
   sketch_id: sketchId,
+  profiles,
   distance,
   direction,
   boolean_op: booleanOp,
@@ -378,11 +447,13 @@ export const addRevolve = (
   booleanOp: BooleanOp,
   targetBody: string | null,
   name: string | null = null,
+  profiles: string[] = [],
 ): Command => ({
   type: "add_revolve",
   id: null,
   name,
   sketch_id: sketchId,
+  profiles,
   axis_origin: axisOrigin,
   axis_direction: axisDirection,
   angle,

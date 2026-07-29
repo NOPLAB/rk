@@ -98,14 +98,14 @@ fn delete_selected_sketch_entities(ctx: &ActionContext, events: &mut Vec<Event>)
 }
 
 fn execute_extrude(ctx: &ActionContext, events: &mut Vec<Event>) {
-    let Some((sketch_id, distance, direction, has_profiles, boolean_op, target_body)) = ({
+    let Some((sketch_id, distance, direction, picked, boolean_op, target_body)) = ({
         let state = ctx.app_state.lock();
         state.editor_mode.sketch().map(|s| {
             (
                 s.extrude_dialog.sketch_id,
                 s.extrude_dialog.distance,
                 s.extrude_dialog.direction,
-                !s.extrude_dialog.selected_profile_indices.is_empty(),
+                s.extrude_dialog.selected_profile_indices.clone(),
                 s.extrude_dialog.boolean_op,
                 s.extrude_dialog.target_body,
             )
@@ -114,17 +114,33 @@ fn execute_extrude(ctx: &ActionContext, events: &mut Vec<Event>) {
         return;
     };
 
-    if !has_profiles {
+    if picked.is_empty() {
         tracing::warn!("No profiles selected for extrusion");
         return;
     }
 
     ctx.apply(Command::SolveSketch { sketch_id }, events);
 
+    // The dialog picks regions by their position in the list; the command
+    // names them by ID, which is what survives a rebuild
+    let engine = ctx.engine();
+    let profiles: Vec<uuid::Uuid> = {
+        let engine = engine.lock();
+        let Some(sketch) = engine.sketch(sketch_id) else {
+            return;
+        };
+        let regions = sketch.profiles();
+        picked
+            .iter()
+            .filter_map(|i| regions.get(*i).map(|p| p.id))
+            .collect()
+    };
+
     let result = ctx.engine().lock().apply(Command::AddExtrude {
         id: None,
         name: None,
         sketch_id,
+        profiles,
         distance,
         direction: direction.to_cad(),
         boolean_op,

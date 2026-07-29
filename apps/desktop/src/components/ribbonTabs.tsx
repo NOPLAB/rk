@@ -11,14 +11,13 @@ import {
   connectParts,
   createBox,
   createCylinder,
-  createSketch,
   createSphere,
   deletePart,
   disconnectPart,
   resetAllJointPositions,
   rollbackTo,
+  setSketchConstruction,
   solveSketch,
-  standardPlane,
 } from "../engine/commands";
 import {
   DIMENSIONAL,
@@ -29,12 +28,12 @@ import {
   type ConstraintDef,
 } from "../engine/constraints";
 import { newUuid } from "../engine/interaction";
+import { TOOLS } from "../scene/sketchToolInfo";
+import type { SketchTool } from "../scene/sketchTools";
 import type { AppApi } from "../ui/appApi";
 import { SHAPES, defaultGeometry } from "./CollisionPanel";
 import type { IconName } from "./icons";
 import { RibBig, RibCol, RibGroup, RibHint, RibSmall, chunk } from "./ribbonParts";
-
-const PLANES = ["XY", "XZ", "YZ"] as const;
 
 const CONSTRAINT_ICONS: Record<string, IconName> = {
   Coincident: "cnCoincident",
@@ -60,68 +59,30 @@ const CONSTRAINT_ICONS: Record<string, IconName> = {
 // ---- 3D Model -----------------------------------------------------------
 
 export function ModelTab({ api }: { api: AppApi }) {
-  const [plane, setPlane] = useState<(typeof PLANES)[number]>("XY");
-  const [offset, setOffset] = useState(0);
   const snapshot = api.snapshot;
   const sketchCount = snapshot?.sketches.length ?? 0;
-
-  const startSketch = async () => {
-    // Every sketch would otherwise be called "Sketch"; the browser needs to
-    // tell them apart. The engine mints the ID and reports it back.
-    const events = await api.run([
-      createSketch(
-        standardPlane(plane, offset / 1000),
-        `Sketch ${sketchCount + 1} (${plane})`,
-      ),
-    ]);
-    const added = events.find((e) => e.type === "sketch_added");
-    if (added) api.activateSketch(added.sketch_id as string);
-  };
+  const picked = api.regionSelection.length;
 
   return (
     <>
       <RibGroup name="Sketch">
         <RibBig
           icon="sketch"
-          label="Start 2D Sketch"
-          hint="Create a sketch on the chosen plane and edit it"
-          onClick={() => void startSketch()}
+          label="Create Sketch"
+          hint="Then click a plane or a flat face in the 3D view"
+          active={api.pickingPlane}
+          onClick={() =>
+            api.pickingPlane ? api.cancelPlanePick() : api.beginPlanePick()
+          }
         />
-        <RibCol>
-          <div className="rb-field">
-            <select
-              value={plane}
-              title="Sketch plane"
-              onChange={(e) =>
-                setPlane(e.target.value as (typeof PLANES)[number])
-              }
-            >
-              {PLANES.map((p) => (
-                <option key={p} value={p}>
-                  {p} plane
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="rb-field">
-            <input
-              type="number"
-              step="10"
-              style={{ width: 62 }}
-              title="Offset along the plane normal (mm)"
-              value={offset}
-              onChange={(e) => setOffset(parseFloat(e.target.value) || 0)}
-            />
-            <span>mm</span>
-          </div>
-        </RibCol>
+        {api.pickingPlane && <RibHint>Pick a plane or a face — Esc cancels</RibHint>}
       </RibGroup>
 
       <RibGroup name="Create">
         <RibBig
           icon="extrude"
           label="Extrude"
-          hint="Extrude a sketch profile into a solid"
+          hint="Turn the selected sketch region into a solid"
           disabled={sketchCount === 0}
           active={api.dialog === "extrude"}
           onClick={() => api.setDialog("extrude")}
@@ -129,12 +90,20 @@ export function ModelTab({ api }: { api: AppApi }) {
         <RibBig
           icon="revolve"
           label="Revolve"
-          hint="Revolve a sketch profile around an axis"
+          hint="Sweep the selected sketch region around an axis"
           disabled={sketchCount === 0}
           active={api.dialog === "revolve"}
           onClick={() => api.setDialog("revolve")}
         />
-        {sketchCount === 0 && <RibHint>Draw a sketch first</RibHint>}
+        {sketchCount === 0 ? (
+          <RibHint>Draw a sketch first</RibHint>
+        ) : (
+          <RibHint>
+            {picked > 0
+              ? `${picked} region${picked > 1 ? "s" : ""} selected`
+              : "Click a shaded region to choose what to build"}
+          </RibHint>
+        )}
       </RibGroup>
 
       <RibGroup name="Primitives">
@@ -252,39 +221,180 @@ export function SketchTab({ api }: { api: AppApi }) {
     />
   );
 
+  const tool = (name: SketchTool) => {
+    const spec = TOOLS[name];
+    return (
+      <RibSmall
+        key={name}
+        icon={spec.icon}
+        label={spec.label}
+        hint={spec.hint}
+        active={api.sketchTool === name}
+        onClick={() => api.setSketchTool(name)}
+      />
+    );
+  };
+  const bigTool = (name: SketchTool) => {
+    const spec = TOOLS[name];
+    return (
+      <RibBig
+        icon={spec.icon}
+        label={spec.label}
+        hint={spec.hint}
+        active={api.sketchTool === name}
+        onClick={() => api.setSketchTool(name)}
+      />
+    );
+  };
+  const options = api.toolOptions;
+  const numberField = (
+    label: string,
+    value: number,
+    step: number,
+    onChange: (value: number) => void,
+    unit?: string,
+  ) => (
+    <div className="rb-field" key={label}>
+      <span>{label}</span>
+      <input
+        type="number"
+        step={step}
+        style={{ width: 54 }}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+      />
+      {unit && <span>{unit}</span>}
+    </div>
+  );
+
   return (
     <>
       <RibGroup name="Draw">
-        <RibBig
-          icon="line"
-          label="Line"
-          hint="Click point to point; close on the first point"
-          active={api.sketchTool === "line"}
-          onClick={() => api.setSketchTool("line")}
-        />
-        <RibBig
-          icon="rect"
-          label="Rectangle"
-          hint="Click two opposite corners"
-          active={api.sketchTool === "rect"}
-          onClick={() => api.setSketchTool("rect")}
-        />
-        <RibBig
-          icon="circle"
-          label="Circle"
-          hint="Click the centre, then the radius"
-          active={api.sketchTool === "circle"}
-          onClick={() => api.setSketchTool("circle")}
-        />
+        {bigTool("line")}
+        {bigTool("rect")}
+        {bigTool("circle")}
         <RibCol>
+          {tool("select")}
+          {tool("rectCenter")}
+          {tool("rect3")}
+        </RibCol>
+        <RibCol>
+          {tool("circle2")}
+          {tool("circle3")}
+          {tool("point")}
+        </RibCol>
+        <RibCol>
+          {tool("arc3")}
+          {tool("arcCenter")}
+          {tool("spline")}
+        </RibCol>
+        <RibCol>
+          {tool("ellipse")}
+          {tool("slot")}
+          {tool("slotOverall")}
+        </RibCol>
+        <RibCol>
+          {tool("polygon")}
+          {tool("polygonCirc")}
+          {tool("polygonEdge")}
+        </RibCol>
+        <RibCol>
+          {numberField("Sides", options.sides, 1, (v) =>
+            api.setToolOptions({ sides: Math.max(3, Math.round(v)) }),
+          )}
           <RibSmall
-            icon="select"
-            label="Select"
-            hint="Pick entities — Shift adds to the selection"
-            active={api.sketchTool === "select"}
-            onClick={() => api.setSketchTool("select")}
+            icon="construction"
+            label="Construction"
+            hint="Draw guides that never enclose a region"
+            active={options.construction}
+            onClick={() =>
+              api.setToolOptions({ construction: !options.construction })
+            }
+          />
+          <RibSmall
+            icon="construction"
+            label="Toggle Selected"
+            hint="Switch the selected curves between normal and construction"
+            disabled={api.sketchSelection.length === 0}
+            onClick={() => {
+              const ids = api.sketchSelection;
+              const anyNormal = ids.some(
+                (id) =>
+                  !geometry ||
+                  [
+                    ...geometry.lines,
+                    ...geometry.circles,
+                    ...geometry.arcs,
+                    ...geometry.ellipses,
+                    ...geometry.splines,
+                  ].some((e) => e.id === id && !e.construction),
+              );
+              void api.run([setSketchConstruction(sketch.id, ids, anyNormal)]);
+            }}
           />
         </RibCol>
+      </RibGroup>
+
+      <RibGroup name="Modify">
+        <RibCol>
+          {tool("fillet")}
+          {tool("trim")}
+          {tool("extend")}
+        </RibCol>
+        <RibCol>
+          {tool("offset")}
+          {tool("mirror")}
+          {tool("patternRect")}
+        </RibCol>
+        <RibCol>
+          {tool("patternCirc")}
+          {numberField(
+            "Radius",
+            options.filletRadius * 1000,
+            1,
+            (v) => api.setToolOptions({ filletRadius: v / 1000 }),
+            "mm",
+          )}
+          {numberField(
+            "Offset",
+            options.offsetDistance * 1000,
+            1,
+            (v) => api.setToolOptions({ offsetDistance: v / 1000 }),
+            "mm",
+          )}
+        </RibCol>
+        <RibCol>
+          {numberField("Copies", options.patternCount, 1, (v) =>
+            api.setToolOptions({ patternCount: Math.max(2, Math.round(v)) }),
+          )}
+          {numberField(
+            "Spacing",
+            options.patternSpacing * 1000,
+            1,
+            (v) => api.setToolOptions({ patternSpacing: v / 1000 }),
+            "mm",
+          )}
+          {numberField(
+            "Sweep",
+            Math.round((options.patternAngle * 180) / Math.PI),
+            15,
+            (v) => api.setToolOptions({ patternAngle: (v * Math.PI) / 180 }),
+            "°",
+          )}
+        </RibCol>
+        {(api.sketchTool === "mirror" ||
+          api.sketchTool === "patternRect" ||
+          api.sketchTool === "patternCirc") && (
+          <RibHint>
+            {api.sketchSelection.length === 0
+              ? "Select what to copy first, with the Select tool"
+              : api.sketchTool === "mirror"
+                ? "Now click the line to mirror across"
+                : api.sketchTool === "patternRect"
+                  ? "Now click to set the direction"
+                  : "Now click the centre to revolve around"}
+          </RibHint>
+        )}
       </RibGroup>
 
       <RibGroup name="Constrain">
@@ -299,29 +409,40 @@ export function SketchTab({ api }: { api: AppApi }) {
         ))}
       </RibGroup>
 
-      <RibGroup name="Exit">
-        <RibCol>
-          <RibSmall
-            icon="solve"
-            label="Solve"
-            hint="Re-solve the sketch constraints"
-            onClick={() => void api.run([solveSketch(sketch.id)])}
-          />
-          <RibSmall
-            icon="align"
-            label="Align View"
-            hint="Look straight down the sketch plane"
-            onClick={() => api.viewport()?.alignToSketch()}
-          />
-        </RibCol>
-        <RibBig
-          icon="finish"
-          label="Finish Sketch"
-          hint="Leave sketch mode"
-          onClick={() => api.activateSketch(null)}
-        />
-      </RibGroup>
     </>
+  );
+}
+
+/**
+ * Solve / align / finish. The ribbon renders this outside its scrolling area
+ * so leaving a sketch never depends on scrolling to find the button.
+ */
+export function SketchExitGroup({ api }: { api: AppApi }) {
+  const sketch = api.activeSketch;
+  if (!sketch) return null;
+  return (
+    <RibGroup name="Exit" pinned>
+      <RibCol>
+        <RibSmall
+          icon="solve"
+          label="Solve"
+          hint="Re-solve the sketch constraints"
+          onClick={() => void api.run([solveSketch(sketch.id)])}
+        />
+        <RibSmall
+          icon="align"
+          label="Align View"
+          hint="Look straight down the sketch plane"
+          onClick={() => api.viewport()?.alignToSketch()}
+        />
+      </RibCol>
+      <RibBig
+        icon="finish"
+        label="Finish Sketch"
+        hint="Leave sketch mode"
+        onClick={() => api.activateSketch(null)}
+      />
+    </RibGroup>
   );
 }
 
@@ -493,6 +614,13 @@ export function ViewTab({ api }: { api: AppApi }) {
             hint="Draw collision shapes as wireframes"
             active={api.showCollisions}
             onClick={() => api.setShowCollisions(!api.showCollisions)}
+          />
+          <RibSmall
+            icon="sketch"
+            label="Sketches"
+            hint="Keep finished sketches visible in the 3D view"
+            active={api.showSketches}
+            onClick={() => api.setShowSketches(!api.showSketches)}
           />
         </RibCol>
       </RibGroup>

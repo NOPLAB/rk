@@ -81,6 +81,10 @@ pub enum Feature {
         name: String,
         /// Reference to the sketch
         sketch_id: Uuid,
+        /// Which of the sketch's regions to extrude ([`crate::sketch::Profile::id`]);
+        /// empty means every one of them
+        #[serde(default)]
+        profiles: Vec<Uuid>,
         /// Extrusion distance
         distance: f32,
         /// Extrusion direction
@@ -104,6 +108,10 @@ pub enum Feature {
         name: String,
         /// Reference to the sketch
         sketch_id: Uuid,
+        /// Which of the sketch's regions to revolve ([`crate::sketch::Profile::id`]);
+        /// empty means every one of them
+        #[serde(default)]
+        profiles: Vec<Uuid>,
         /// Axis origin
         axis_origin: Vec3,
         /// Axis direction
@@ -310,6 +318,7 @@ impl Feature {
             id: Uuid::new_v4(),
             name: name.into(),
             sketch_id,
+            profiles: Vec::new(),
             distance,
             direction,
             boolean_op: BooleanOp::New,
@@ -332,6 +341,7 @@ impl Feature {
             id: Uuid::new_v4(),
             name: name.into(),
             sketch_id,
+            profiles: Vec::new(),
             distance,
             direction,
             boolean_op,
@@ -347,6 +357,7 @@ impl Feature {
             id: Uuid::new_v4(),
             name: name.into(),
             sketch_id,
+            profiles: Vec::new(),
             axis_origin: axis.origin,
             axis_direction: axis.direction,
             angle,
@@ -448,6 +459,7 @@ impl Feature {
         match self {
             Feature::Extrude {
                 sketch_id,
+                profiles,
                 distance,
                 direction,
                 boolean_op,
@@ -462,14 +474,7 @@ impl Feature {
                             sketch_id
                         )))?;
 
-                // Extract profiles from sketch
-                let profiles = sketch.extract_profiles()?;
-
-                if profiles.is_empty() {
-                    return Err(FeatureError::InvalidFeature(
-                        "No closed profiles found".into(),
-                    ));
-                }
+                let regions = sketch.regions(profiles)?;
 
                 // Calculate extrusion direction and distance
                 let (extrude_dir, extrude_dist) = match direction {
@@ -478,28 +483,29 @@ impl Feature {
                     ExtrudeDirection::Symmetric => (sketch.plane.normal, *distance / 2.0),
                 };
 
-                // Extrude the first profile (for now)
-                let profile = &profiles[0];
-                let mut solid = kernel.extrude(
-                    profile,
-                    sketch.plane.origin,
-                    sketch.plane.x_axis,
-                    sketch.plane.y_axis,
-                    extrude_dir,
-                    extrude_dist,
-                )?;
+                let sweep = |dir: Vec3| -> FeatureResult<Solid> {
+                    let mut solids = regions.iter().map(|region| {
+                        kernel.extrude_region(
+                            region,
+                            sketch.plane.origin,
+                            sketch.plane.x_axis,
+                            sketch.plane.y_axis,
+                            dir,
+                            extrude_dist,
+                        )
+                    });
+                    let first = solids.next().expect("regions is never empty")?;
+                    solids.try_fold(first, |acc, next| {
+                        Ok(kernel.boolean(&acc, &next?, BooleanType::Union)?)
+                    })
+                };
+
+                let mut solid = sweep(extrude_dir)?;
 
                 // For symmetric, extrude in the other direction and union
                 if matches!(direction, ExtrudeDirection::Symmetric) {
-                    let solid2 = kernel.extrude(
-                        profile,
-                        sketch.plane.origin,
-                        sketch.plane.x_axis,
-                        sketch.plane.y_axis,
-                        -extrude_dir,
-                        extrude_dist,
-                    )?;
-                    solid = kernel.boolean(&solid, &solid2, BooleanType::Union)?;
+                    let other = sweep(-extrude_dir)?;
+                    solid = kernel.boolean(&solid, &other, BooleanType::Union)?;
                 }
 
                 // Apply boolean operation with target body
@@ -515,6 +521,7 @@ impl Feature {
 
             Feature::Revolve {
                 sketch_id,
+                profiles,
                 axis_origin,
                 axis_direction,
                 angle,
@@ -530,25 +537,23 @@ impl Feature {
                             sketch_id
                         )))?;
 
-                let profiles = sketch.extract_profiles()?;
-
-                if profiles.is_empty() {
-                    return Err(FeatureError::InvalidFeature(
-                        "No closed profiles found".into(),
-                    ));
-                }
-
+                let regions = sketch.regions(profiles)?;
                 let axis = Axis3D::new(*axis_origin, *axis_direction);
-                let profile = &profiles[0];
 
-                let mut solid = kernel.revolve(
-                    profile,
-                    sketch.plane.origin,
-                    sketch.plane.x_axis,
-                    sketch.plane.y_axis,
-                    &axis,
-                    *angle,
-                )?;
+                let mut swept = regions.iter().map(|region| {
+                    kernel.revolve_region(
+                        region,
+                        sketch.plane.origin,
+                        sketch.plane.x_axis,
+                        sketch.plane.y_axis,
+                        &axis,
+                        *angle,
+                    )
+                });
+                let first = swept.next().expect("regions is never empty")?;
+                let mut solid = swept.try_fold(first, |acc, next| {
+                    kernel.boolean(&acc, &next?, BooleanType::Union)
+                })?;
 
                 // Apply boolean operation
                 if let (Some(op), Some(target_id)) =

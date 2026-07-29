@@ -1,8 +1,9 @@
 // Modeless dialog for the extrude and revolve commands, floating over the
-// viewport the way Inventor's feature dialogs do.
+// viewport the way Fusion's feature dialogs do.
 //
-// It defaults to the sketch being edited, so the usual flow — draw, finish,
-// extrude — needs no picking at all.
+// It builds whatever regions the user clicked in the 3D view. With nothing
+// clicked it falls back to the sketch being edited and takes every region in
+// it, so the quick path — draw, finish, extrude — still needs no picking.
 
 import { useState } from "react";
 import type { Vec3 } from "../engine/api";
@@ -44,17 +45,27 @@ export function FeatureDialog({
   if (!snapshot) return null;
   const { sketches, body_ids, features } = snapshot;
 
-  // The sketch being edited wins until the user picks another one
+  // Clicking a region in the 3D view is the primary way in; the sketch being
+  // edited is the fallback, and the dropdown overrides both
+  const clicked = api.regionSelection;
   const sketchId =
-    picked ?? api.activeSketch?.id ?? sketches[sketches.length - 1]?.id ?? "";
+    picked ??
+    clicked[0]?.sketchId ??
+    api.activeSketch?.id ??
+    sketches[sketches.length - 1]?.id ??
+    "";
   const sketch = sketches.find((s) => s.id === sketchId) ?? null;
+  // Only regions of the sketch actually being built count
+  const regions = clicked
+    .filter((r) => r.sketchId === sketchId)
+    .map((r) => r.regionId);
 
   const targetBody = op === "New" ? null : target || body_ids[0] || null;
-  // Cut/Join need a body to act on, and every profile has to be closed
+  // Cut/Join need a body to act on, and there has to be something enclosed
   const blocked = !sketch
     ? "Pick a sketch to build from"
     : sketch.profile_count === 0
-      ? "That sketch has no closed profile"
+      ? "That sketch encloses nothing to build from"
       : op !== "New" && !targetBody
         ? "No body to combine with"
         : null;
@@ -67,7 +78,15 @@ export function FeatureDialog({
     const name = `${title} ${features.length + 1}`;
     if (kind === "extrude") {
       void api.run([
-        addExtrude(sketch.id, distance / 1000, direction, op, targetBody, name),
+        addExtrude(
+          sketch.id,
+          distance / 1000,
+          direction,
+          op,
+          targetBody,
+          name,
+          regions,
+        ),
       ]);
     } else {
       const dir = AXES.find((a) => a.label === axis)?.dir ?? [0, 0, 1];
@@ -80,9 +99,11 @@ export function FeatureDialog({
           op,
           targetBody,
           name,
+          regions,
         ),
       ]);
     }
+    api.setRegionSelection([]);
     api.setDialog(null);
   };
 
@@ -115,6 +136,15 @@ export function FeatureDialog({
               </option>
             ))}
           </select>
+        </label>
+
+        <label className="field">
+          <span>Regions</span>
+          <span className="small">
+            {regions.length > 0
+              ? `${regions.length} selected`
+              : `all ${sketch?.profile_count ?? 0}`}
+          </span>
         </label>
 
         {kind === "extrude" ? (

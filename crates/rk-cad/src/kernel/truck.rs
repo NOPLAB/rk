@@ -11,12 +11,13 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use truck_meshalgo::prelude::*;
-use truck_modeling::{Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
+use truck_modeling::{Face, Point3, Solid as TruckSolid, Vector3, Vertex, Wire, builder};
 use truck_shapeops::{and as solid_and, or as solid_or};
 
 use super::{
-    Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo, Solid,
-    StepExportOptions, StepImportOptions, StepImportResult, TessellatedMesh, Wire2D,
+    Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo,
+    Region2D, Solid, StepExportOptions, StepImportOptions, StepImportResult, TessellatedMesh,
+    Wire2D,
 };
 
 /// Truck-based CAD kernel
@@ -111,6 +112,49 @@ impl TruckKernel {
 
         edges.into()
     }
+
+    /// Build the planar face a sweep starts from, islands included.
+    ///
+    /// Truck takes a face's boundaries as one slice — outer first, holes
+    /// after — so a region with holes never needs a boolean subtraction,
+    /// which this kernel cannot do anyway.
+    fn create_face(
+        &self,
+        region: &Region2D,
+        plane_origin: Vec3,
+        plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
+    ) -> CadResult<Face> {
+        if region.outer.points.len() < 3 {
+            return Err(CadError::InvalidProfile(
+                "Profile must have at least 3 points".into(),
+            ));
+        }
+        let wires = |flip_holes: bool| -> Vec<Wire> {
+            let mut wires =
+                vec![self.create_wire(&region.outer, plane_origin, plane_x_axis, plane_y_axis)];
+            for hole in &region.holes {
+                let hole = if flip_holes {
+                    let mut reversed = hole.clone();
+                    reversed.points.reverse();
+                    reversed
+                } else {
+                    hole.clone()
+                };
+                wires.push(self.create_wire(&hole, plane_origin, plane_x_axis, plane_y_axis));
+            }
+            wires
+        };
+
+        match builder::try_attach_plane(&wires(false)) {
+            Ok(face) => Ok(face),
+            // The plane truck fits may face the other way, and then it is the
+            // holes that are wound wrongly — worth one retry before giving up
+            Err(first) => builder::try_attach_plane(&wires(true)).map_err(|_| {
+                CadError::OperationFailed(format!("Failed to create face: {:?}", first))
+            }),
+        }
+    }
 }
 
 impl Default for TruckKernel {
@@ -137,30 +181,36 @@ impl CadKernel for TruckKernel {
         direction: Vec3,
         distance: f32,
     ) -> CadResult<Solid> {
-        if profile.points.len() < 3 {
-            return Err(CadError::InvalidProfile(
-                "Profile must have at least 3 points".into(),
-            ));
-        }
+        self.extrude_region(
+            &Region2D::solid(profile.clone()),
+            plane_origin,
+            plane_x_axis,
+            plane_y_axis,
+            direction,
+            distance,
+        )
+    }
 
-        // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_x_axis, plane_y_axis);
-
-        // Create extrusion direction vector
+    fn extrude_region(
+        &self,
+        region: &Region2D,
+        plane_origin: Vec3,
+        plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
+        direction: Vec3,
+        distance: f32,
+    ) -> CadResult<Solid> {
+        let face = self.create_face(region, plane_origin, plane_x_axis, plane_y_axis)?;
         let dir = Vector3::new(
             direction.x as f64 * distance as f64,
             direction.y as f64 * distance as f64,
             direction.z as f64 * distance as f64,
         );
+        Ok(self.store_solid(builder::tsweep(&face, dir)))
+    }
 
-        // Create a face from the wire
-        let face = builder::try_attach_plane(&[wire])
-            .map_err(|e| CadError::OperationFailed(format!("Failed to create face: {:?}", e)))?;
-
-        // Extrude the face
-        let solid = builder::tsweep(&face, dir);
-
-        Ok(self.store_solid(solid))
+    fn supports_holes(&self) -> bool {
+        true
     }
 
     fn revolve(
@@ -172,16 +222,27 @@ impl CadKernel for TruckKernel {
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid> {
-        if profile.points.len() < 3 {
-            return Err(CadError::InvalidProfile(
-                "Profile must have at least 3 points".into(),
-            ));
-        }
+        self.revolve_region(
+            &Region2D::solid(profile.clone()),
+            plane_origin,
+            plane_x_axis,
+            plane_y_axis,
+            axis,
+            angle,
+        )
+    }
 
-        // Create wire from profile
-        let wire = self.create_wire(profile, plane_origin, plane_x_axis, plane_y_axis);
+    fn revolve_region(
+        &self,
+        region: &Region2D,
+        plane_origin: Vec3,
+        plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
+        axis: &Axis3D,
+        angle: f32,
+    ) -> CadResult<Solid> {
+        let face = self.create_face(region, plane_origin, plane_x_axis, plane_y_axis)?;
 
-        // Create axis
         let axis_origin = Point3::new(
             axis.origin.x as f64,
             axis.origin.y as f64,
@@ -192,10 +253,6 @@ impl CadKernel for TruckKernel {
             axis.direction.y as f64,
             axis.direction.z as f64,
         );
-
-        // Create a face from the wire
-        let face = builder::try_attach_plane(&[wire])
-            .map_err(|e| CadError::OperationFailed(format!("Failed to create face: {:?}", e)))?;
 
         // Revolve the face
         let solid = builder::rsweep(

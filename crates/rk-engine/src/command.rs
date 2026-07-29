@@ -175,12 +175,23 @@ pub enum Command {
     SolveSketch {
         sketch_id: Uuid,
     },
+    /// Construction geometry guides the sketch without enclosing any region —
+    /// centrelines, revolve axes, the circle a polygon is inscribed in
+    SetSketchConstruction {
+        sketch_id: Uuid,
+        entity_ids: Vec<Uuid>,
+        construction: bool,
+    },
 
     // ---- Feature ----
     AddExtrude {
         id: Option<Uuid>,
         name: Option<String>,
         sketch_id: Uuid,
+        /// Regions to extrude, by `Profile::id`; empty means every region the
+        /// sketch encloses
+        #[serde(default)]
+        profiles: Vec<Uuid>,
         distance: f32,
         direction: ExtrudeDirection,
         boolean_op: BooleanOp,
@@ -190,6 +201,9 @@ pub enum Command {
         id: Option<Uuid>,
         name: Option<String>,
         sketch_id: Uuid,
+        /// Regions to revolve, by `Profile::id`; empty means every region
+        #[serde(default)]
+        profiles: Vec<Uuid>,
         axis_origin: Vec3,
         axis_direction: Vec3,
         angle: f32,
@@ -322,6 +336,13 @@ impl Command {
             Command::AddSketchConstraint { .. } => "Add Constraint",
             Command::DeleteSketchConstraint { .. } => "Delete Constraint",
             Command::SolveSketch { .. } => "Solve Sketch",
+            Command::SetSketchConstruction { construction, .. } => {
+                if *construction {
+                    "Make Construction"
+                } else {
+                    "Make Normal"
+                }
+            }
             Command::AddExtrude { .. } => "Extrude",
             Command::AddRevolve { .. } => "Revolve",
             Command::DeleteFeature { .. } => "Delete Feature",

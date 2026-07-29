@@ -8,12 +8,16 @@ import { Icon, type IconName } from "./icons";
 export function RibGroup({
   name,
   children,
+  pinned,
 }: {
   name: string;
   children: ReactNode;
+  /** Stays against the right edge when the ribbon is too wide to fit —
+   *  a tab's way out must never be the thing that scrolls off */
+  pinned?: boolean;
 }) {
   return (
-    <div className="rb-group">
+    <div className={pinned ? "rb-group pinned" : "rb-group"}>
       <div className="rb-group-body">{children}</div>
       <div className="rb-group-name">{name}</div>
     </div>

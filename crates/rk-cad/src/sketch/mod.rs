@@ -7,10 +7,12 @@
 
 mod constraint;
 mod entity;
+mod profile;
 mod solver;
 
 pub use constraint::*;
 pub use entity::*;
+pub use profile::Profile;
 pub use solver::*;
 
 use glam::{Mat4, Quat, Vec2, Vec3};
@@ -336,143 +338,71 @@ impl Sketch {
 
     // ============== Profile Extraction ==============
 
+    /// Every closed region the sketch's curves enclose, largest first
+    ///
+    /// Curves are split wherever they cross, so a line drawn across a
+    /// rectangle really does divide it, and a loop nested inside another
+    /// becomes its hole. Construction geometry takes no part.
+    pub fn profiles(&self) -> Vec<Profile> {
+        profile::extract(self)
+    }
+
+    /// Look a region up by the ID [`Sketch::profiles`] gave it
+    pub fn profile(&self, id: Uuid) -> Option<Profile> {
+        self.profiles().into_iter().find(|p| p.id == id)
+    }
+
     /// Extract closed profiles from the sketch for extrusion
     ///
-    /// Returns a list of closed wire profiles (excluding construction geometry)
+    /// The kernel-facing view of [`Sketch::profiles`]: outer boundaries only,
+    /// as flat wires. Prefer [`Sketch::regions`] where holes matter.
     pub fn extract_profiles(&self) -> Result<Vec<crate::kernel::Wire2D>, SketchError> {
-        // For now, implement a simple profile extraction
-        // that works with lines forming closed loops
-
-        let mut profiles = Vec::new();
-        let mut used_entities: HashSet<Uuid> = HashSet::new();
-
-        // Find all line entities that are not construction
-        let lines: Vec<&SketchEntity> = self
-            .entities
-            .values()
-            .filter(|e| matches!(e, SketchEntity::Line { .. }) && !self.is_construction(e.id()))
-            .collect();
-
-        // Try to form closed loops
-        for start_line in &lines {
-            if used_entities.contains(&start_line.id()) {
-                continue;
-            }
-
-            if let Some(profile) = self.trace_closed_loop(start_line.id(), &used_entities) {
-                for id in &profile {
-                    used_entities.insert(*id);
-                }
-
-                // Convert to Wire2D
-                let points = self.entities_to_points(&profile)?;
-                if points.len() >= 3 {
-                    profiles.push(crate::kernel::Wire2D::new(points, true));
-                }
-            }
-        }
-
-        // Also check for circles (single entity profiles)
-        for entity in self.entities.values() {
-            if self.is_construction(entity.id()) {
-                continue;
-            }
-
-            if let SketchEntity::Circle { center, radius, .. } = entity {
-                let center_pos = self.get_point_position(*center)?;
-                profiles.push(crate::kernel::Wire2D::circle(center_pos, *radius, 32));
-            }
-        }
-
+        let profiles = self.profiles();
         if profiles.is_empty() {
             return Err(SketchError::ProfileExtractionFailed(
                 "No closed profiles found".into(),
             ));
         }
-
-        Ok(profiles)
+        Ok(profiles
+            .into_iter()
+            .map(|p| crate::kernel::Wire2D::new(p.outer, true))
+            .collect())
     }
 
-    /// Trace a closed loop starting from a line
-    fn trace_closed_loop(&self, start_id: Uuid, used: &HashSet<Uuid>) -> Option<Vec<Uuid>> {
-        let start = self.entities.get(&start_id)?;
-        let SketchEntity::Line {
-            start: start_point,
-            end: first_end,
-            ..
-        } = start
-        else {
-            return None;
+    /// Closed regions as kernel faces, holes included
+    ///
+    /// `wanted` selects regions by [`Profile::id`]; an empty list means all of
+    /// them, which is what a feature drawn before profile selection existed
+    /// still asks for.
+    pub fn regions(&self, wanted: &[Uuid]) -> Result<Vec<crate::kernel::Region2D>, SketchError> {
+        let all = self.profiles();
+        if all.is_empty() {
+            return Err(SketchError::ProfileExtractionFailed(
+                "No closed profiles found".into(),
+            ));
+        }
+        let picked: Vec<Profile> = if wanted.is_empty() {
+            all
+        } else {
+            let kept: Vec<Profile> = all.into_iter().filter(|p| wanted.contains(&p.id)).collect();
+            if kept.is_empty() {
+                return Err(SketchError::ProfileExtractionFailed(
+                    "The selected regions are no longer part of this sketch".into(),
+                ));
+            }
+            kept
         };
-
-        let mut loop_entities = vec![start_id];
-        let mut current_end = *first_end;
-        let target = *start_point;
-
-        // Follow connected lines
-        for _ in 0..100 {
-            // Limit iterations
-            if current_end == target {
-                return Some(loop_entities);
-            }
-
-            // Find next connected line
-            let next = self.entities.values().find(|e| {
-                if used.contains(&e.id()) || loop_entities.contains(&e.id()) {
-                    return false;
-                }
-                if let SketchEntity::Line { start, end, .. } = e {
-                    *start == current_end || *end == current_end
-                } else {
-                    false
-                }
-            });
-
-            match next {
-                Some(SketchEntity::Line { id, start, end, .. }) => {
-                    loop_entities.push(*id);
-                    current_end = if *start == current_end { *end } else { *start };
-                }
-                _ => return None,
-            }
-        }
-
-        None
-    }
-
-    /// Convert entity IDs to a list of 2D points
-    fn entities_to_points(&self, entity_ids: &[Uuid]) -> Result<Vec<Vec2>, SketchError> {
-        let mut points = Vec::new();
-
-        for id in entity_ids {
-            let entity = self
-                .entities
-                .get(id)
-                .ok_or(SketchError::EntityNotFound(*id))?;
-
-            if let SketchEntity::Line { start, .. } = entity {
-                let pos = self.get_point_position(*start)?;
-                points.push(pos);
-            }
-        }
-
-        Ok(points)
-    }
-
-    /// Get the position of a point entity
-    fn get_point_position(&self, id: Uuid) -> Result<Vec2, SketchError> {
-        let entity = self
-            .entities
-            .get(&id)
-            .ok_or(SketchError::EntityNotFound(id))?;
-
-        match entity {
-            SketchEntity::Point { position, .. } => Ok(*position),
-            _ => Err(SketchError::InvalidConstraint(format!(
-                "Entity {} is not a point",
-                id
-            ))),
-        }
+        Ok(picked
+            .into_iter()
+            .map(|p| crate::kernel::Region2D {
+                outer: crate::kernel::Wire2D::new(p.outer, true),
+                holes: p
+                    .holes
+                    .into_iter()
+                    .map(|h| crate::kernel::Wire2D::new(h, true))
+                    .collect(),
+            })
+            .collect())
     }
 
     // ============== Helper Methods ==============

@@ -6,7 +6,9 @@
 // intersected with the plane and converted back to 2D.
 
 import * as THREE from "three";
-import type { SketchGeometry, SketchInfo, Vec2 } from "../engine/api";
+import type { SketchGeometry, SketchInfo, SketchRegion, Vec2 } from "../engine/api";
+import { ellipsePolyline, splinePolyline } from "./sketchGeom";
+import type { SketchPreview } from "./sketchTools";
 
 const CURVE_SEGMENTS = 72;
 /** Pixel radius for snapping onto an existing point / picking an entity */
@@ -16,32 +18,34 @@ const PICK_PX = 8;
 const GRID_EXTENT = 0.5;
 const GRID_STEP = 0.025;
 
-export type SketchPreview =
-  | { kind: "line"; from: Vec2; to: Vec2 }
-  | { kind: "rect"; from: Vec2; to: Vec2 }
-  | { kind: "circle"; center: Vec2; radius: number };
-
 export interface SnapResult {
   /** Sketch coordinates, moved onto an existing point when one is in reach */
   position: Vec2;
   /** The point to reuse — sharing IDs is what makes a profile closed */
   pointId: string | null;
+  /** Every point in reach, nearest first: a tool that needs a particular kind
+   *  of vertex (fillet wants one joining two lines) can look past the closest */
+  nearby: string[];
 }
 
 /** Sketch coordinates → canvas pixels */
 export type Projector = (u: number, v: number) => [number, number];
 
-const EMPTY: SketchGeometry = {
+export const EMPTY_GEOMETRY: SketchGeometry = {
   points: [],
   lines: [],
   circles: [],
   arcs: [],
+  ellipses: [],
+  splines: [],
+  regions: [],
   constraints: [],
 };
 
 export class SketchLayer {
   readonly group = new THREE.Group();
 
+  private fills = new RegionFills(0x4a7fc4, 0.16);
   private grid = lineObject(0x363b42, true);
   private curves = lineObject(0x8fb8ff, false);
   private construction = lineObject(0x5d6570, false);
@@ -57,19 +61,20 @@ export class SketchLayer {
   private hoverMarker = pointObject(0x4fd18b, 9);
 
   private info: SketchInfo | null = null;
-  private geom: SketchGeometry = EMPTY;
+  private geom: SketchGeometry = EMPTY_GEOMETRY;
   private selection: string[] = [];
   private hovered: string[] = [];
   private plane = new THREE.Plane();
   private toLocal = new THREE.Matrix4();
   /** Hit-test polylines in sketch coordinates, one per curve entity */
-  private outlines: { id: string; pts: Vec2[] }[] = [];
+  private outlines: Outline[] = [];
 
   constructor() {
     this.group.matrixAutoUpdate = false;
     this.group.visible = false;
     const stack = [
       this.grid,
+      this.fills.group,
       this.curves,
       this.construction,
       this.hover,
@@ -98,13 +103,17 @@ export class SketchLayer {
     return this.info?.id ?? null;
   }
 
+  get regions(): SketchRegion[] {
+    return this.geom.regions;
+  }
+
   setSketch(info: SketchInfo | null) {
     this.info = info;
     this.group.visible = info !== null;
     if (!info) {
       this.selection = [];
       this.hovered = [];
-      this.setGeometry(EMPTY);
+      this.setGeometry(EMPTY_GEOMETRY);
       this.setPreview(null);
       this.setCursor(null);
       return;
@@ -124,22 +133,10 @@ export class SketchLayer {
     this.geom = geom;
     const solid: number[] = [];
     const dashed: number[] = [];
-    this.outlines = [];
+    this.outlines = outlinesOf(geom);
 
-    for (const l of geom.lines) {
-      const pts: Vec2[] = [l.start, l.end];
-      this.outlines.push({ id: l.id, pts });
-      pushPolyline(l.construction ? dashed : solid, pts, false);
-    }
-    for (const c of geom.circles) {
-      const pts = arcPoints(c.center, c.radius, 0, Math.PI * 2);
-      this.outlines.push({ id: c.id, pts });
-      pushPolyline(c.construction ? dashed : solid, pts, true);
-    }
-    for (const a of geom.arcs) {
-      const pts = arcPoints(a.center, a.radius, a.start_angle, a.end_angle);
-      this.outlines.push({ id: a.id, pts });
-      pushPolyline(a.construction ? dashed : solid, pts, false);
+    for (const outline of this.outlines) {
+      pushPolyline(outline.construction ? dashed : solid, outline.pts, outline.closed);
     }
 
     setSegments(this.curves, solid);
@@ -148,6 +145,7 @@ export class SketchLayer {
       this.points,
       geom.points.flatMap((p) => [p.position[0], p.position[1], 0]),
     );
+    this.fills.set(geom.regions);
     // Re-apply against the rebuilt outlines; entities that were deleted or
     // undone away simply stop matching
     this.setHighlight(this.selection);
@@ -160,16 +158,8 @@ export class SketchLayer {
       return;
     }
     const out: number[] = [];
-    if (preview.kind === "line") {
-      pushPolyline(out, [preview.from, preview.to], false);
-    } else if (preview.kind === "rect") {
-      pushPolyline(out, rectPoints(preview.from, preview.to), true);
-    } else {
-      pushPolyline(
-        out,
-        arcPoints(preview.center, preview.radius, 0, Math.PI * 2),
-        true,
-      );
+    for (const stroke of preview.strokes) {
+      pushPolyline(out, stroke.pts, stroke.closed);
     }
     setSegments(this.preview, out);
   }
@@ -191,6 +181,15 @@ export class SketchLayer {
     this.paint(this.hover, this.hoverMarker, entityIds);
   }
 
+  /** Regions the user has clicked, ready for an extrude */
+  setSelectedRegions(regionIds: string[]) {
+    this.fills.setSelected(regionIds);
+  }
+
+  setHoveredRegion(regionId: string | null) {
+    this.fills.setHovered(regionId);
+  }
+
   private paint(
     curves: THREE.LineSegments,
     points: THREE.Points,
@@ -199,11 +198,7 @@ export class SketchLayer {
     const wanted = new Set(entityIds);
     const out: number[] = [];
     for (const outline of this.outlines) {
-      if (!wanted.has(outline.id)) continue;
-      const closed =
-        this.geom.circles.some((c) => c.id === outline.id) &&
-        outline.pts.length > 2;
-      pushPolyline(out, outline.pts, closed);
+      if (wanted.has(outline.id)) pushPolyline(out, outline.pts, outline.closed);
     }
     setSegments(curves, out);
     setPoints(
@@ -225,18 +220,27 @@ export class SketchLayer {
 
   /** Pull `position` onto a nearby existing point, reporting its ID */
   snap(position: Vec2, project: Projector): SnapResult {
+    const near = this.pointsNear(position, project);
+    const best = near[0];
+    return best
+      ? { position: best.position, pointId: best.id, nearby: near.map((p) => p.id) }
+      : { position, pointId: null, nearby: [] };
+  }
+
+  /** Every point within snapping distance, nearest first */
+  private pointsNear(
+    position: Vec2,
+    project: Projector,
+  ): { id: string; position: Vec2; distance: number }[] {
     const [px, py] = project(position[0], position[1]);
-    let best: SnapResult = { position, pointId: null };
-    let bestDist = SNAP_PX;
+    const out: { id: string; position: Vec2; distance: number }[] = [];
     for (const p of this.geom.points) {
       const [qx, qy] = project(p.position[0], p.position[1]);
-      const d = Math.hypot(qx - px, qy - py);
-      if (d < bestDist) {
-        bestDist = d;
-        best = { position: p.position, pointId: p.id };
-      }
+      const distance = Math.hypot(qx - px, qy - py);
+      if (distance < SNAP_PX) out.push({ id: p.id, position: p.position, distance });
     }
-    return best;
+    out.sort((a, b) => a.distance - b.distance);
+    return out;
   }
 
   /** Entity under the pointer: points win over curves */
@@ -244,9 +248,11 @@ export class SketchLayer {
     let bestId: string | null = null;
     let bestDist = PICK_PX;
     for (const o of this.outlines) {
-      for (let i = 0; i + 1 < o.pts.length; i++) {
+      const n = o.pts.length;
+      const last = o.closed ? n : n - 1;
+      for (let i = 0; i < last; i++) {
         const a = project(o.pts[i][0], o.pts[i][1]);
-        const b = project(o.pts[i + 1][0], o.pts[i + 1][1]);
+        const b = project(o.pts[(i + 1) % n][0], o.pts[(i + 1) % n][1]);
         const d = distToSegment(px, py, a, b);
         if (d < bestDist) {
           bestDist = d;
@@ -266,7 +272,13 @@ export class SketchLayer {
     return bestId;
   }
 
+  /** Innermost region containing `p`, in sketch coordinates */
+  pickRegion(p: Vec2): string | null {
+    return pickRegionAt(this.geom.regions, p);
+  }
+
   dispose() {
+    this.fills.dispose();
     for (const obj of [
       this.grid,
       this.curves,
@@ -285,7 +297,174 @@ export class SketchLayer {
   }
 }
 
+// ---- region fills -------------------------------------------------------
+
+/**
+ * Translucent patches over the areas a sketch encloses. They are what the
+ * user clicks before extruding, so they are meshes rather than lines: Three's
+ * ShapeGeometry triangulates the outer loop with its holes cut out.
+ */
+export class RegionFills {
+  readonly group = new THREE.Group();
+  private meshes = new Map<string, THREE.Mesh>();
+  private base: THREE.MeshBasicMaterial;
+  private selected: THREE.MeshBasicMaterial;
+  private hovered: THREE.MeshBasicMaterial;
+  private picked = new Set<string>();
+  private under: string | null = null;
+
+  constructor(color: number, opacity: number) {
+    const material = (hex: number, alpha: number) =>
+      new THREE.MeshBasicMaterial({
+        color: hex,
+        transparent: true,
+        opacity: alpha,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+    this.base = material(color, opacity);
+    this.selected = material(0xffa53c, 0.34);
+    this.hovered = material(0x7fc4ff, 0.28);
+  }
+
+  set(regions: SketchRegion[]) {
+    this.clear();
+    for (const region of regions) {
+      const shape = new THREE.Shape(
+        region.outer.map((p) => new THREE.Vector2(p[0], p[1])),
+      );
+      shape.holes = region.holes.map(
+        (hole) => new THREE.Path(hole.map((p) => new THREE.Vector2(p[0], p[1]))),
+      );
+      const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), this.base);
+      mesh.userData.regionId = region.id;
+      this.meshes.set(region.id, mesh);
+      this.group.add(mesh);
+    }
+    this.repaint();
+  }
+
+  setSelected(regionIds: string[]) {
+    this.picked = new Set(regionIds);
+    this.repaint();
+  }
+
+  setHovered(regionId: string | null) {
+    if (this.under === regionId) return;
+    this.under = regionId;
+    this.repaint();
+  }
+
+  setVisible(visible: boolean) {
+    this.group.visible = visible;
+  }
+
+  private repaint() {
+    for (const [id, mesh] of this.meshes) {
+      mesh.material = this.picked.has(id)
+        ? this.selected
+        : id === this.under
+          ? this.hovered
+          : this.base;
+    }
+  }
+
+  private clear() {
+    for (const mesh of this.meshes.values()) {
+      this.group.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.meshes.clear();
+  }
+
+  dispose() {
+    this.clear();
+    this.base.dispose();
+    this.selected.dispose();
+    this.hovered.dispose();
+  }
+}
+
+/** Innermost (smallest) region containing `p` */
+export function pickRegionAt(regions: SketchRegion[], p: Vec2): string | null {
+  let best: SketchRegion | null = null;
+  for (const region of regions) {
+    if (!insideLoop(region.outer, p)) continue;
+    if (region.holes.some((hole) => insideLoop(hole, p))) continue;
+    if (!best || region.area < best.area) best = region;
+  }
+  return best?.id ?? null;
+}
+
+function insideLoop(loop: Vec2[], p: Vec2): boolean {
+  let inside = false;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+    const a = loop[i];
+    const b = loop[j];
+    if (
+      a[1] > p[1] !== b[1] > p[1] &&
+      p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 // ---- geometry helpers ---------------------------------------------------
+
+export interface Outline {
+  id: string;
+  pts: Vec2[];
+  closed: boolean;
+  construction: boolean;
+}
+
+/** Every curve as a polyline, for drawing and for hit-testing */
+export function outlinesOf(geom: SketchGeometry): Outline[] {
+  const out: Outline[] = [];
+  for (const l of geom.lines) {
+    out.push({
+      id: l.id,
+      pts: [l.start, l.end],
+      closed: false,
+      construction: l.construction,
+    });
+  }
+  for (const c of geom.circles) {
+    out.push({
+      id: c.id,
+      pts: arcPoints(c.center, c.radius, 0, Math.PI * 2),
+      closed: true,
+      construction: c.construction,
+    });
+  }
+  for (const a of geom.arcs) {
+    out.push({
+      id: a.id,
+      pts: arcPoints(a.center, a.radius, a.start_angle, a.end_angle),
+      closed: false,
+      construction: a.construction,
+    });
+  }
+  for (const e of geom.ellipses) {
+    out.push({
+      id: e.id,
+      pts: ellipsePolyline(e.center, e.major_radius, e.minor_radius, e.rotation),
+      closed: true,
+      construction: e.construction,
+    });
+  }
+  for (const s of geom.splines) {
+    out.push({
+      id: s.id,
+      pts: splinePolyline(s.points, s.closed),
+      closed: s.closed,
+      construction: s.construction,
+    });
+  }
+  return out;
+}
 
 /** Sketch geometry sits on top of solids so it stays visible while drawing */
 function lineObject(color: number, depthTest: boolean): THREE.LineSegments {
@@ -315,7 +494,7 @@ function pointObject(color: number, size: number): THREE.Points {
   return obj;
 }
 
-function setSegments(obj: THREE.LineSegments, positions: number[]) {
+export function setSegments(obj: THREE.LineSegments, positions: number[]) {
   obj.geometry.dispose();
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -332,7 +511,7 @@ function setPoints(obj: THREE.Points, positions: number[]) {
 }
 
 /** Append a polyline as line-segment pairs (`closed` adds the wrap-around) */
-function pushPolyline(out: number[], pts: Vec2[], closed: boolean) {
+export function pushPolyline(out: number[], pts: Vec2[], closed: boolean) {
   const n = pts.length;
   const last = closed ? n : n - 1;
   for (let i = 0; i < last; i++) {
@@ -359,11 +538,6 @@ function arcPoints(
     pts.push([center[0] + radius * Math.cos(a), center[1] + radius * Math.sin(a)]);
   }
   return pts;
-}
-
-/** Axis-aligned rectangle corners, counter-clockwise from `a` */
-export function rectPoints(a: Vec2, b: Vec2): Vec2[] {
-  return [a, [b[0], a[1]], b, [a[0], b[1]]];
 }
 
 function gridSegments(): number[] {

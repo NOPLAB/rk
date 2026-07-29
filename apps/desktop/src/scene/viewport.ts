@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import {
+  allSketchGeometry,
   getBodyMesh,
   getPartMesh,
   sceneSnapshot,
@@ -24,7 +25,10 @@ import {
   type SketchInfo,
   type Vec2,
 } from "../engine/api";
-import { SketchLayer, type Projector, type SketchPreview } from "./sketchLayer";
+import { IdleSketches, type RegionPick } from "./idleSketches";
+import { PlanePicker, type OriginPlane, type PlanePick } from "./planePicker";
+import { SketchLayer, type Projector } from "./sketchLayer";
+import type { SketchPreview } from "./sketchTools";
 import { AxisTriad, CUBE_MARGIN, CUBE_SIZE, ViewCube } from "./viewCube";
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -58,8 +62,12 @@ export interface SketchHit {
   position: Vec2;
   /** The snapped point's ID, if any — reuse it to keep profiles connected */
   pointId: string | null;
+  /** Every point within snapping distance, nearest first */
+  pointIds: string[];
   /** Entity under the pointer (for the select tool) */
   entityId: string | null;
+  /** Enclosed area under the pointer, when the click missed every curve */
+  regionId: string | null;
 }
 
 export class Viewport {
@@ -75,6 +83,10 @@ export class Viewport {
   private bodyMeshes = new Map<string, THREE.Mesh>();
   private selected: string | null = null;
   private sketch = new SketchLayer();
+  private idle = new IdleSketches();
+  private planes = new PlanePicker();
+  /** Modal "click something in the 3D view" state */
+  private pickingPlane = false;
   private sketchInfo: SketchInfo | null = null;
   private grid: THREE.GridHelper;
   private cube = new ViewCube();
@@ -105,6 +117,12 @@ export class Viewport {
   onSketchMove: ((hit: SketchHit) => void) | null = null;
   /** The active sketch's geometry, whenever it is (re-)pulled from the engine */
   onSketchGeometry: ((geometry: SketchGeometry) => void) | null = null;
+  /** A plane was picked in the 3D view; the pick mode has already ended */
+  onPlanePick: ((pick: PlanePick) => void) | null = null;
+  /** What the pointer is over while picking a plane (`null` = nothing) */
+  onPlaneHover: ((pick: PlanePick | null) => void) | null = null;
+  /** A filled region of a finished sketch was clicked (`null` = empty space) */
+  onRegionPick: ((pick: RegionPick | null, additive: boolean) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -134,6 +152,8 @@ export class Viewport {
     this.scene.add(fill);
 
     this.scene.add(this.sketch.group);
+    this.scene.add(this.idle.group);
+    this.scene.add(this.planes.group);
     this.collisions.visible = false;
     this.scene.add(this.collisions);
 
@@ -191,17 +211,42 @@ export class Viewport {
         if (dir) this.lookFrom(dir);
         return;
       }
+      if (this.pickingPlane) {
+        const pick = this.planes.probe(this.rayThrough(e), this.solids(), false);
+        if (pick) {
+          this.setPlanePick(false);
+          this.onPlanePick?.(pick);
+        }
+        return;
+      }
       if (this.sketch.active) {
         const hit = this.sketchHit(e);
         if (hit) this.onSketchClick?.(hit, e.shiftKey);
         return;
       }
+      // A filled region wins over the solid behind it: clicking one is how a
+      // finished sketch is aimed at an extrude
+      const region = this.idle.pick(this.rayThrough(e));
+      if (region) {
+        this.onRegionPick?.(region, e.shiftKey);
+        return;
+      }
+      this.onRegionPick?.(null, e.shiftKey);
       this.onPick?.(this.pick(e));
     }, { signal });
     canvas.addEventListener("pointermove", (e) => {
       const onCube = this.cubeLocal(e);
       this.cube.setHover(onCube ? onCube.x : null, onCube?.y ?? 0);
-      if (!this.sketch.active) return;
+      if (this.pickingPlane) {
+        this.onPlaneHover?.(
+          this.planes.probe(this.rayThrough(e), this.solids(), true),
+        );
+        return;
+      }
+      if (!this.sketch.active) {
+        this.idle.setHovered(this.idle.pick(this.rayThrough(e)));
+        return;
+      }
       const hit = this.sketchHit(e);
       if (!hit) return;
       this.sketch.setCursor(hit.pointId ? hit.position : null);
@@ -234,6 +279,8 @@ export class Viewport {
     this.gizmo.dispose();
     this.controls.dispose();
     this.sketch.dispose();
+    this.idle.dispose();
+    this.planes.dispose();
     this.cube.dispose();
     this.triad.dispose();
     this.setCollisions([]);
@@ -342,8 +389,9 @@ export class Viewport {
 
   private attachGizmo() {
     const mesh = this.selected ? this.partMeshes.get(this.selected) : undefined;
-    // Sketch mode owns the pointer; a gizmo on top of it would fight for clicks
-    if (this.gizmoMode === "none" || this.sketch.active || !mesh) {
+    // Sketch mode and plane picking own the pointer; a gizmo on top of them
+    // would fight for clicks
+    if (this.gizmoMode === "none" || this.sketch.active || this.pickingPlane || !mesh) {
       this.gizmo.detach();
       this.gizmo.getHelper().visible = false;
       return;
@@ -381,6 +429,53 @@ export class Viewport {
     this.collisions.visible = visible;
   }
 
+  // ---- picking a plane --------------------------------------------------
+
+  /** Start (or abandon) the modal "click a plane or a face" interaction */
+  setPlanePick(active: boolean) {
+    this.pickingPlane = active;
+    if (active) this.planes.begin(this.sceneBounds());
+    else this.planes.end();
+    this.renderer.domElement.style.cursor = active ? "crosshair" : "";
+    this.attachGizmo();
+  }
+
+  get pickingPlaneActive(): boolean {
+    return this.pickingPlane;
+  }
+
+  /** Light up an origin plane from outside — the browser tree hovers them */
+  setPlaneHighlight(which: OriginPlane | null) {
+    this.planes.setHighlight(which);
+  }
+
+  /** Everything a face pick may land on */
+  private solids(): THREE.Mesh[] {
+    return [...this.bodyMeshes.values(), ...this.partMeshes.values()];
+  }
+
+  private rayThrough(e: PointerEvent): THREE.Raycaster {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.raycaster.setFromCamera(
+      new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      ),
+      this.camera,
+    );
+    return this.raycaster;
+  }
+
+  private sceneBounds(): THREE.Box3 | null {
+    const box = new THREE.Box3();
+    let any = false;
+    for (const mesh of this.solids()) {
+      box.expandByObject(mesh);
+      any = true;
+    }
+    return any && !box.isEmpty() ? box : null;
+  }
+
   // ---- sketch mode ------------------------------------------------------
 
   /** Enter sketch mode on `info`, or leave it with `null` */
@@ -389,12 +484,18 @@ export class Viewport {
     this.sketchInfo = info;
     this.sketch.setSketch(info);
     this.attachGizmo();
+    await this.refreshIdleSketches();
     if (!info) {
       this.camera.up.set(0, 0, 1);
       return;
     }
     await this.refreshSketch();
     if (entered) this.alignToSketch();
+  }
+
+  /** Which sketch is being edited, if any */
+  get activeSketchId(): string | null {
+    return this.sketch.sketchId;
   }
 
   /** Re-pull the active sketch's entities from the engine */
@@ -410,6 +511,28 @@ export class Viewport {
     } catch (e) {
       console.warn(`sketch ${id} geometry:`, e);
     }
+  }
+
+  /** Redraw every sketch that is not being edited */
+  async refreshIdleSketches() {
+    try {
+      this.idle.set(await allSketchGeometry(), this.sketch.sketchId);
+    } catch (e) {
+      console.warn("sketch geometry:", e);
+    }
+  }
+
+  setSketchesVisible(visible: boolean) {
+    this.idle.setVisible(visible);
+  }
+
+  /** Regions picked for an extrude, in the active sketch and outside it */
+  setRegionSelection(selection: RegionPick[]) {
+    this.idle.setSelection(selection);
+    const active = this.sketch.sketchId;
+    this.sketch.setSelectedRegions(
+      active ? selection.filter((s) => s.sketchId === active).map((s) => s.regionId) : [],
+    );
   }
 
   setSketchPreview(preview: SketchPreview | null) {
@@ -452,10 +575,14 @@ export class Viewport {
     if (!raw) return null;
     const project = this.sketchProjector(rect.width, rect.height);
     const snapped = this.sketch.snap(raw, project);
+    const entityId = this.sketch.pick(px, py, project);
     return {
       position: snapped.position,
       pointId: snapped.pointId,
-      entityId: this.sketch.pick(px, py, project),
+      pointIds: snapped.nearby,
+      entityId,
+      // Curves win; the region is what a click on open space inside one means
+      regionId: entityId ? null : this.sketch.pickRegion(raw),
     };
   }
 
@@ -502,6 +629,11 @@ export class Viewport {
         case "sketch_geometry_changed":
         case "sketch_solved":
           if (ev.sketch_id === this.sketch.sketchId) await this.refreshSketch();
+          await this.refreshIdleSketches();
+          break;
+        case "sketch_added":
+        case "sketch_removed":
+          await this.refreshIdleSketches();
           break;
         default:
           // list/history/joint changes are handled by the React layer
@@ -522,6 +654,7 @@ export class Viewport {
     // The sketch may have been undone away; the React layer decides whether
     // to stay in sketch mode, we just resync what is still there
     await this.refreshSketch();
+    await this.refreshIdleSketches();
     if (fit && (snap.parts.length > 0 || snap.body_ids.length > 0)) {
       this.fitCamera();
     }
@@ -596,6 +729,7 @@ export class Viewport {
         makeMaterial(payload.color),
       );
       mesh.matrixAutoUpdate = false;
+      mesh.userData.bodyId = bodyId;
       this.bodyMeshes.set(bodyId, mesh);
       this.scene.add(mesh);
     } catch (e) {

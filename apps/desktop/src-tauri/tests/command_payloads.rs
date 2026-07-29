@@ -452,6 +452,123 @@ fn sketch_payloads_apply() {
     assert!(eng.sketch(sketch_id).is_none());
 }
 
+/// The curve tools beyond line/rectangle/circle, plus the construction toggle
+#[test]
+fn curve_and_construction_payloads_apply() {
+    let mut eng = engine();
+    let sketch_id = create_sketch(&mut eng);
+
+    let (centre, start, end, arc) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let (ellipse_centre, ellipse) = (Uuid::new_v4(), Uuid::new_v4());
+    let knots: Vec<Uuid> = (0..4).map(|_| Uuid::new_v4()).collect();
+    let spline = Uuid::new_v4();
+
+    apply(
+        &mut eng,
+        json!({
+            "type": "add_sketch_entities",
+            "sketch_id": sketch_id,
+            "entities": [
+                {"Point": {"id": centre, "position": [0.0, 0.0]}},
+                {"Point": {"id": start, "position": [0.02, 0.0]}},
+                {"Point": {"id": end, "position": [0.0, 0.02]}},
+                {"Arc": {"id": arc, "center": centre, "start": start, "end": end, "radius": 0.02}},
+                {"Point": {"id": ellipse_centre, "position": [0.1, 0.0]}},
+                {"Ellipse": {
+                    "id": ellipse,
+                    "center": ellipse_centre,
+                    "major_radius": 0.03,
+                    "minor_radius": 0.015,
+                    "rotation": 0.5,
+                }},
+                {"Point": {"id": knots[0], "position": [0.2, 0.0]}},
+                {"Point": {"id": knots[1], "position": [0.22, 0.02]}},
+                {"Point": {"id": knots[2], "position": [0.25, 0.0]}},
+                {"Point": {"id": knots[3], "position": [0.22, -0.02]}},
+                {"Spline": {"id": spline, "control_points": knots, "closed": true}},
+            ],
+        }),
+    );
+
+    let sketch = eng.sketch(sketch_id).expect("sketch exists");
+    assert!(matches!(
+        sketch.get_entity(arc),
+        Some(rk_cad::SketchEntity::Arc { .. })
+    ));
+    assert!(matches!(
+        sketch.get_entity(ellipse),
+        Some(rk_cad::SketchEntity::Ellipse { .. })
+    ));
+    assert!(matches!(
+        sketch.get_entity(spline),
+        Some(rk_cad::SketchEntity::Spline { .. })
+    ));
+    // The ellipse and the closed spline each enclose an area
+    assert!(
+        sketch.profiles().len() >= 2,
+        "closed curves enclose regions: {:?}",
+        sketch.profiles().len(),
+    );
+
+    apply(
+        &mut eng,
+        json!({
+            "type": "set_sketch_construction",
+            "sketch_id": sketch_id,
+            "entity_ids": [ellipse],
+            "construction": true,
+        }),
+    );
+    assert!(eng.sketch(sketch_id).unwrap().is_construction(ellipse));
+
+    apply(
+        &mut eng,
+        json!({
+            "type": "set_sketch_construction",
+            "sketch_id": sketch_id,
+            "entity_ids": [ellipse],
+            "construction": false,
+        }),
+    );
+    assert!(!eng.sketch(sketch_id).unwrap().is_construction(ellipse));
+}
+
+/// Sketching on a solid's face sends a frame that is not axis-aligned
+#[test]
+fn a_face_derived_sketch_plane_applies() {
+    let mut eng = engine();
+    // A 45° plane, the way `planeFromHit` builds one from a picked face
+    let events = apply(
+        &mut eng,
+        json!({
+            "type": "create_sketch",
+            "id": null,
+            "name": "Sketch on face",
+            "plane": {
+                "origin": [0.01, 0.02, 0.03],
+                "normal": [0.0, 0.70710677, 0.70710677],
+                "x_axis": [1.0, 0.0, 0.0],
+                "y_axis": [0.0, 0.70710677, -0.70710677],
+            },
+        }),
+    );
+    let sketch_id = events
+        .iter()
+        .find_map(|e| match e {
+            Event::SketchAdded { sketch_id } => Some(*sketch_id),
+            _ => None,
+        })
+        .expect("SketchAdded event");
+    let plane = eng.sketch(sketch_id).unwrap().plane;
+    assert!((plane.normal.y - 0.70710677).abs() < 1e-6);
+    assert!((plane.origin.z - 0.03).abs() < 1e-6);
+}
+
 #[test]
 fn feature_payloads_apply() {
     if !rk_cad::default_kernel().is_available() {
@@ -460,6 +577,8 @@ fn feature_payloads_apply() {
     let mut eng = engine();
     let sketch_id = create_sketch(&mut eng);
     rectangle(&mut eng, sketch_id);
+    // The dialog sends the clicked region; an empty list would mean "all"
+    let region = eng.sketch(sketch_id).unwrap().profiles()[0].id;
 
     let events = apply(
         &mut eng,
@@ -468,6 +587,7 @@ fn feature_payloads_apply() {
             "id": null,
             "name": "Extrude 1",
             "sketch_id": sketch_id,
+            "profiles": [region],
             "distance": 0.01,
             "direction": "Positive",
             "boolean_op": "New",
@@ -533,6 +653,7 @@ fn revolve_payload_applies() {
         "id": null,
         "name": "Revolve 1",
         "sketch_id": sketch_id,
+        "profiles": [],
         "axis_origin": [0.0, 0.0, 0.0],
         "axis_direction": [0.0, 1.0, 0.0],
         "angle": std::f32::consts::TAU,

@@ -48,6 +48,7 @@ fn variant_name(cmd: &Command) -> &'static str {
         Command::AddSketchConstraint { .. } => "add_sketch_constraint",
         Command::DeleteSketchConstraint { .. } => "delete_sketch_constraint",
         Command::SolveSketch { .. } => "solve_sketch",
+        Command::SetSketchConstruction { .. } => "set_sketch_construction",
         Command::AddExtrude { .. } => "add_extrude",
         Command::AddRevolve { .. } => "add_revolve",
         Command::DeleteFeature { .. } => "delete_feature",

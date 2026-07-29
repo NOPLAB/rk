@@ -13,7 +13,8 @@ import type {
 } from "../engine/api";
 import type { StlUnit } from "../engine/commands";
 import type { ConstraintDef } from "../engine/constraints";
-import type { SketchTool } from "../scene/sketchTools";
+import type { RegionPick } from "../scene/idleSketches";
+import type { SketchTool, ToolOptions } from "../scene/sketchTools";
 import type { GizmoMode, Viewport } from "../scene/viewport";
 
 /** A dimension the user started, waiting for its value to be accepted */
@@ -46,6 +47,18 @@ export interface AppApi {
   sketchGeometry: SketchGeometry | null;
   /** Entities to light up in the viewport while hovering a constraint */
   hoverSketch(entityIds: string[]): void;
+  /** Numbers the tools need up front: polygon sides, fillet radius, ... */
+  toolOptions: ToolOptions;
+  setToolOptions(options: Partial<ToolOptions>): void;
+
+  /** Waiting for the user to click a plane or a face in the 3D view */
+  pickingPlane: boolean;
+  beginPlanePick(): void;
+  cancelPlanePick(): void;
+
+  /** Enclosed sketch areas the user has clicked, for the next extrude */
+  regionSelection: RegionPick[];
+  setRegionSelection(selection: RegionPick[]): void;
 
   pendingDimension: PendingDimension | null;
   setPendingDimension(pending: PendingDimension | null): void;
@@ -56,6 +69,8 @@ export interface AppApi {
   setShowCollisions(visible: boolean): void;
   showGrid: boolean;
   setShowGrid(visible: boolean): void;
+  showSketches: boolean;
+  setShowSketches(visible: boolean): void;
   showBrowser: boolean;
   setShowBrowser(visible: boolean): void;
   showInspector: boolean;

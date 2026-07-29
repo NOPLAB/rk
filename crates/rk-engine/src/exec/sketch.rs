@@ -134,6 +134,29 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn exec_set_sketch_construction(
+        &mut self,
+        sketch_id: Uuid,
+        entity_ids: Vec<Uuid>,
+        construction: bool,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let sketch = self.sketch_mut(sketch_id)?;
+        for id in &entity_ids {
+            if sketch.get_entity(*id).is_none() {
+                return Err(EngineError::NotFound {
+                    kind: "sketch entity",
+                    id: *id,
+                });
+            }
+        }
+        for id in entity_ids {
+            sketch.set_construction(id, construction);
+        }
+        events.push(Event::SketchGeometryChanged { sketch_id });
+        Ok(())
+    }
+
     fn sketch_mut(&mut self, sketch_id: Uuid) -> Result<&mut Sketch, EngineError> {
         self.doc
             .cad

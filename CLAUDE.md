@@ -87,12 +87,29 @@ Core data structures and logic:
 CAD kernel abstraction and parametric modeling:
 
 - **Kernel abstraction** (`CadKernel` trait): Interface for geometry backends (OpenCASCADE, Truck, or NullKernel)
-- **Sketch system**: 2D sketches with entities (points, lines, arcs, circles) and constraints (coincident, parallel, perpendicular, dimensions)
+- **Sketch system**: 2D sketches with entities (points, lines, arcs,
+  circles, ellipses, splines) and constraints (coincident, parallel,
+  perpendicular, dimensions). A sketch's plane is a free
+  `{origin, normal, x_axis, y_axis}` frame, so a sketch can sit on a
+  solid's face just as well as on an origin plane
+- **Region extraction** (`sketch/profile.rs`): every closed area a sketch
+  encloses. Curves are flattened, split wherever they cross, and stitched
+  into a planar graph whose half-edge walk yields one loop per area; a loop
+  inside another becomes its hole. So a line drawn across a rectangle
+  really does divide it, and a circle inside one makes a plate with a hole
+  rather than two overlapping solids. `Profile::id` is derived from the
+  curves that bound the region, so a feature keeps pointing at the same
+  area when the sketch is edited elsewhere
 - **Constraint solver**: Newton-Raphson iteration for sketch constraint
   solving. Only point coordinates are variables, so radius/diameter/equal-radius
   dimensions are applied to the circle as assignments before the iteration
   (and left out of the DOF count) instead of being solved for
-- **Feature operations**: Extrude, revolve, boolean operations on sketches to create 3D solids
+- **Feature operations**: Extrude, revolve, boolean operations on sketches
+  to create 3D solids. `Extrude`/`Revolve` carry `profiles: Vec<Uuid>` —
+  which regions to build, empty meaning all of them. `CadKernel::
+  extrude_region`/`revolve_region` take the holes with them: truck attaches
+  a face from outer + hole wires in one go, so a washer never needs the
+  boolean subtract that backend does not have
 - **Parametric history**: Ordered feature list with rollback/rebuild support
 
 ### rk-engine
@@ -222,7 +239,36 @@ the egui frontend once at feature parity):
   emits a command once a shape is complete — one `add_sketch_entities`
   per shape (one undo step), and cancelling leaves no orphan points. The
   line tool reuses point IDs between segments and closes onto the chain's
-  first point, which is what makes `extract_profiles` find a closed loop
+  first point, which is what makes the region extractor find a closed loop
+- Sketch plane picking follows Fusion: "Create Sketch" arms a modal pick
+  (`scene/planePicker.ts`) that draws the three origin quads and accepts
+  either one of those or a flat face of a solid. The kernel does not carry
+  B-Rep faces through tessellation, so `scene/facePlane.ts` recovers one by
+  flood-filling coplanar triangles out from the one under the pointer —
+  which works on imported meshes too, and refuses a lone facet so a
+  cylinder wall cannot be sketched on. The in-plane axes are pinned to the
+  world axis least parallel to the normal, or the same face would give a
+  different 2D frame each session
+- Tools live in three files: `sketchGeom.ts` (2D maths), `sketchTools.ts`
+  (creation, a stage machine so 3-click tools fit) and `sketchEdits.ts`
+  (fillet/trim/extend/offset/mirror/patterns, each resolving from one
+  click plus the ribbon's numbers). `sketchToolInfo.ts` is the one table of
+  labels, icons and prompts, shared by the ribbon and the status bar. An
+  edit tool that declines returns a `problem` string that lands in the
+  status bar, rather than looking broken
+- Arcs have no direction flag: the engine stores a counter-clockwise sweep
+  from `start` to `end`, so a clockwise arc is emitted with the endpoints
+  swapped. Getting this backwards turns a slot's end caps inside out
+- Finished sketches stay on screen (`scene/idleSketches.ts`), one child
+  group per sketch carrying its own plane basis, drawn with the depth test
+  on so a solid built from a sketch hides it. Their regions are filled
+  meshes (`RegionFills`, three's ShapeGeometry with `shape.holes`) and
+  clicking one selects it — that selection is what Extrude and Revolve
+  build. Inside sketch mode the active layer owns the same job, picked by
+  point-in-polygon in sketch coordinates rather than a raycast
+- Trimming deletes the points it orphans, and fillet looks past the nearest
+  point for one that actually joins two lines — without both, every edit
+  leaves loose points that hijack the next snap
 - Constraints: pick entities with the select tool (Shift adds), then hit a
   constraint — `engine/constraints.ts` is the single table of what each
   one needs, what the geometry measures now (so a dimension opens on a
@@ -236,6 +282,12 @@ the egui frontend once at feature parity):
   belong to links, so a part only gets them once it is in the assembly
 - `tests/command_payloads.rs` applies the JSON the TypeScript builders
   emit; it is the only check that those field names match `Command`
+- `.app` sets `grid-template-columns: minmax(0, 1fr)`. Without it the
+  implicit `auto` track sizes to the widest row, so a ribbon tab with more
+  buttons than fit stretches the whole window's chrome past the edge
+  instead of scrolling inside it. The Sketch tab holds more than fits at
+  any sane width, so its Exit group is absolutely positioned over the right
+  edge — leaving a sketch must never depend on scrolling to find the button
 - Dev: `npm run tauri dev` (Vite on port 1420); the production build embeds
   `dist/` via the `custom-protocol` feature
 
@@ -265,5 +317,7 @@ the egui frontend once at feature parity):
   part editing + joint UI + mesh/URDF import-export + gizmo
   (`apply_interactive`) + sketch/feature UI + collisions and mass/inertia
   + sketch constraints and dimensions + the Inventor-style shell (ribbon,
-  model browser, ViewCube, navigation bar) done; egui retirement pending
+  model browser, ViewCube, navigation bar) + the Fusion sketching flow
+  (pick a plane or a face in the 3D view, the full tool set, sketches that
+  stay visible, click a region to extrude it) done; egui retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)

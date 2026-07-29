@@ -242,18 +242,61 @@ export interface SketchGeometry {
   circles: {
     id: string;
     center: Vec2;
+    center_id: string;
     radius: number;
     construction: boolean;
   }[];
   arcs: {
     id: string;
     center: Vec2;
+    center_id: string;
     radius: number;
     start_angle: number;
     end_angle: number;
+    start_id: string;
+    end_id: string;
     construction: boolean;
   }[];
+  ellipses: {
+    id: string;
+    center: Vec2;
+    center_id: string;
+    major_radius: number;
+    minor_radius: number;
+    rotation: number;
+    construction: boolean;
+  }[];
+  splines: {
+    id: string;
+    points: Vec2[];
+    point_ids: string[];
+    closed: boolean;
+    construction: boolean;
+  }[];
+  /** Closed areas, largest first — what the user clicks to extrude */
+  regions: SketchRegion[];
   constraints: SketchConstraintInfo[];
+}
+
+/** One enclosed area of a sketch */
+export interface SketchRegion {
+  /** Named by the curves bounding it, so a feature can keep pointing at it */
+  id: string;
+  /** Outer boundary, counter-clockwise */
+  outer: Vec2[];
+  /** Islands, each clockwise */
+  holes: Vec2[][];
+  area: number;
+  /** A point inside the region */
+  centroid: Vec2;
+}
+
+/** A sketch with its own plane basis, for drawing it while it is not active */
+export interface SketchEntry {
+  id: string;
+  name: string;
+  transform: Mat4;
+  geometry: SketchGeometry;
 }
 
 export interface SceneSnapshot {
@@ -313,6 +356,11 @@ export function sceneSnapshot(): Promise<SceneSnapshot> {
 
 export function sketchGeometry(sketchId: string): Promise<SketchGeometry> {
   return invoke("sketch_geometry", { sketchId });
+}
+
+/** Every sketch in the document, so finished ones stay drawn */
+export function allSketchGeometry(): Promise<SketchEntry[]> {
+  return invoke("all_sketch_geometry");
 }
 
 export function getPartMesh(partId: string): Promise<MeshPayload> {

@@ -279,22 +279,35 @@ dimension instead of adding a second one:
 {"type": "solve_sketch", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f"}
 ```
 
+Construction geometry guides a sketch without enclosing anything — centrelines,
+revolve axes, the circle a polygon is inscribed in. It is excluded from region
+extraction, so it never becomes a face:
+
+```json
+{"type": "set_sketch_construction", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "entity_ids": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"], "construction": true}
+```
+
 ## Features (3D solids)
 
-Extrude a sketch's closed profiles. `direction` is `"Positive" | "Negative" |
+Extrude the regions a sketch encloses. `direction` is `"Positive" | "Negative" |
 "Symmetric"` (relative to the sketch plane normal); `boolean_op` is `"New" |
 "Join" | "Cut" | "Intersect"` (`target_body` required for anything but New;
 note: the Truck kernel currently rejects Cut). Emits `feature_added` and
-`bodies_rebuilt` with the resulting body IDs:
+`bodies_rebuilt` with the resulting body IDs.
+
+`profiles` names the regions to use — the IDs `describe_scene` reports for the
+sketch. Leave it empty to take every region the sketch encloses. A region's
+holes are cut out of the face before the sweep, so a circle drawn inside a
+rectangle extrudes to a plate with a hole rather than two overlapping solids:
 
 ```json
-{"type": "add_extrude", "id": null, "name": "base_pad", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "distance": 0.02, "direction": "Positive", "boolean_op": "New", "target_body": null}
+{"type": "add_extrude", "id": null, "name": "base_pad", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "profiles": [], "distance": 0.02, "direction": "Positive", "boolean_op": "New", "target_body": null}
 ```
 
-Revolve profiles around an axis (angle in radians, 6.2831853 = full turn):
+Revolve regions around an axis (angle in radians, 6.2831853 = full turn):
 
 ```json
-{"type": "add_revolve", "id": null, "name": "hub", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "axis_origin": [0.0, 0.0, 0.0], "axis_direction": [0.0, 0.0, 1.0], "angle": 6.2831853, "boolean_op": "New", "target_body": null}
+{"type": "add_revolve", "id": null, "name": "hub", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "profiles": ["7d3a1c5e-9b2f-8e14-a6d0-3f8c1b4e7a29"], "axis_origin": [0.0, 0.0, 0.0], "axis_direction": [0.0, 0.0, 1.0], "angle": 6.2831853, "boolean_op": "New", "target_body": null}
 ```
 
 Manage the feature history (rollback re-computes bodies as of just after the

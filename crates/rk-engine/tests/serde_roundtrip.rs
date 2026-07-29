@@ -175,10 +175,16 @@ fn all_commands() -> Vec<Command> {
             constraint_id: id(),
         },
         Command::SolveSketch { sketch_id: id() },
+        Command::SetSketchConstruction {
+            sketch_id: id(),
+            entity_ids: vec![id(), id()],
+            construction: true,
+        },
         Command::AddExtrude {
             id: Some(id()),
             name: None,
             sketch_id: id(),
+            profiles: vec![id()],
             distance: 5.0,
             direction: ExtrudeDirection::Symmetric,
             boolean_op: BooleanOp::Join,
@@ -188,6 +194,7 @@ fn all_commands() -> Vec<Command> {
             id: None,
             name: Some("rev".into()),
             sketch_id: id(),
+            profiles: Vec::new(),
             axis_origin: Vec3::ZERO,
             axis_direction: Vec3::Y,
             angle: std::f32::consts::PI,
@@ -320,6 +327,7 @@ fn assert_command_coverage(cmd: &Command) {
         | AddSketchConstraint { .. }
         | DeleteSketchConstraint { .. }
         | SolveSketch { .. }
+        | SetSketchConstruction { .. }
         | AddExtrude { .. }
         | AddRevolve { .. }
         | DeleteFeature { .. }

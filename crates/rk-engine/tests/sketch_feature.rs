@@ -29,6 +29,7 @@ fn sketch_extrude_produces_body_mesh() {
             id: Some(feature_id),
             name: None,
             sketch_id,
+            profiles: Vec::new(),
             distance: 5.0,
             direction: ExtrudeDirection::Positive,
             boolean_op: BooleanOp::New,
@@ -63,6 +64,7 @@ fn delete_feature_removes_body() {
         id: Some(feature_id),
         name: None,
         sketch_id,
+        profiles: Vec::new(),
         distance: 5.0,
         direction: ExtrudeDirection::Positive,
         boolean_op: BooleanOp::New,
@@ -88,6 +90,7 @@ fn suppression_toggles_body() {
         id: Some(feature_id),
         name: None,
         sketch_id,
+        profiles: Vec::new(),
         distance: 5.0,
         direction: ExtrudeDirection::Positive,
         boolean_op: BooleanOp::New,
@@ -136,6 +139,143 @@ fn preview_extrude_returns_mesh_without_side_effects() {
     assert_eq!(eng.revision(), revision, "preview is a pure query");
     assert!(eng.body_ids().is_empty());
     assert!(!eng.can_undo() || eng.undo_description() != Some("Extrude"));
+}
+
+/// Two separate squares: extruding one of them must not build the other
+#[test]
+fn extrude_uses_only_the_selected_region() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+    let sketch_id = Uuid::new_v4();
+    eng.apply(Command::CreateSketch {
+        id: Some(sketch_id),
+        name: None,
+        plane: SketchPlane::xy(),
+    })
+    .unwrap();
+
+    let mut tmp = rk_cad::Sketch::new("tmp", SketchPlane::xy());
+    for origin in [Vec2::ZERO, Vec2::new(10.0, 0.0)] {
+        let corners = [
+            origin,
+            origin + Vec2::new(2.0, 0.0),
+            origin + Vec2::new(2.0, 2.0),
+            origin + Vec2::new(0.0, 2.0),
+        ];
+        let ids: Vec<Uuid> = corners.iter().map(|c| tmp.add_point(*c)).collect();
+        for i in 0..4 {
+            tmp.add_line(ids[i], ids[(i + 1) % 4]);
+        }
+    }
+    let entities: Vec<_> = tmp.entities().values().cloned().collect();
+    eng.apply(Command::AddSketchEntities {
+        sketch_id,
+        entities,
+    })
+    .unwrap();
+
+    let regions = eng.sketch(sketch_id).unwrap().profiles();
+    assert_eq!(regions.len(), 2, "two squares, two regions");
+
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id,
+        profiles: vec![regions[0].id],
+        distance: 1.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::New,
+        target_body: None,
+    })
+    .unwrap();
+
+    let body = eng.body_ids()[0];
+    let mesh = eng.body_mesh(body).unwrap().clone();
+    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for v in &mesh.vertices {
+        lo = lo.min(v[0]);
+        hi = hi.max(v[0]);
+    }
+    assert!(
+        hi - lo < 3.0,
+        "only one square was extruded, but the body spans {} in x",
+        hi - lo,
+    );
+}
+
+/// A circle inside a square is a hole in it, not a second solid
+#[test]
+fn extrude_cuts_the_holes_out_of_the_region() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+    let sketch_id = Uuid::new_v4();
+    eng.apply(Command::CreateSketch {
+        id: Some(sketch_id),
+        name: None,
+        plane: SketchPlane::xy(),
+    })
+    .unwrap();
+
+    let mut tmp = rk_cad::Sketch::new("tmp", SketchPlane::xy());
+    let corners = [
+        Vec2::ZERO,
+        Vec2::new(4.0, 0.0),
+        Vec2::new(4.0, 4.0),
+        Vec2::new(0.0, 4.0),
+    ];
+    let ids: Vec<Uuid> = corners.iter().map(|c| tmp.add_point(*c)).collect();
+    for i in 0..4 {
+        tmp.add_line(ids[i], ids[(i + 1) % 4]);
+    }
+    let centre = tmp.add_point(Vec2::new(2.0, 2.0));
+    tmp.add_circle(centre, 1.0);
+    let entities: Vec<_> = tmp.entities().values().cloned().collect();
+    eng.apply(Command::AddSketchEntities {
+        sketch_id,
+        entities,
+    })
+    .unwrap();
+
+    let regions = eng.sketch(sketch_id).unwrap().profiles();
+    assert_eq!(regions.len(), 2, "the plate and the disc");
+    let plate = &regions[0];
+    assert_eq!(plate.holes.len(), 1, "the disc is a hole in the plate");
+
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id,
+        profiles: vec![plate.id],
+        distance: 1.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::New,
+        target_body: None,
+    })
+    .unwrap();
+
+    let body = eng.body_ids()[0];
+    let mesh = eng.body_mesh(body).unwrap().clone();
+    let volume: f32 = mesh
+        .indices
+        .chunks(3)
+        .filter_map(|tri| match tri {
+            [i, j, k] => {
+                let at = |n: &u32| glam::Vec3::from_array(mesh.vertices[*n as usize]);
+                Some(at(i).dot(at(j).cross(at(k))) / 6.0)
+            }
+            _ => None,
+        })
+        .sum();
+    let want = 16.0 - std::f32::consts::PI;
+    assert!(
+        (volume.abs() - want).abs() / want < 0.05,
+        "plate volume {} is not {want} — the hole was dropped",
+        volume.abs(),
+    );
 }
 
 #[test]

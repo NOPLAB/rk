@@ -7,15 +7,14 @@
 import { useState, type ReactNode } from "react";
 import type { JointInfo, LinkInfo, PartInfo } from "../engine/api";
 import {
-  createSketch,
   deleteFeature,
   deletePart,
   deleteSketch,
   rollbackTo,
   setFeatureSuppressed,
-  standardPlane,
 } from "../engine/commands";
 import type { AppApi } from "../ui/appApi";
+import { createSketchOnOrigin } from "../ui/sketchActions";
 import { Icon, type IconName } from "./icons";
 
 const PLANES = ["XY", "XZ", "YZ"] as const;
@@ -64,17 +63,6 @@ export function BrowserPanel({ api }: { api: AppApi }) {
 
   const { parts, links, joints, sketches, features, rollback_position } =
     snapshot;
-
-  const newSketchOn = async (plane: (typeof PLANES)[number]) => {
-    const events = await api.run([
-      createSketch(
-        standardPlane(plane, 0),
-        `Sketch ${sketches.length + 1} (${plane})`,
-      ),
-    ]);
-    const added = events.find((e) => e.type === "sketch_added");
-    if (added) api.activateSketch(added.sketch_id as string);
-  };
 
   const partName = (partId: string | null, linkId: string) =>
     (partId && parts.find((p) => p.id === partId)?.name) ||
@@ -162,7 +150,11 @@ export function BrowserPanel({ api }: { api: AppApi }) {
               icon="plane"
               label={`${plane} Plane`}
               hint="Start a sketch on this plane"
-              onClick={() => void newSketchOn(plane)}
+              onClick={() => void createSketchOnOrigin(api, plane)}
+              // Hovering the row lights the matching quad in the 3D view
+              onHover={(over) =>
+                api.viewport()?.setPlaneHighlight(over ? plane : null)
+              }
             />
           ))}
 
@@ -378,6 +370,8 @@ interface RowProps {
   swatch?: string;
   onToggle?: () => void;
   onClick?: () => void;
+  /** Pointer entered (true) or left (false) the row */
+  onHover?: (over: boolean) => void;
   actions?: ReactNode;
 }
 
@@ -395,6 +389,7 @@ function TreeRow({
   swatch,
   onToggle,
   onClick,
+  onHover,
   actions,
 }: RowProps) {
   const classes = [
@@ -411,6 +406,8 @@ function TreeRow({
       style={{ paddingLeft: 4 + depth * 12 }}
       title={hint ?? label}
       onClick={onClick}
+      onMouseEnter={onHover ? () => onHover(true) : undefined}
+      onMouseLeave={onHover ? () => onHover(false) : undefined}
     >
       <button
         className={`twist${open ? " open" : ""}${hasChildren ? "" : " leaf"}`}

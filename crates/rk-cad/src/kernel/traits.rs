@@ -213,6 +213,31 @@ impl Wire2D {
     }
 }
 
+/// A closed area to build a face from: one outer boundary, minus its islands
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Region2D {
+    /// Outer boundary, counter-clockwise
+    pub outer: Wire2D,
+    /// Islands cut out of `outer`, each clockwise
+    pub holes: Vec<Wire2D>,
+}
+
+impl Region2D {
+    /// A region with no islands
+    pub fn solid(outer: Wire2D) -> Self {
+        Self {
+            outer,
+            holes: Vec::new(),
+        }
+    }
+}
+
+impl From<Wire2D> for Region2D {
+    fn from(outer: Wire2D) -> Self {
+        Self::solid(outer)
+    }
+}
+
 /// A 3D solid body
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Solid {
@@ -379,6 +404,54 @@ pub trait CadKernel: Send + Sync {
         axis: &Axis3D,
         angle: f32,
     ) -> CadResult<Solid>;
+
+    /// Extrude a region, cutting its holes out of the face first
+    ///
+    /// The default drops the holes, which is all a kernel that cannot build a
+    /// face with islands is able to do.
+    fn extrude_region(
+        &self,
+        region: &Region2D,
+        plane_origin: Vec3,
+        plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
+        direction: Vec3,
+        distance: f32,
+    ) -> CadResult<Solid> {
+        self.extrude(
+            &region.outer,
+            plane_origin,
+            plane_x_axis,
+            plane_y_axis,
+            direction,
+            distance,
+        )
+    }
+
+    /// Revolve a region, cutting its holes out of the face first
+    fn revolve_region(
+        &self,
+        region: &Region2D,
+        plane_origin: Vec3,
+        plane_x_axis: Vec3,
+        plane_y_axis: Vec3,
+        axis: &Axis3D,
+        angle: f32,
+    ) -> CadResult<Solid> {
+        self.revolve(
+            &region.outer,
+            plane_origin,
+            plane_x_axis,
+            plane_y_axis,
+            axis,
+            angle,
+        )
+    }
+
+    /// Whether [`CadKernel::extrude_region`] really honours holes
+    fn supports_holes(&self) -> bool {
+        false
+    }
 
     /// Perform a boolean operation on two solids
     ///

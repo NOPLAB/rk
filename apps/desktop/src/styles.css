@@ -100,6 +100,10 @@ body {
 .app {
   display: grid;
   grid-template-rows: auto auto 1fr auto auto;
+  /* Without a column track the implicit `auto` one sizes to its widest row,
+     so a ribbon tab with more buttons than fit would stretch the whole
+     window's worth of chrome past the edge instead of scrolling inside it */
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -219,16 +223,55 @@ body {
 }
 
 .ribbon-body {
+  position: relative;
   display: flex;
   align-items: stretch;
   height: 92px;
   padding: 3px 4px 0;
+  overflow: hidden;
+}
+
+/* The tab's groups scroll; anything pinned sits on top of them, out of the
+   flow, so a tab wide enough to overflow cannot push it off the edge */
+.rb-scroll {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
 }
 
-.ribbon-body::-webkit-scrollbar {
-  height: 6px;
+.rb-scroll::-webkit-scrollbar {
+  height: 7px;
+}
+
+.rb-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-soft);
+  border-radius: 4px;
+}
+
+.rb-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-hover);
+}
+
+/* The Sketch tab has more than fits at any sane window width, so the way
+   out of it rides along on the right instead of scrolling away */
+.rb-group.pinned {
+  position: absolute;
+  right: 0;
+  top: 3px;
+  bottom: 0;
+  z-index: 3;
+  background: var(--bg-ribbon);
+  border-left: 1px solid var(--line-soft);
+  border-right: none;
+  box-shadow: -8px 0 10px -6px rgba(0, 0, 0, 0.55);
+}
+
+/* Room to scroll the last group clear of the pinned one */
+.rb-scroll.has-pinned {
+  padding-right: 152px;
 }
 
 .rb-group {

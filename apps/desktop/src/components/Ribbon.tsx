@@ -8,7 +8,13 @@ import { undo } from "../engine/commands";
 import type { AppApi } from "../ui/appApi";
 import { fileActions } from "../ui/fileActions";
 import { Icon, type IconName } from "./icons";
-import { AssemblyTab, ModelTab, SketchTab, ViewTab } from "./ribbonTabs";
+import {
+  AssemblyTab,
+  ModelTab,
+  SketchExitGroup,
+  SketchTab,
+  ViewTab,
+} from "./ribbonTabs";
 
 type TabId = "model" | "sketch" | "assembly" | "view";
 
@@ -31,6 +37,10 @@ export function Ribbon({ api }: { api: AppApi }) {
     setTab(sketchId ? "sketch" : "model");
   }, [sketchId]);
 
+  // Leaving a sketch must never depend on scrolling the ribbon to find the
+  // button, so that one group is pinned over the right edge
+  const pinned = tab === "sketch" && api.activeSketch !== null;
+
   return (
     <div className="ribbon">
       <div className="ribbon-tabs">
@@ -52,10 +62,15 @@ export function Ribbon({ api }: { api: AppApi }) {
       </div>
 
       <div className="ribbon-body">
-        {tab === "model" && <ModelTab api={api} />}
-        {tab === "sketch" && <SketchTab api={api} />}
-        {tab === "assembly" && <AssemblyTab api={api} />}
-        {tab === "view" && <ViewTab api={api} />}
+        <div className={pinned ? "rb-scroll has-pinned" : "rb-scroll"}>
+          {tab === "model" && <ModelTab api={api} />}
+          {tab === "sketch" && <SketchTab api={api} />}
+          {tab === "assembly" && <AssemblyTab api={api} />}
+          {tab === "view" && <ViewTab api={api} />}
+        </div>
+        {/* The Sketch tab holds more than fits at any sane window width, so
+            the way out of it rides on top of the scrolling area instead */}
+        {pinned && <SketchExitGroup api={api} />}
       </div>
 
       {menuOpen && <FileMenu api={api} onClose={() => setMenuOpen(false)} />}
