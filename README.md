@@ -5,9 +5,9 @@
 
 A 3D CAD editor built with Rust.
 
-## Try It
+## Documentation
 
-[Web App](https://noplab.github.io/rk/app/) | [Documentation](https://noplab.github.io/rk/)
+[noplab.github.io/rk](https://noplab.github.io/rk/) — source in `apps/docs`.
 
 ## Install
 

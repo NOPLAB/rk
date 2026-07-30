@@ -1,0 +1,54 @@
+---
+title: Installation
+description: How to install and run RK
+---
+
+## Download
+
+Download the latest release for your operating system from the [GitHub Releases](https://github.com/NOPLAB/rk/releases) page. Installers are published for Windows, macOS, and Linux.
+
+### System Requirements
+
+- Windows 10/11, macOS 10.15+, or Linux
+- A GPU supporting Vulkan, Metal, or DirectX 12
+- 4GB RAM minimum
+
+## Building from Source
+
+### Prerequisites
+
+- Rust 1.85 or later (the workspace uses edition 2024)
+
+On Linux you will also need the usual windowing and graphics development
+packages (`libxcb`, `libxkbcommon`, and a Vulkan driver).
+
+### Build Commands
+
+```bash
+# Clone the repository
+git clone https://github.com/NOPLAB/rk.git
+cd rk
+
+# Run the editor
+cargo run -p rk-frontend
+
+# Build an optimized binary
+cargo build --release -p rk-frontend
+```
+
+### Choosing a CAD Kernel
+
+Geometry operations go through a kernel abstraction selected at build time.
+[Truck](https://github.com/ricosjp/truck) — a pure Rust B-Rep kernel — is the
+default, so no C++ toolchain is required.
+
+```bash
+# Truck (default)
+cargo build
+
+# OpenCASCADE instead
+cargo build --features rk-cad/opencascade
+
+# No kernel; sketching only
+cargo build --no-default-features
+```

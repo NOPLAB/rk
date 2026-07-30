@@ -20,6 +20,9 @@ cargo run -p rk-mcp
 # Run the Tauri desktop app (dev: starts Vite + opens the window)
 cd apps/desktop && npm install && npm run tauri dev
 
+# Run the documentation site (npm workspace at the repo root)
+npm install && npm run docs:dev
+
 # Run tests
 cargo test
 
@@ -52,7 +55,8 @@ cargo build --no-default-features        # No CAD kernel (NullKernel)
 RK is a 3D CAD editor built with Rust, evolving into an agentic platform
 where AI agents drive CAD (and later simulation) through a headless
 engine. The codebase is a Cargo workspace with six library/binary crates
-under `crates/` plus the Tauri desktop app under `apps/desktop`:
+under `crates/`, plus two applications under `apps/`: the Tauri desktop
+app (`apps/desktop`) and the documentation site (`apps/docs`):
 
 ### Crate Dependencies
 
@@ -290,6 +294,23 @@ the egui frontend once at feature parity):
   edge — leaving a sketch must never depend on scrolling to find the button
 - Dev: `npm run tauri dev` (Vite on port 1420); the production build embeds
   `dist/` via the `custom-protocol` feature
+
+### rk-docs (apps/docs)
+
+Astro + Starlight documentation site, published to GitHub Pages at
+`noplab.github.io/rk` by `.github/workflows/deploy-pages.yml` on pushes to
+`main`:
+
+- The only npm workspace declared in the root `package.json`, so it
+  installs and builds from the repo root (`npm run docs:dev` / `docs:build`).
+  `apps/desktop` deliberately stays outside the workspace — it carries its
+  own `package-lock.json` and Tauri drives its Vite build itself
+- Pages live in `src/content/docs/`; `astro.config.mjs` owns the sidebar,
+  where `base: '/rk'` means every hand-written internal link needs the
+  `/rk/` prefix
+- `public/favicon.svg` and `src/assets/logo.svg` are symlinks into the
+  repo-root `assets/icons/`, so moving this directory breaks the build
+  until the `../` counts are fixed
 
 ## Key Patterns
 

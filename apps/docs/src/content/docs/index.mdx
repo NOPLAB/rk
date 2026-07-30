@@ -11,31 +11,35 @@ hero:
       link: /rk/getting-started/installation/
       icon: right-arrow
       variant: primary
-    - text: Try in Browser
-      link: https://noplab.github.io/rk/app/
+    - text: View on GitHub
+      link: https://github.com/NOPLAB/rk
       icon: external
+      variant: minimal
 ---
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 ## What is RK?
 
-RK is a modern 3D CAD editor. It provides the tools you need to create, edit, and visualize 3D models efficiently.
+RK is a 3D CAD editor built in Rust. Sketch a profile, turn it into a solid, and
+keep every step editable — the feature history is the model.
 
 ## Features
 
 <CardGrid stagger>
-  <Card title="Visual 3D Editor" icon="pencil">
-    Intuitively edit links, joints, and visual properties in an interactive 3D viewport. No manual XML editing required.
+  <Card title="Parametric Sketching" icon="pencil">
+    Draw lines, arcs, circles and splines on any plane or on a face of an
+    existing solid, then pin the shape down with constraints and dimensions.
   </Card>
-  <Card title="Real-time Preview" icon="laptop">
-    See your changes instantly. Adjust joint positions, modify geometry, and preview kinematics in real-time.
+  <Card title="Feature-based Modeling" icon="setting">
+    Extrude and revolve the regions a sketch encloses, combine them with boolean
+    operations, and roll the history back to any earlier step.
   </Card>
   <Card title="Cross-Platform" icon="rocket">
-    Run natively on Windows, macOS, and Linux, or use the WebAssembly version directly in your browser.
+    Runs natively on Windows, macOS, and Linux.
   </Card>
-  <Card title="Mesh Support" icon="document">
-    Import and export STL, OBJ, and DAE mesh files. Visualize complex robot geometries with ease.
+  <Card title="Mesh and URDF" icon="document">
+    Import STL, OBJ, DAE and URDF; export URDF for robotics toolchains.
   </Card>
 </CardGrid>
 
@@ -49,7 +53,7 @@ RK is a modern 3D CAD editor. It provides the tools you need to create, edit, an
   />
   <LinkCard
     title="Quick Start"
-    description="Create your first robot model"
+    description="Model your first part"
     href="/rk/getting-started/quick-start/"
   />
 </CardGrid>

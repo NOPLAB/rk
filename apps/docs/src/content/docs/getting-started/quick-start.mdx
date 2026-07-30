@@ -1,0 +1,34 @@
+---
+title: Quick Start
+description: Get started with RK in minutes
+---
+
+## Interface Overview
+
+The application is split into dockable panels:
+
+- **3D Viewport**: the interactive 3D view
+- **Parts**: every part in the document, as a hierarchy
+- **Features**: the sketch and feature history of the active part
+- **Joints**: the joints connecting parts
+- **Properties**: the selected part's properties
+
+## Modeling Your First Part
+
+1. In the **Features** panel, press **+ Sketch** and pick the plane to draw on.
+2. Draw a closed shape — the sketch tools live in the viewport toolbar while
+   sketch mode is active.
+3. Press **Exit Sketch Mode** when the shape is done.
+4. Select the sketch and press **Extrude**, then give it a distance.
+
+The result is a solid, and every step stays in the **Features** list. Edit the
+sketch later and the extrusion rebuilds from it.
+
+## Assembling Parts
+
+Parts can also come from outside. The **Parts** panel's toolbar offers
+**Import Parts** for STL, OBJ, DAE and URDF files, **Create Primitives** for
+boxes, spheres and cylinders, and **Create Empty...** for a bare node to group
+things under. Once two parts exist, connect them in the **Joints** panel.
+
+Save with **File > Save**; documents are written as `.rk` files.

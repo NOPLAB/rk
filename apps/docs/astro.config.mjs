@@ -35,7 +35,7 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/NOPLAB/rk/edit/main/docs/',
+        baseUrl: 'https://github.com/NOPLAB/rk/edit/main/apps/docs/',
       },
     }),
   ],
