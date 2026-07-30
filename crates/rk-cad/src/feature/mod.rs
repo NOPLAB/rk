@@ -265,6 +265,21 @@ impl Feature {
         }
     }
 
+    /// Rename this feature
+    pub fn set_name(&mut self, value: impl Into<String>) {
+        let value = value.into();
+        match self {
+            Feature::Extrude { name, .. } => *name = value,
+            Feature::Revolve { name, .. } => *name = value,
+            Feature::Boolean { name, .. } => *name = value,
+            Feature::Fillet { name, .. } => *name = value,
+            Feature::Chamfer { name, .. } => *name = value,
+            Feature::Shell { name, .. } => *name = value,
+            Feature::Sweep { name, .. } => *name = value,
+            Feature::Loft { name, .. } => *name = value,
+        }
+    }
+
     /// Get the type name of this feature
     pub fn type_name(&self) -> &'static str {
         match self {

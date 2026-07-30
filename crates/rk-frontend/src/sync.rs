@@ -94,11 +94,14 @@ pub fn apply_events(
             | Event::CollisionChanged { .. }
             | Event::SketchAdded { .. }
             | Event::SketchRemoved { .. }
+            | Event::SketchRenamed { .. }
             | Event::SketchGeometryChanged { .. }
             | Event::SketchSolved { .. }
             | Event::FeatureAdded { .. }
             | Event::FeatureRemoved { .. }
             | Event::FeatureChanged { .. }
+            // Grouping is browser presentation; the egui tree does not show it
+            | Event::FeatureGroupsChanged
             | Event::HistoryChanged { .. } => {}
         }
     }

@@ -325,3 +325,77 @@ fn solve_with_dimension_constraint_moves_points() {
         (pa - pb).length()
     );
 }
+
+#[test]
+fn grouping_features_never_changes_the_model() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+    let sketch_id = create_rect_sketch(&mut eng);
+
+    let mut feature_ids = Vec::new();
+    for distance in [5.0_f32, 8.0] {
+        let id = Uuid::new_v4();
+        eng.apply(Command::AddExtrude {
+            id: Some(id),
+            name: None,
+            sketch_id,
+            profiles: Vec::new(),
+            distance,
+            direction: ExtrudeDirection::Positive,
+            boolean_op: BooleanOp::New,
+            target_body: None,
+        })
+        .unwrap();
+        feature_ids.push(id);
+    }
+    let bodies_before = eng.body_ids().len();
+
+    let group_id = Uuid::new_v4();
+    let events = eng
+        .apply(Command::GroupFeatures {
+            id: Some(group_id),
+            name: Some("Pads".into()),
+            feature_ids: feature_ids.clone(),
+        })
+        .unwrap();
+    assert!(events.contains(&Event::FeatureGroupsChanged));
+    assert_eq!(
+        eng.body_ids().len(),
+        bodies_before,
+        "grouping is presentation only"
+    );
+
+    let groups = eng.document().cad.history.groups();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].members, feature_ids);
+
+    // Deleting a member prunes it; deleting the last one takes the group
+    eng.apply(Command::DeleteFeature {
+        feature_id: feature_ids[0],
+    })
+    .unwrap();
+    assert_eq!(
+        eng.document().cad.history.groups()[0].members,
+        vec![feature_ids[1]]
+    );
+    eng.apply(Command::DeleteFeature {
+        feature_id: feature_ids[1],
+    })
+    .unwrap();
+    assert!(eng.document().cad.history.groups().is_empty());
+}
+
+#[test]
+fn grouping_rejects_a_feature_that_does_not_exist() {
+    let mut eng = engine();
+    let err = eng
+        .apply(Command::GroupFeatures {
+            id: None,
+            name: None,
+            feature_ids: vec![Uuid::new_v4()],
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("feature"), "{err}");
+}

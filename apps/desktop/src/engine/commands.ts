@@ -344,6 +344,12 @@ export const deleteSketch = (sketchId: string): Command => ({
   sketch_id: sketchId,
 });
 
+export const renameSketch = (sketchId: string, name: string): Command => ({
+  type: "rename_sketch",
+  sketch_id: sketchId,
+  name,
+});
+
 /** One command = one undo step, so a rectangle's 4 points + 4 lines go together */
 export const addSketchEntities = (
   sketchId: string,
@@ -466,6 +472,12 @@ export const deleteFeature = (featureId: string): Command => ({
   feature_id: featureId,
 });
 
+export const renameFeature = (featureId: string, name: string): Command => ({
+  type: "rename_feature",
+  feature_id: featureId,
+  name,
+});
+
 export const setFeatureSuppressed = (
   featureId: string,
   suppressed: boolean,
@@ -473,6 +485,39 @@ export const setFeatureSuppressed = (
   type: "set_feature_suppressed",
   feature_id: featureId,
   suppressed,
+});
+
+// ---- Feature groups (browser presentation only) --------------------------
+
+export const groupFeatures = (
+  featureIds: string[],
+  name?: string,
+  id?: string,
+): Command => ({
+  type: "group_features",
+  id: id ?? null,
+  name: name ?? null,
+  feature_ids: featureIds,
+});
+
+export const ungroupFeatures = (groupId: string): Command => ({
+  type: "ungroup_features",
+  group_id: groupId,
+});
+
+export const renameFeatureGroup = (groupId: string, name: string): Command => ({
+  type: "rename_feature_group",
+  group_id: groupId,
+  name,
+});
+
+export const setFeatureGroupCollapsed = (
+  groupId: string,
+  collapsed: boolean,
+): Command => ({
+  type: "set_feature_group_collapsed",
+  group_id: groupId,
+  collapsed,
 });
 
 /** `featureId: null` rolls forward to the end of the history */

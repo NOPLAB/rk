@@ -387,6 +387,15 @@ const ICONS = {
   plus: {
     base: "M12 4.5v15M4.5 12h15",
   },
+  rename: {
+    base: "M4 20h16",
+    accent: "M6.5 16.5L16 7l3 3-9.5 9.5H6.5z",
+  },
+  /** A panel leaving its dock for a window of its own */
+  float: {
+    base: "M3.5 5.5h10v8h-10z",
+    accent: "M9.5 10.5h11v8h-11zM13.5 5.5h7v5",
+  },
 } satisfies Record<string, Glyph>;
 
 export type IconName = keyof typeof ICONS;

@@ -5,8 +5,8 @@ use glam::Vec3;
 use uuid::Uuid;
 
 use rk_cad::{
-    BooleanOp, BooleanType, CadKernel, ExtrudeDirection, Feature, Sketch, Solid, TessellatedMesh,
-    Wire2D,
+    BooleanOp, BooleanType, CadKernel, ExtrudeDirection, Feature, FeatureGroup, Sketch, Solid,
+    TessellatedMesh, Wire2D,
 };
 
 use crate::command::ExtrudePreviewRequest;
@@ -148,6 +148,129 @@ impl Engine {
         events.push(Event::BodiesRebuilt {
             body_ids: self.body_ids(),
         });
+        Ok(())
+    }
+
+    pub(crate) fn exec_rename_feature(
+        &mut self,
+        feature_id: Uuid,
+        name: String,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let feature =
+            self.doc
+                .cad
+                .history
+                .get_by_id_mut(feature_id)
+                .ok_or(EngineError::NotFound {
+                    kind: "feature",
+                    id: feature_id,
+                })?;
+        feature.set_name(name);
+        events.push(Event::FeatureChanged { feature_id });
+        Ok(())
+    }
+
+    // ---- Grouping ------------------------------------------------------
+    //
+    // Groups are metadata over the timeline: nothing here rebuilds, because
+    // nothing here changes what gets built.
+
+    pub(crate) fn exec_group_features(
+        &mut self,
+        id: Option<Uuid>,
+        name: Option<String>,
+        feature_ids: Vec<Uuid>,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        if feature_ids.is_empty() {
+            return Err(EngineError::InvalidCommand(
+                "a group needs at least one feature".into(),
+            ));
+        }
+        for id in &feature_ids {
+            if self.doc.cad.history.get_by_id(*id).is_none() {
+                return Err(EngineError::NotFound {
+                    kind: "feature",
+                    id: *id,
+                });
+            }
+        }
+        // Keep the timeline's order regardless of the order they were picked in
+        let mut members: Vec<Uuid> = self
+            .doc
+            .cad
+            .history
+            .features()
+            .map(|f| f.id())
+            .filter(|id| feature_ids.contains(id))
+            .collect();
+        members.dedup();
+
+        self.doc.cad.history.add_group(FeatureGroup {
+            id: id.unwrap_or_else(Uuid::new_v4),
+            name: name.unwrap_or_else(|| "Group".to_string()),
+            members,
+            collapsed: false,
+        });
+        events.push(Event::FeatureGroupsChanged);
+        Ok(())
+    }
+
+    pub(crate) fn exec_ungroup_features(
+        &mut self,
+        group_id: Uuid,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        self.doc
+            .cad
+            .history
+            .remove_group(group_id)
+            .ok_or(EngineError::NotFound {
+                kind: "feature group",
+                id: group_id,
+            })?;
+        events.push(Event::FeatureGroupsChanged);
+        Ok(())
+    }
+
+    pub(crate) fn exec_rename_feature_group(
+        &mut self,
+        group_id: Uuid,
+        name: String,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let group = self
+            .doc
+            .cad
+            .history
+            .get_group_mut(group_id)
+            .ok_or(EngineError::NotFound {
+                kind: "feature group",
+                id: group_id,
+            })?;
+        group.name = name;
+        events.push(Event::FeatureGroupsChanged);
+        Ok(())
+    }
+
+    pub(crate) fn exec_set_feature_group_collapsed(
+        &mut self,
+        group_id: Uuid,
+        collapsed: bool,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let group = self
+            .doc
+            .cad
+            .history
+            .get_group_mut(group_id)
+            .ok_or(EngineError::NotFound {
+                kind: "feature group",
+                id: group_id,
+            })?;
+        group.collapsed = collapsed;
+        events.push(Event::FeatureGroupsChanged);
         Ok(())
     }
 

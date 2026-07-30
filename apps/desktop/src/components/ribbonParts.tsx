@@ -2,7 +2,7 @@
 // large buttons for the headline command, and stacked small buttons for the
 // rest — the layout Inventor uses for every panel on its ribbon.
 
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./icons";
 
 export function RibGroup({
@@ -77,6 +77,75 @@ export function RibSmall({
       <Icon name={icon} size={16} />
       <span>{label}</span>
     </button>
+  );
+}
+
+export interface SplitItem extends ButtonProps {
+  key: string;
+}
+
+/**
+ * A button that stands for a family of related commands: pressing it runs the
+ * one on its face, and the caret drops down the rest. Given a single item it
+ * degrades to a plain button, so a family can grow without the caller caring.
+ *
+ * The list is `position: fixed` because the ribbon clips its own overflow —
+ * anchored inside the scrolling row it would be cut off at the group's edge.
+ */
+export function RibSplit({
+  big,
+  face,
+  items,
+}: {
+  big?: boolean;
+  /** The variant the button itself runs */
+  face: ButtonProps;
+  items: SplitItem[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const Button = big ? RibBig : RibSmall;
+  if (items.length < 2) return <Button {...face} />;
+
+  const rect = ref.current?.getBoundingClientRect();
+  return (
+    <div className={big ? "rb-split big" : "rb-split"} ref={ref}>
+      <Button {...face} />
+      <button
+        className="rb-caret"
+        title="More"
+        aria-label="More"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name="chevron" size={10} />
+      </button>
+      {open && rect && (
+        <>
+          <div className="menu-backdrop" onClick={() => setOpen(false)} />
+          <div
+            className="rb-flyout"
+            style={{ left: rect.left, top: rect.bottom + 2 }}
+          >
+            {items.map(({ key, icon, label, hint, active, disabled, onClick }) => (
+              <button
+                key={key}
+                className={active ? "active" : ""}
+                title={hint ?? label}
+                disabled={disabled}
+                onClick={() => {
+                  setOpen(false);
+                  onClick();
+                }}
+              >
+                <Icon name={icon} size={16} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

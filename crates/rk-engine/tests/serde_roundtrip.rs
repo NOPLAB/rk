@@ -154,6 +154,10 @@ fn all_commands() -> Vec<Command> {
             plane: SketchPlane::xz(),
         },
         Command::DeleteSketch { sketch_id: id() },
+        Command::RenameSketch {
+            sketch_id: id(),
+            name: "Base Profile".into(),
+        },
         Command::AddSketchEntities {
             sketch_id: id(),
             entities: entities.clone(),
@@ -202,9 +206,27 @@ fn all_commands() -> Vec<Command> {
             target_body: None,
         },
         Command::DeleteFeature { feature_id: id() },
+        Command::RenameFeature {
+            feature_id: id(),
+            name: "Boss".into(),
+        },
         Command::SetFeatureSuppressed {
             feature_id: id(),
             suppressed: true,
+        },
+        Command::GroupFeatures {
+            id: Some(id()),
+            name: Some("Mounting boss".into()),
+            feature_ids: vec![id(), id()],
+        },
+        Command::UngroupFeatures { group_id: id() },
+        Command::RenameFeatureGroup {
+            group_id: id(),
+            name: "Bracket".into(),
+        },
+        Command::SetFeatureGroupCollapsed {
+            group_id: id(),
+            collapsed: true,
         },
         Command::RollbackTo {
             feature_id: Some(id()),
@@ -268,11 +290,16 @@ fn all_events() -> Vec<Event> {
         },
         Event::SketchAdded { sketch_id: id() },
         Event::SketchRemoved { sketch_id: id() },
+        Event::SketchRenamed {
+            sketch_id: id(),
+            name: "Base Profile".into(),
+        },
         Event::SketchGeometryChanged { sketch_id: id() },
         Event::SketchSolved { sketch_id: id() },
         Event::FeatureAdded { feature_id: id() },
         Event::FeatureRemoved { feature_id: id() },
         Event::FeatureChanged { feature_id: id() },
+        Event::FeatureGroupsChanged,
         Event::BodiesRebuilt {
             body_ids: vec![id(), id()],
         },
@@ -321,6 +348,7 @@ fn assert_command_coverage(cmd: &Command) {
         | SetCollisionGeometry { .. }
         | CreateSketch { .. }
         | DeleteSketch { .. }
+        | RenameSketch { .. }
         | AddSketchEntities { .. }
         | UpdateSketchEntity { .. }
         | DeleteSketchEntities { .. }
@@ -331,7 +359,12 @@ fn assert_command_coverage(cmd: &Command) {
         | AddExtrude { .. }
         | AddRevolve { .. }
         | DeleteFeature { .. }
+        | RenameFeature { .. }
         | SetFeatureSuppressed { .. }
+        | GroupFeatures { .. }
+        | UngroupFeatures { .. }
+        | RenameFeatureGroup { .. }
+        | SetFeatureGroupCollapsed { .. }
         | RollbackTo { .. }
         | RebuildFeatures
         | Undo

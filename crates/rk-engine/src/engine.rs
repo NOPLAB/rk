@@ -234,6 +234,7 @@ impl Engine {
 
             CreateSketch { id, name, plane } => self.exec_create_sketch(id, name, plane, events),
             DeleteSketch { sketch_id } => self.exec_delete_sketch(sketch_id, events),
+            RenameSketch { sketch_id, name } => self.exec_rename_sketch(sketch_id, name, events),
             AddSketchEntities {
                 sketch_id,
                 entities,
@@ -303,10 +304,26 @@ impl Engine {
                 events,
             ),
             DeleteFeature { feature_id } => self.exec_delete_feature(feature_id, events),
+            RenameFeature { feature_id, name } => {
+                self.exec_rename_feature(feature_id, name, events)
+            }
             SetFeatureSuppressed {
                 feature_id,
                 suppressed,
             } => self.exec_set_feature_suppressed(feature_id, suppressed, events),
+            GroupFeatures {
+                id,
+                name,
+                feature_ids,
+            } => self.exec_group_features(id, name, feature_ids, events),
+            UngroupFeatures { group_id } => self.exec_ungroup_features(group_id, events),
+            RenameFeatureGroup { group_id, name } => {
+                self.exec_rename_feature_group(group_id, name, events)
+            }
+            SetFeatureGroupCollapsed {
+                group_id,
+                collapsed,
+            } => self.exec_set_feature_group_collapsed(group_id, collapsed, events),
             RollbackTo { feature_id } => self.exec_rollback_to(feature_id, events),
             RebuildFeatures => self.exec_rebuild_features(events),
 

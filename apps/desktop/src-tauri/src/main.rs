@@ -10,8 +10,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rk_engine::{Command, Engine, Event, SharedEngine};
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 use uuid::Uuid;
+
+/// Broadcast to every window after the document changes, so a torn-off panel
+/// on a second display stays in step with the window that made the edit.
+const DOCUMENT_CHANGED: &str = "rk://document-changed";
+/// A torn-off panel window went away; the main window takes its panel back
+const PANEL_CLOSED: &str = "rk://panel-closed";
+/// Torn-off panel windows are labelled `panel-<id>`; the webview reads its own
+/// label to know which single panel to render
+const PANEL_PREFIX: &str = "panel-";
 
 /// Default CAD body display color (matches the egui viewport)
 const BODY_COLOR: [f32; 4] = [0.7, 0.7, 0.8, 1.0];
@@ -39,8 +48,33 @@ struct ApplyFailure {
 /// applying anything. On an engine error the batch stops there; earlier
 /// commands stay applied (undo can revert them) and the outcome reports the
 /// failing index.
+#[derive(Clone, serde::Serialize)]
+struct DocumentChanged {
+    /// Label of the window that made the change, so it can ignore its own echo
+    origin: String,
+}
+
+/// Tell the other windows to re-pull. Skipped when this is the only window,
+/// which is the common case — a single window has already applied the events.
+fn broadcast_change(window: &tauri::Window, events: &[Event]) {
+    if events.is_empty() {
+        return;
+    }
+    let app = window.app_handle();
+    if app.webview_windows().len() < 2 {
+        return;
+    }
+    let _ = app.emit(
+        DOCUMENT_CHANGED,
+        DocumentChanged {
+            origin: window.label().to_string(),
+        },
+    );
+}
+
 #[tauri::command]
 fn engine_apply(
+    window: tauri::Window,
     state: State<'_, EngineState>,
     commands: Vec<serde_json::Value>,
 ) -> Result<ApplyOutcome, String> {
@@ -54,27 +88,29 @@ fn engine_apply(
         .collect::<Result<_, _>>()?;
 
     let total = parsed.len();
-    let mut engine = state.engine.lock();
     let mut events = Vec::new();
-    for (i, cmd) in parsed.into_iter().enumerate() {
-        match engine.apply(cmd) {
-            Ok(evs) => events.extend(evs),
-            Err(e) => {
-                return Ok(ApplyOutcome {
-                    applied: i,
-                    events,
-                    error: Some(ApplyFailure {
+    let mut failure = None;
+    {
+        let mut engine = state.engine.lock();
+        for (i, cmd) in parsed.into_iter().enumerate() {
+            match engine.apply(cmd) {
+                Ok(evs) => events.extend(evs),
+                Err(e) => {
+                    failure = Some(ApplyFailure {
                         index: i,
                         message: e.to_string(),
-                    }),
-                });
+                    });
+                    break;
+                }
             }
         }
     }
+    broadcast_change(&window, &events);
+    let applied = failure.as_ref().map(|f| f.index).unwrap_or(total);
     Ok(ApplyOutcome {
-        applied: total,
+        applied,
         events,
-        error: None,
+        error: failure,
     })
 }
 
@@ -82,42 +118,51 @@ fn engine_apply(
 /// session collapses into a single undo step.
 #[tauri::command]
 fn engine_apply_interactive(
+    window: tauri::Window,
     state: State<'_, EngineState>,
     session: Uuid,
     command: serde_json::Value,
 ) -> Result<ApplyOutcome, String> {
     let cmd: Command =
         serde_json::from_value(command).map_err(|e| format!("not a valid command: {e}"))?;
-    let mut engine = state.engine.lock();
-    match engine.apply_interactive(session, cmd) {
-        Ok(events) => Ok(ApplyOutcome {
-            applied: 1,
-            events,
-            error: None,
-        }),
-        Err(e) => Ok(ApplyOutcome {
-            applied: 0,
-            events: Vec::new(),
-            error: Some(ApplyFailure {
-                index: 0,
-                message: e.to_string(),
-            }),
-        }),
-    }
+    let outcome = {
+        let mut engine = state.engine.lock();
+        match engine.apply_interactive(session, cmd) {
+            Ok(events) => ApplyOutcome {
+                applied: 1,
+                events,
+                error: None,
+            },
+            Err(e) => ApplyOutcome {
+                applied: 0,
+                events: Vec::new(),
+                error: Some(ApplyFailure {
+                    index: 0,
+                    message: e.to_string(),
+                }),
+            },
+        }
+    };
+    broadcast_change(&window, &outcome.events);
+    Ok(outcome)
 }
 
 /// Close an interaction session. `cancel` rolls the document back to the
 /// state from before the drag started.
 #[tauri::command]
 fn engine_end_interaction(
+    window: tauri::Window,
     state: State<'_, EngineState>,
     session: Uuid,
     cancel: bool,
 ) -> Result<ApplyOutcome, String> {
-    let mut engine = state.engine.lock();
-    let events = engine
-        .end_interaction(session, cancel)
-        .map_err(|e| e.to_string())?;
+    let events = {
+        let mut engine = state.engine.lock();
+        engine
+            .end_interaction(session, cancel)
+            .map_err(|e| e.to_string())?
+    };
+    broadcast_change(&window, &events);
     Ok(ApplyOutcome {
         applied: 1,
         events,
@@ -214,6 +259,16 @@ struct FeatureInfo {
     created_bodies: Vec<Uuid>,
 }
 
+/// A named bundle of timeline features. Presentation only — the browser draws
+/// the group where its first member sits and the build order never changes.
+#[derive(serde::Serialize)]
+struct FeatureGroupInfo {
+    id: Uuid,
+    name: String,
+    members: Vec<Uuid>,
+    collapsed: bool,
+}
+
 #[derive(serde::Serialize)]
 struct SceneSnapshot {
     project_name: String,
@@ -228,6 +283,7 @@ struct SceneSnapshot {
     joints: Vec<JointInfo>,
     sketches: Vec<SketchInfo>,
     features: Vec<FeatureInfo>,
+    feature_groups: Vec<FeatureGroupInfo>,
     /// Features from this index on are rolled back (inactive); `None` = all active
     rollback_position: Option<usize>,
     history: HistoryInfo,
@@ -321,6 +377,16 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
             created_bodies: e.created_bodies.clone(),
         })
         .collect();
+    let feature_groups: Vec<FeatureGroupInfo> = history
+        .groups()
+        .iter()
+        .map(|g| FeatureGroupInfo {
+            id: g.id,
+            name: g.name.clone(),
+            members: g.members.clone(),
+            collapsed: g.collapsed,
+        })
+        .collect();
     let rollback_position = history.rollback_position();
 
     SceneSnapshot {
@@ -352,6 +418,7 @@ fn scene_snapshot(state: State<'_, EngineState>) -> SceneSnapshot {
         joints,
         sketches,
         features,
+        feature_groups,
         rollback_position,
         history: HistoryInfo {
             can_undo: engine.can_undo(),
@@ -687,6 +754,87 @@ fn get_body_mesh(state: State<'_, EngineState>, body_id: Uuid) -> Result<MeshPay
     })
 }
 
+// ================= Torn-off panel windows =================
+
+#[derive(serde::Deserialize)]
+struct PanelWindowSpec {
+    /// Panel id from the UI's layout (`browser`, `viewport`, ...)
+    panel: String,
+    title: String,
+    /// Screen position and size, in logical pixels — where the tab was dropped
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Window labels accept only a narrow character set, and the panel id lands in
+/// one verbatim — anything else would panic inside Tauri rather than fail here
+fn panel_label(panel: &str) -> Result<String, String> {
+    if panel.is_empty()
+        || !panel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("not a panel id: {panel}"));
+    }
+    Ok(format!("{PANEL_PREFIX}{panel}"))
+}
+
+/// Float a panel into its own OS window, so it can be dropped onto a second
+/// display. The window renders the same app; it reads its own label to know
+/// which single panel to show.
+///
+/// `async` on purpose: a synchronous command runs on the main thread, and
+/// building a webview from there returns a window whose webview never
+/// attaches — an empty white frame. Off the main thread it works.
+#[tauri::command]
+async fn open_panel_window(app: tauri::AppHandle, spec: PanelWindowSpec) -> Result<String, String> {
+    let label = panel_label(&spec.panel)?;
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.unminimize();
+        let _ = existing.set_focus();
+        return Ok(label);
+    }
+    // The panel window is literally the page the main window is already
+    // showing, so it works the same in dev (Vite) and in a bundled build
+    let url = app
+        .get_webview_window("main")
+        .and_then(|main| main.url().ok())
+        .map(tauri::WebviewUrl::External)
+        .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
+    tracing::info!("opening panel window {label} at {url:?}");
+
+    tauri::WebviewWindowBuilder::new(&app, &label, url)
+        .title(spec.title)
+        .inner_size(spec.width.max(320.0), spec.height.max(240.0))
+        .position(spec.x, spec.y)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(label)
+}
+
+/// Dock a panel back: closing the window makes the main one take it back,
+/// through the `panel-closed` event the destroy handler emits
+#[tauri::command]
+fn close_panel_window(app: tauri::AppHandle, panel: String) -> Result<(), String> {
+    let label = panel_label(&panel)?;
+    if let Some(win) = app.get_webview_window(&label) {
+        win.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Which panels are currently floating, so a reloaded main window does not
+/// draw a tab that already lives in another window
+#[tauri::command]
+fn floating_panels(app: tauri::AppHandle) -> Vec<String> {
+    app.webview_windows()
+        .keys()
+        .filter_map(|label| label.strip_prefix(PANEL_PREFIX).map(str::to_owned))
+        .collect()
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -701,6 +849,27 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(EngineState { engine })
+        .on_window_event(|window, event| {
+            if !matches!(event, tauri::WindowEvent::Destroyed) {
+                return;
+            }
+            let app = window.app_handle();
+            match window.label().strip_prefix(PANEL_PREFIX) {
+                // The panel goes back to its dock in the main window
+                Some(panel) => {
+                    let _ = app.emit(PANEL_CLOSED, panel.to_string());
+                }
+                // Panels are satellites of the main window; left behind they
+                // would keep the process alive with no way back to the model
+                None => {
+                    for other in app.webview_windows().values() {
+                        if other.label() != window.label() {
+                            let _ = other.close();
+                        }
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             engine_apply,
             engine_apply_interactive,
@@ -709,7 +878,10 @@ fn main() {
             sketch_geometry,
             all_sketch_geometry,
             get_part_mesh,
-            get_body_mesh
+            get_body_mesh,
+            open_panel_window,
+            close_panel_window,
+            floating_panels
         ])
         .run(tauri::generate_context!())
         .expect("error while running rk-desktop");

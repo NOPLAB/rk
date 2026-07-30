@@ -105,6 +105,10 @@ pub enum Event {
     SketchRemoved {
         sketch_id: Uuid,
     },
+    SketchRenamed {
+        sketch_id: Uuid,
+        name: String,
+    },
     /// Entities or constraints changed; 2D render data is pulled per frame
     SketchGeometryChanged {
         sketch_id: Uuid,
@@ -120,10 +124,14 @@ pub enum Event {
     FeatureRemoved {
         feature_id: Uuid,
     },
-    /// Suppression or rollback state changed
+    /// Name, suppression or rollback state changed
     FeatureChanged {
         feature_id: Uuid,
     },
+    /// Feature grouping changed. Groups are browser presentation only and
+    /// carry no geometry, so clients re-pull the whole list rather than
+    /// tracking individual groups.
+    FeatureGroupsChanged,
     /// Bodies were regenerated; renderers clear CAD bodies and re-pull
     /// each listed body's mesh via `Engine::body_mesh`
     BodiesRebuilt {

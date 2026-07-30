@@ -224,6 +224,19 @@ export interface SketchConstraintInfo {
   value: number | null;
 }
 
+/**
+ * A named bundle of timeline features. Grouping is presentation only: the
+ * browser draws the group where its first member sits and the model is
+ * untouched.
+ */
+export interface FeatureGroupInfo {
+  id: string;
+  name: string;
+  /** Feature IDs, in history order */
+  members: string[];
+  collapsed: boolean;
+}
+
 /** Sketch entities with point references resolved to coordinates */
 export interface SketchGeometry {
   points: {
@@ -311,6 +324,7 @@ export interface SceneSnapshot {
   joints: JointInfo[];
   sketches: SketchInfo[];
   features: FeatureInfo[];
+  feature_groups: FeatureGroupInfo[];
   /** Features from this index on are rolled back; `null` = all active */
   rollback_position: number | null;
   history: {
@@ -369,4 +383,31 @@ export function getPartMesh(partId: string): Promise<MeshPayload> {
 
 export function getBodyMesh(bodyId: string): Promise<MeshPayload> {
   return invoke("get_body_mesh", { bodyId });
+}
+
+// ---- torn-off panel windows ---------------------------------------------
+
+export interface PanelWindowSpec {
+  panel: string;
+  title: string;
+  /** Screen position and size in logical pixels — where the tab was dropped */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Float a panel into its own OS window, so it can live on a second display */
+export function openPanelWindow(spec: PanelWindowSpec): Promise<string> {
+  return invoke("open_panel_window", { spec });
+}
+
+/** Close a floating panel window; the main window docks the panel back */
+export function closePanelWindow(panel: string): Promise<void> {
+  return invoke("close_panel_window", { panel });
+}
+
+/** Panels that are already floating, so a reload does not draw them twice */
+export function floatingPanels(): Promise<string[]> {
+  return invoke("floating_panels");
 }

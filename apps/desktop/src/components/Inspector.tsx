@@ -12,22 +12,9 @@ import { PropertiesPanel } from "./PropertiesPanel";
 export function Inspector({ api }: { api: AppApi }) {
   const sketch = api.activeSketch;
 
+  // The dock's tab strip names and closes the panel now
   return (
     <aside className="inspector">
-      <div className="dock-head">
-        <button className="dock-tab active">
-          {sketch ? "Sketch" : "Properties"}
-        </button>
-        <span className="spacer" />
-        <button
-          className="qa-btn"
-          title="Hide the inspector"
-          onClick={() => api.setShowInspector(false)}
-        >
-          <Icon name="close" size={13} />
-        </button>
-      </div>
-
       {sketch ? (
         <>
           <div className="panel-title">

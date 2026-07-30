@@ -28,12 +28,31 @@ import {
   type ConstraintDef,
 } from "../engine/constraints";
 import { newUuid } from "../engine/interaction";
-import { TOOLS } from "../scene/sketchToolInfo";
+import {
+  CREATE_FAMILIES,
+  MODIFY_FAMILIES,
+  TOOLS,
+  familyTool,
+  type ToolFamily,
+} from "../scene/sketchToolInfo";
 import type { SketchTool } from "../scene/sketchTools";
 import type { AppApi } from "../ui/appApi";
+import { PANELS, PANEL_IDS, panelVisible } from "../ui/layout";
 import { SHAPES, defaultGeometry } from "./CollisionPanel";
 import type { IconName } from "./icons";
-import { RibBig, RibCol, RibGroup, RibHint, RibSmall, chunk } from "./ribbonParts";
+import {
+  RibBig,
+  RibCol,
+  RibGroup,
+  RibHint,
+  RibSmall,
+  RibSplit,
+  chunk,
+} from "./ribbonParts";
+
+const FAMILIES = new Map<string, ToolFamily>(
+  [...CREATE_FAMILIES, ...MODIFY_FAMILIES].map((f) => [f.id, f]),
+);
 
 const CONSTRAINT_ICONS: Record<string, IconName> = {
   Coincident: "cnCoincident",
@@ -234,15 +253,32 @@ export function SketchTab({ api }: { api: AppApi }) {
       />
     );
   };
-  const bigTool = (name: SketchTool) => {
-    const spec = TOOLS[name];
+  // One button per shape, its variants on the caret — the button's face is
+  // whichever variant was used last, so it says what pressing it will do
+  const family = (id: string, big = false) => {
+    const family = FAMILIES.get(id);
+    if (!family) return null;
+    const current = familyTool(family, api.toolVariant);
+    const spec = TOOLS[current];
     return (
-      <RibBig
-        icon={spec.icon}
-        label={spec.label}
-        hint={spec.hint}
-        active={api.sketchTool === name}
-        onClick={() => api.setSketchTool(name)}
+      <RibSplit
+        key={family.id}
+        big={big}
+        face={{
+          icon: spec.icon,
+          label: spec.label,
+          hint: spec.hint,
+          active: family.tools.includes(api.sketchTool),
+          onClick: () => api.setSketchTool(current),
+        }}
+        items={family.tools.map((name) => ({
+          key: name,
+          icon: TOOLS[name].icon,
+          label: TOOLS[name].label,
+          hint: TOOLS[name].hint,
+          active: api.sketchTool === name,
+          onClick: () => api.setSketchTool(name),
+        }))}
       />
     );
   };
@@ -269,39 +305,27 @@ export function SketchTab({ api }: { api: AppApi }) {
 
   return (
     <>
-      <RibGroup name="Draw">
-        {bigTool("line")}
-        {bigTool("rect")}
-        {bigTool("circle")}
+      <RibGroup name="Create">
+        {family("line", true)}
+        {family("rect", true)}
+        {family("circle", true)}
         <RibCol>
           {tool("select")}
-          {tool("rectCenter")}
-          {tool("rect3")}
+          {family("arc")}
+          {family("polygon")}
         </RibCol>
         <RibCol>
-          {tool("circle2")}
-          {tool("circle3")}
-          {tool("point")}
+          {family("slot")}
+          {family("ellipse")}
+          {family("spline")}
         </RibCol>
         <RibCol>
-          {tool("arc3")}
-          {tool("arcCenter")}
-          {tool("spline")}
-        </RibCol>
-        <RibCol>
-          {tool("ellipse")}
-          {tool("slot")}
-          {tool("slotOverall")}
-        </RibCol>
-        <RibCol>
-          {tool("polygon")}
-          {tool("polygonCirc")}
-          {tool("polygonEdge")}
-        </RibCol>
-        <RibCol>
+          {family("point")}
           {numberField("Sides", options.sides, 1, (v) =>
             api.setToolOptions({ sides: Math.max(3, Math.round(v)) }),
           )}
+        </RibCol>
+        <RibCol>
           <RibSmall
             icon="construction"
             label="Construction"
@@ -337,17 +361,16 @@ export function SketchTab({ api }: { api: AppApi }) {
 
       <RibGroup name="Modify">
         <RibCol>
-          {tool("fillet")}
-          {tool("trim")}
-          {tool("extend")}
+          {family("fillet")}
+          {family("trim")}
+          {family("extend")}
         </RibCol>
         <RibCol>
-          {tool("offset")}
-          {tool("mirror")}
-          {tool("patternRect")}
+          {family("offset")}
+          {family("mirror")}
+          {family("pattern")}
         </RibCol>
         <RibCol>
-          {tool("patternCirc")}
           {numberField(
             "Radius",
             options.filletRadius * 1000,
@@ -627,20 +650,34 @@ export function ViewTab({ api }: { api: AppApi }) {
 
       <ManipulateGroup api={api} />
 
-      <RibGroup name="Windows">
+      {/* Each panel is a tab: this shows it, the tab strip moves it, and
+          dragging it out of the window floats it onto another display */}
+      <RibGroup name="Panels">
+        {chunk(PANEL_IDS, 2).map((column, i) => (
+          <RibCol key={i}>
+            {column.map((panel) => (
+              <RibSmall
+                key={panel}
+                icon={PANELS[panel].icon}
+                label={PANELS[panel].title}
+                hint={`Show or hide the ${PANELS[panel].title} panel`}
+                active={panelVisible(api.layout, panel)}
+                onClick={() => api.togglePanel(panel)}
+              />
+            ))}
+          </RibCol>
+        ))}
         <RibCol>
-          <RibSmall
-            icon="browserPanel"
-            label="Browser"
-            active={api.showBrowser}
-            onClick={() => api.setShowBrowser(!api.showBrowser)}
-          />
-          <RibSmall
-            icon="inspectorPanel"
-            label="Inspector"
-            active={api.showInspector}
-            onClick={() => api.setShowInspector(!api.showInspector)}
-          />
+          {PANEL_IDS.map((panel) => (
+            <RibSmall
+              key={panel}
+              icon="float"
+              label={`Float ${PANELS[panel].title}`}
+              hint="Open this panel in its own window — drop it on a second display"
+              disabled={api.layout.floating.includes(panel)}
+              onClick={() => void api.floatPanel(panel, 120, 120)}
+            />
+          ))}
         </RibCol>
       </RibGroup>
       {!vp && <RibHint>Viewport is still starting…</RibHint>}

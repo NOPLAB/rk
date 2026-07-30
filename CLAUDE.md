@@ -114,7 +114,12 @@ CAD kernel abstraction and parametric modeling:
   extrude_region`/`revolve_region` take the holes with them: truck attaches
   a face from outer + hole wires in one go, so a washer never needs the
   boolean subtract that backend does not have
-- **Parametric history**: Ordered feature list with rollback/rebuild support
+- **Parametric history**: Ordered feature list with rollback/rebuild support.
+  `FeatureGroup` bundles timeline entries under one name for the browser and
+  nothing else — the build order, the bodies and the rollback position are
+  untouched, so grouping can never change the model. A feature belongs to at
+  most one group (adding it to a second moves it) and a group that loses its
+  last member is deleted with it
 
 ### rk-engine
 
@@ -192,10 +197,11 @@ the egui frontend once at feature parity):
   validate-all-then-apply), `engine_apply_interactive` /
   `engine_end_interaction` (drag sessions), `scene_snapshot` (part
   metadata + physics + render transforms + body IDs + links/joints +
-  collisions + sketches + feature history + undo state),
+  collisions + sketches + feature history + feature groups + undo state),
   `sketch_geometry` (entities with point references resolved to 2D
   coordinates, plus the constraint list), `get_part_mesh` /
-  `get_body_mesh` (bulk data pulled by ID)
+  `get_body_mesh` (bulk data pulled by ID), and `open_panel_window` /
+  `close_panel_window` / `floating_panels` for the torn-off panels
 - `src/` (React): `engine/api.ts` typed IPC wrappers, `engine/commands.ts`
   command builders, `engine/constraints.ts` the sketch-constraint catalog,
   `engine/interaction.ts` drag-session helpers (latest-wins coalescing),
@@ -206,7 +212,7 @@ the egui frontend once at feature parity):
   `scene/viewCube.ts` viewport overlays, `ui/` shared state,
   `components/` chrome
 - **UI shell (modelled on Autodesk Inventor)**: a five-row grid — quick-access
-  title bar, ribbon, workspace (browser | viewport | inspector), document
+  title bar, ribbon, workspace (three docks), document
   tabs, status bar. `components/Ribbon.tsx` owns the tab strip and the File
   drop-down, `components/ribbonTabs.tsx` holds what each tab can do (3D
   Model / Sketch / Assembly / View) and `ribbonParts.tsx` the group plus big
@@ -218,6 +224,38 @@ the egui frontend once at feature parity):
   properties and the sketch's constraint list. Icons are inline two-tone SVG
   in `components/icons.tsx` — no icon font or CDN, since the app ships as one
   self-contained window
+- **Panels are tabs** (`ui/layout.ts`): the model browser, the 3D view and
+  the inspector each live in one of three docks, or floating in their own OS
+  window, or hidden — that one structure is what the tab strip, the drag
+  between docks and the tear-off all read and write. The dock holding the 3D
+  view is the one that stretches. The layout is kept in localStorage, and a
+  stored layout is repaired on load rather than trusted, since a bad one
+  would come up as a blank window. Dragging uses pointer capture rather than
+  HTML5 drag-and-drop (`ui/panelDrag.ts`): with the pointer captured the move
+  events keep coming after it leaves the window, and `screenX`/`screenY` say
+  where on the desktop it was let go — which is what makes "drag the tab onto
+  the second monitor" possible at all. The ghost and the drop highlight are
+  plain DOM, because a pointermove at 120 Hz must not re-render the tree
+- A torn-off panel is a second Tauri window running the same app; it reads
+  its own window label (`panel-<id>`) to know which single panel to draw.
+  The two share nothing but the engine, so `engine_apply` broadcasts
+  `rk://document-changed` and the other window re-pulls. `open_panel_window`
+  is `async` **on purpose**: a synchronous Tauri command runs on the main
+  thread, and building a webview from there yields a window whose webview
+  never attaches — an empty white frame. Closing the window emits
+  `rk://panel-closed` from the Rust destroy handler, which is what docks the
+  panel back; a webview cannot be relied on to report its own death
+- Moving the 3D view to another dock remounts its canvas and therefore builds
+  a new `Viewport`; `cameraState()`/`restoreCamera()` carry the view across so
+  the model does not appear to jump. Switching tabs inside a dock only hides
+  the panel (`display: none`) — unmounting would throw away the WebGL context
+- Right-click menus all come from `ui/menus.ts` and render through
+  `components/ContextMenu.tsx`, so a part in the browser tree and the same
+  part in the 3D view offer the same commands. `Viewport.onContextMenu`
+  resolves what the pointer is over (part / sketch region / empty space, or
+  the sketch being edited) before the menu is built, so no caller needs the
+  camera. Rename items open `components/TextPromptDialog.tsx` rather than
+  `window.prompt`, which the webview styles nothing like the rest of the app
 - Every chrome component takes one `AppApi` (`ui/appApi.ts`) instead of a
   dozen props; App owns the state and all mutation still goes through `run`.
   `ui/fileActions.ts` is the single implementation of the document commands,
@@ -260,6 +298,13 @@ the egui frontend once at feature parity):
   labels, icons and prompts, shared by the ribbon and the status bar. An
   edit tool that declines returns a `problem` string that lands in the
   status bar, rather than looking broken
+- The ribbon shows one button per shape, not one per variant: the same file
+  groups the tools into families (`CREATE_FAMILIES` / `MODIFY_FAMILIES`) and
+  `RibSplit` gives each a caret with the rest, the way Fusion nests 2-point /
+  3-point / centre rectangles under "Rectangle". The button's face is the
+  variant last chosen (`AppApi.toolVariant`, recorded by `setSketchTool`), so
+  it always says what pressing it will do. The flyout is `position: fixed`
+  because the ribbon clips its own overflow
 - Arcs have no direction flag: the engine stores a counter-clockwise sweep
   from `start` to `end`, so a clockwise arc is emitted with the endpoints
   swapped. Getting this backwards turns a slot's end caps inside out
@@ -340,5 +385,7 @@ Astro + Starlight documentation site, published to GitHub Pages at
   + sketch constraints and dimensions + the Inventor-style shell (ribbon,
   model browser, ViewCube, navigation bar) + the Fusion sketching flow
   (pick a plane or a face in the 3D view, the full tool set, sketches that
-  stay visible, click a region to extrude it) done; egui retirement pending
+  stay visible, click a region to extrude it) + dockable panel tabs that tear
+  off into their own window + feature groups + context menus throughout done;
+  egui retirement pending
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)

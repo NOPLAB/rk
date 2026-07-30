@@ -70,6 +70,23 @@ export interface SketchHit {
   regionId: string | null;
 }
 
+/** Camera pose, carried from one Viewport to the next across a dock move */
+export interface CameraState {
+  position: number[];
+  target: number[];
+  up: number[];
+}
+
+/** What a right-click in the 3D view landed on */
+export interface ViewportTarget {
+  /** Part under the pointer, when not sketching */
+  partId: string | null;
+  /** Filled region of a finished sketch, when not sketching */
+  region: RegionPick | null;
+  /** Where the pointer sits on the active sketch's plane, while sketching */
+  sketchHit: SketchHit | null;
+}
+
 export class Viewport {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -123,6 +140,8 @@ export class Viewport {
   onPlaneHover: ((pick: PlanePick | null) => void) | null = null;
   /** A filled region of a finished sketch was clicked (`null` = empty space) */
   onRegionPick: ((pick: RegionPick | null, additive: boolean) => void) | null = null;
+  /** Right-click, with whatever the pointer was over resolved for the menu */
+  onContextMenu: ((target: ViewportTarget, e: MouseEvent) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -255,6 +274,25 @@ export class Viewport {
     canvas.addEventListener("pointerleave", () => this.cube.setHover(null, 0), {
       signal,
     });
+    // Right-click opens the menu on whatever is under the pointer. The pick
+    // runs here rather than in the menu so the caller never needs the camera.
+    canvas.addEventListener(
+      "contextmenu",
+      (e) => {
+        e.preventDefault();
+        if (!this.onContextMenu) return;
+        const sketching = this.sketch.active;
+        this.onContextMenu(
+          {
+            partId: sketching ? null : this.pick(e),
+            region: sketching ? null : this.idle.pick(this.rayThrough(e)),
+            sketchHit: sketching ? this.sketchHit(e) : null,
+          },
+          e,
+        );
+      },
+      { signal },
+    );
 
     this.renderer.setAnimationLoop(() => {
       if (this.disposed) return;
@@ -262,6 +300,27 @@ export class Viewport {
       this.renderer.render(this.scene, this.camera);
       this.renderOverlays();
     });
+  }
+
+  /**
+   * Where the camera is looking. Dragging the 3D view into another dock
+   * remounts the canvas and therefore builds a new Viewport, and coming back
+   * to a reset camera would feel like the model had moved.
+   */
+  cameraState(): CameraState {
+    return {
+      position: this.camera.position.toArray(),
+      target: this.controls.target.toArray(),
+      up: this.camera.up.toArray(),
+    };
+  }
+
+  restoreCamera(state: CameraState) {
+    this.camera.position.fromArray(state.position);
+    this.camera.up.fromArray(state.up);
+    this.controls.target.fromArray(state.target);
+    this.camera.lookAt(this.controls.target);
+    this.controls.update();
   }
 
   resize(width: number, height: number) {
@@ -454,7 +513,7 @@ export class Viewport {
     return [...this.bodyMeshes.values(), ...this.partMeshes.values()];
   }
 
-  private rayThrough(e: PointerEvent): THREE.Raycaster {
+  private rayThrough(e: MouseEvent): THREE.Raycaster {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.raycaster.setFromCamera(
       new THREE.Vector2(
@@ -563,7 +622,7 @@ export class Viewport {
     this.controls.target.copy(origin);
   }
 
-  private sketchHit(e: PointerEvent): SketchHit | null {
+  private sketchHit(e: MouseEvent): SketchHit | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
@@ -737,7 +796,7 @@ export class Viewport {
     }
   }
 
-  private pick(e: PointerEvent): string | null {
+  private pick(e: MouseEvent): string | null {
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,

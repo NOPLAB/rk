@@ -4,6 +4,7 @@
 // object instead of a dozen props each. Everything that mutates the document
 // still goes through `run`, so the command/event path is unchanged.
 
+import type { MenuEntry } from "../components/ContextMenu";
 import type {
   PartInfo,
   RunCommands,
@@ -16,6 +17,7 @@ import type { ConstraintDef } from "../engine/constraints";
 import type { RegionPick } from "../scene/idleSketches";
 import type { SketchTool, ToolOptions } from "../scene/sketchTools";
 import type { GizmoMode, Viewport } from "../scene/viewport";
+import type { DockId, Layout, PanelId } from "./layout";
 
 /** A dimension the user started, waiting for its value to be accepted */
 export interface PendingDimension {
@@ -28,6 +30,14 @@ export interface PendingDimension {
 
 /** Modeless command dialogs that float over the viewport */
 export type DialogKind = "extrude" | "revolve";
+
+/** A one-line text entry, for the Rename items on the context menus */
+export interface TextPrompt {
+  title: string;
+  value: string;
+  /** Cancelling simply never calls this */
+  onAccept(value: string): void;
+}
 
 export interface AppApi {
   snapshot: SceneSnapshot | null;
@@ -50,6 +60,8 @@ export interface AppApi {
   /** Numbers the tools need up front: polygon sides, fillet radius, ... */
   toolOptions: ToolOptions;
   setToolOptions(options: Partial<ToolOptions>): void;
+  /** Variant each ribbon tool family last ran, keyed by family id */
+  toolVariant: Record<string, SketchTool>;
 
   /** Waiting for the user to click a plane or a face in the 3D view */
   pickingPlane: boolean;
@@ -71,10 +83,25 @@ export interface AppApi {
   setShowGrid(visible: boolean): void;
   showSketches: boolean;
   setShowSketches(visible: boolean): void;
-  showBrowser: boolean;
-  setShowBrowser(visible: boolean): void;
-  showInspector: boolean;
-  setShowInspector(visible: boolean): void;
+
+  // ---- panels ----
+  /** Which dock each panel sits in, and which of them are floating */
+  layout: Layout;
+  updateLayout(next: Layout): void;
+  movePanel(panel: PanelId, dock: DockId, index: number): void;
+  /** Tear a panel off into its own window at that spot on the desktop */
+  floatPanel(panel: PanelId, screenX: number, screenY: number): Promise<void>;
+  hidePanel(panel: PanelId): void;
+  togglePanel(panel: PanelId): void;
+  /**
+   * Set when this window shows one torn-off panel rather than the whole app;
+   * chrome (ribbon, title bar, status bar) is left out in that case
+   */
+  soloPanel: PanelId | null;
+
+  // ---- transient UI ----
+  openMenu(x: number, y: number, entries: MenuEntry[]): void;
+  askText(prompt: TextPrompt): void;
 
   /** Unit meshes are interpreted in when imported */
   meshUnit: StlUnit;

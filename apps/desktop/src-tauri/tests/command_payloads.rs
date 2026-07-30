@@ -633,9 +633,107 @@ fn feature_payloads_apply() {
 
     apply(
         &mut eng,
+        json!({"type": "rename_feature", "feature_id": feature_id, "name": "Base Pad"}),
+    );
+    assert_eq!(
+        eng.document()
+            .cad
+            .history
+            .get_by_id(feature_id)
+            .unwrap()
+            .name(),
+        "Base Pad"
+    );
+
+    apply(
+        &mut eng,
         json!({"type": "delete_feature", "feature_id": feature_id}),
     );
     assert!(eng.body_ids().is_empty());
+}
+
+/// The browser's Group / Rename / Collapse / Ungroup menu items
+#[test]
+fn feature_group_payloads_apply() {
+    if !rk_cad::default_kernel().is_available() {
+        return;
+    }
+    let mut eng = engine();
+    let sketch_id = create_sketch(&mut eng);
+    rectangle(&mut eng, sketch_id);
+
+    let mut feature_ids = Vec::new();
+    for (i, distance) in [0.01_f32, 0.02].iter().enumerate() {
+        let events = apply(
+            &mut eng,
+            json!({
+                "type": "add_extrude",
+                "id": null,
+                "name": format!("Extrude {}", i + 1),
+                "sketch_id": sketch_id,
+                "profiles": [],
+                "distance": distance,
+                "direction": "Positive",
+                "boolean_op": "New",
+                "target_body": null,
+            }),
+        );
+        feature_ids.push(
+            events
+                .iter()
+                .find_map(|e| match e {
+                    Event::FeatureAdded { feature_id } => Some(*feature_id),
+                    _ => None,
+                })
+                .expect("FeatureAdded event"),
+        );
+    }
+
+    let group_id = Uuid::new_v4();
+    apply(
+        &mut eng,
+        json!({
+            "type": "group_features",
+            "id": group_id,
+            "name": "Pads",
+            "feature_ids": feature_ids,
+        }),
+    );
+    apply(
+        &mut eng,
+        json!({"type": "rename_feature_group", "group_id": group_id, "name": "Boss"}),
+    );
+    apply(
+        &mut eng,
+        json!({"type": "set_feature_group_collapsed", "group_id": group_id, "collapsed": true}),
+    );
+    let group = eng.document().cad.history.get_group(group_id).unwrap();
+    assert_eq!(group.name, "Boss");
+    assert!(group.collapsed);
+    assert_eq!(group.members, feature_ids);
+
+    apply(
+        &mut eng,
+        json!({"type": "ungroup_features", "group_id": group_id}),
+    );
+    assert!(eng.document().cad.history.groups().is_empty());
+    assert_eq!(
+        eng.body_ids().len(),
+        2,
+        "grouping and ungrouping never touch the bodies"
+    );
+}
+
+/// The sketch's Rename menu item
+#[test]
+fn rename_sketch_payload_applies() {
+    let mut eng = engine();
+    let sketch_id = create_sketch(&mut eng);
+    apply(
+        &mut eng,
+        json!({"type": "rename_sketch", "sketch_id": sketch_id, "name": "Base Profile"}),
+    );
+    assert_eq!(eng.sketch(sketch_id).unwrap().name, "Base Profile");
 }
 
 #[test]

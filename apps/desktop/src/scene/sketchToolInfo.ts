@@ -1,7 +1,9 @@
 // What each sketch tool is called, what it looks like, and how it is used.
 //
 // One table so the ribbon button, its tooltip and the status-bar prompt can
-// never drift apart.
+// never drift apart. Below it, the families that collapse the variants of one
+// shape into a single ribbon button with a drop-down, the way Fusion's Create
+// menu nests 2-point / 3-point / centre rectangles under "Rectangle".
 
 import type { IconName } from "../components/icons";
 import type { SketchTool } from "./sketchTools";
@@ -167,3 +169,65 @@ export const TOOLS: Record<SketchTool, ToolInfo> = {
     prompt: "Circular pattern: select first, then click the centre",
   },
 };
+
+/**
+ * A ribbon button that stands for several related tools. The button runs the
+ * variant last used, and the caret lists the rest — one button instead of
+ * three for the rectangles, the circles, the arcs and so on.
+ */
+export interface ToolFamily {
+  /** Stable key for remembering the chosen variant */
+  id: string;
+  /** Shown as the group's own name, e.g. "Rectangle" */
+  label: string;
+  /** Variants, the first being the default */
+  tools: SketchTool[];
+}
+
+/** Create tools, grouped the way Fusion's Create menu groups them */
+export const CREATE_FAMILIES: ToolFamily[] = [
+  { id: "line", label: "Line", tools: ["line"] },
+  { id: "rect", label: "Rectangle", tools: ["rect", "rect3", "rectCenter"] },
+  { id: "circle", label: "Circle", tools: ["circle", "circle2", "circle3"] },
+  { id: "arc", label: "Arc", tools: ["arc3", "arcCenter"] },
+  {
+    id: "polygon",
+    label: "Polygon",
+    tools: ["polygon", "polygonCirc", "polygonEdge"],
+  },
+  { id: "slot", label: "Slot", tools: ["slot", "slotOverall"] },
+  { id: "ellipse", label: "Ellipse", tools: ["ellipse"] },
+  { id: "spline", label: "Spline", tools: ["spline"] },
+  { id: "point", label: "Point", tools: ["point"] },
+];
+
+/** Modify tools; only the patterns are numerous enough to nest */
+export const MODIFY_FAMILIES: ToolFamily[] = [
+  { id: "fillet", label: "Fillet", tools: ["fillet"] },
+  { id: "trim", label: "Trim", tools: ["trim"] },
+  { id: "extend", label: "Extend", tools: ["extend"] },
+  { id: "offset", label: "Offset", tools: ["offset"] },
+  { id: "mirror", label: "Mirror", tools: ["mirror"] },
+  { id: "pattern", label: "Pattern", tools: ["patternRect", "patternCirc"] },
+];
+
+const FAMILY_OF = new Map<SketchTool, ToolFamily>();
+for (const family of [...CREATE_FAMILIES, ...MODIFY_FAMILIES]) {
+  for (const tool of family.tools) FAMILY_OF.set(tool, family);
+}
+
+/** The family a tool belongs to, so choosing it updates that button's face */
+export function familyOf(tool: SketchTool): ToolFamily | null {
+  return FAMILY_OF.get(tool) ?? null;
+}
+
+/** The variant a family's button runs: the one last chosen, else the default */
+export function familyTool(
+  family: ToolFamily,
+  chosen: Record<string, SketchTool>,
+): SketchTool {
+  const remembered = chosen[family.id];
+  return remembered && family.tools.includes(remembered)
+    ? remembered
+    : family.tools[0];
+}

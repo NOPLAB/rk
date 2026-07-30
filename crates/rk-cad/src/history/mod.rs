@@ -39,6 +39,23 @@ impl HistoryEntry {
     }
 }
 
+/// A named bundle of timeline features.
+///
+/// Grouping is presentation only — it never changes the order features are
+/// rebuilt in, so a group can be added, renamed or dissolved without the
+/// model changing shape. Members are listed in history order by the client;
+/// a group is drawn where its first member sits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeatureGroup {
+    pub id: Uuid,
+    pub name: String,
+    /// Feature IDs belonging to this group
+    pub members: Vec<Uuid>,
+    /// Whether the browser shows the group folded up
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
 /// Manages the parametric feature history
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FeatureHistory {
@@ -48,6 +65,9 @@ pub struct FeatureHistory {
     rollback_position: Option<usize>,
     /// All sketches in the model
     sketches: HashMap<Uuid, Sketch>,
+    /// Named bundles of features, for the browser tree only
+    #[serde(default)]
+    groups: Vec<FeatureGroup>,
     /// All bodies in the model
     #[serde(skip)]
     bodies: HashMap<Uuid, CadBody>,
@@ -115,6 +135,12 @@ impl FeatureHistory {
     pub fn remove_feature(&mut self, id: Uuid) -> Option<Feature> {
         let index = self.index_of(id)?;
         let entry = self.entries.remove(index);
+        // A group that lost its last member would otherwise linger in the
+        // browser as an empty folder nothing can be dropped into
+        for group in &mut self.groups {
+            group.members.retain(|m| *m != id);
+        }
+        self.groups.retain(|g| !g.members.is_empty());
         Some(entry.feature)
     }
 
@@ -140,6 +166,44 @@ impl FeatureHistory {
     /// Get all history entries
     pub fn entries(&self) -> &[HistoryEntry] {
         &self.entries
+    }
+
+    // ============== Grouping ==============
+
+    /// All feature groups
+    pub fn groups(&self) -> &[FeatureGroup] {
+        &self.groups
+    }
+
+    /// Add a group. Members already in another group are moved into this one,
+    /// so a feature is never listed twice in the browser.
+    pub fn add_group(&mut self, group: FeatureGroup) {
+        for existing in &mut self.groups {
+            existing.members.retain(|m| !group.members.contains(m));
+        }
+        self.groups.retain(|g| !g.members.is_empty());
+        self.groups.push(group);
+    }
+
+    /// Dissolve a group; its features stay in the history untouched
+    pub fn remove_group(&mut self, id: Uuid) -> Option<FeatureGroup> {
+        let index = self.groups.iter().position(|g| g.id == id)?;
+        Some(self.groups.remove(index))
+    }
+
+    /// Get a group by ID
+    pub fn get_group(&self, id: Uuid) -> Option<&FeatureGroup> {
+        self.groups.iter().find(|g| g.id == id)
+    }
+
+    /// Get a mutable group by ID
+    pub fn get_group_mut(&mut self, id: Uuid) -> Option<&mut FeatureGroup> {
+        self.groups.iter_mut().find(|g| g.id == id)
+    }
+
+    /// The group a feature belongs to, if any
+    pub fn group_of(&self, feature_id: Uuid) -> Option<&FeatureGroup> {
+        self.groups.iter().find(|g| g.members.contains(&feature_id))
     }
 
     // ============== Sketch Management ==============
@@ -397,6 +461,50 @@ mod tests {
         // Roll forward
         history.rollback_to_end();
         assert_eq!(history.effective_len(), 3);
+    }
+
+    #[test]
+    fn a_group_never_lists_a_feature_twice() {
+        let mut history = FeatureHistory::new();
+        let ids: Vec<Uuid> = (0..3)
+            .map(|i| {
+                let f = Feature::extrude(
+                    format!("F{i}"),
+                    Uuid::new_v4(),
+                    1.0,
+                    ExtrudeDirection::Positive,
+                );
+                let id = f.id();
+                history.add_feature(f);
+                id
+            })
+            .collect();
+
+        history.add_group(FeatureGroup {
+            id: Uuid::new_v4(),
+            name: "First two".into(),
+            members: vec![ids[0], ids[1]],
+            collapsed: false,
+        });
+        let second = Uuid::new_v4();
+        history.add_group(FeatureGroup {
+            id: second,
+            name: "Last two".into(),
+            members: vec![ids[1], ids[2]],
+            collapsed: false,
+        });
+
+        // The middle feature moved to the newer group rather than appearing
+        // in both
+        assert_eq!(history.groups().len(), 2);
+        assert_eq!(history.groups()[0].members, vec![ids[0]]);
+        assert_eq!(history.group_of(ids[1]).map(|g| g.id), Some(second));
+
+        // Deleting the features a group holds takes the group with them
+        history.remove_feature(ids[1]);
+        history.remove_feature(ids[2]);
+        assert_eq!(history.groups().len(), 1);
+        assert!(history.get_group(second).is_none());
     }
 
     #[test]

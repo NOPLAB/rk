@@ -207,6 +207,10 @@ axes X/Z) and YZ (`normal` `[1,0,0]`, axes Y/Z):
 {"type": "delete_sketch", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f"}
 ```
 
+```json
+{"type": "rename_sketch", "sketch_id": "c9d8e7f6-a5b4-4c3d-8e2f-1a0b9c8d7e6f", "name": "base_profile"}
+```
+
 Add entities **atomically** (one command = one undo step). Entities reference
 each other by ID, so generate UUIDs client-side. Entity kinds:
 `{"Point": {"id", "position": [x, y]}}`, `{"Line": {"id", "start", "end"}}`
@@ -330,7 +334,36 @@ given feature; `feature_id: null` rolls forward to the end):
 ```
 
 ```json
+{"type": "rename_feature", "feature_id": "d1e2f3a4-b5c6-4d7e-8f9a-0b1c2d3e4f5a", "name": "mounting_boss"}
+```
+
+```json
 {"type": "rebuild_features"}
+```
+
+## Feature groups
+
+Groups bundle timeline features under one name for the browser tree. They are
+presentation only: the build order, the bodies and the rollback position are all
+untouched, so grouping can never change the model. A feature belongs to at most
+one group — adding it to a second one moves it. Deleting the last feature of a
+group deletes the group. All four commands emit `feature_groups_changed`;
+re-read the group list from `describe_scene`.
+
+```json
+{"type": "group_features", "id": null, "name": "mounting boss", "feature_ids": ["d1e2f3a4-b5c6-4d7e-8f9a-0b1c2d3e4f5a"]}
+```
+
+```json
+{"type": "rename_feature_group", "group_id": "e2f3a4b5-c6d7-4e8f-9a0b-1c2d3e4f5a6b", "name": "bracket"}
+```
+
+```json
+{"type": "set_feature_group_collapsed", "group_id": "e2f3a4b5-c6d7-4e8f-9a0b-1c2d3e4f5a6b", "collapsed": true}
+```
+
+```json
+{"type": "ungroup_features", "group_id": "e2f3a4b5-c6d7-4e8f-9a0b-1c2d3e4f5a6b"}
 ```
 
 ## History

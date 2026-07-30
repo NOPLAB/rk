@@ -2,18 +2,34 @@
 //
 // One tree over the whole document: origin planes, parts, the assembly's
 // link/joint chain, sketches, and the feature history ending in the "End of
-// Part" marker that shows where the rollback bar sits.
+// Part" marker that shows where the rollback bar sits. Every row carries the
+// same right-click menu the object has anywhere else in the app.
 
 import { useState, type ReactNode } from "react";
-import type { JointInfo, LinkInfo, PartInfo } from "../engine/api";
+import type {
+  FeatureGroupInfo,
+  FeatureInfo,
+  JointInfo,
+  LinkInfo,
+  PartInfo,
+} from "../engine/api";
 import {
   deleteFeature,
   deletePart,
   deleteSketch,
   rollbackTo,
+  setFeatureGroupCollapsed,
   setFeatureSuppressed,
 } from "../engine/commands";
 import type { AppApi } from "../ui/appApi";
+import {
+  featureGroupMenu,
+  featureMenu,
+  jointMenu,
+  originPlaneMenu,
+  partMenu,
+  sketchMenu,
+} from "../ui/menus";
 import { createSketchOnOrigin } from "../ui/sketchActions";
 import { Icon, type IconName } from "./icons";
 
@@ -27,6 +43,8 @@ export function BrowserPanel({ api }: { api: AppApi }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set(["origin"]),
   );
+  // Ctrl-click builds up a set of features, which is what Group acts on
+  const [picked, setPicked] = useState<string[]>([]);
   const snapshot = api.snapshot;
 
   const isOpen = (key: string) => !collapsed.has(key);
@@ -38,31 +56,23 @@ export function BrowserPanel({ api }: { api: AppApi }) {
       return next;
     });
 
-  const head = (
-    <div className="dock-head">
-      <button className="dock-tab active">Model</button>
-      <span className="spacer" />
-      <button
-        className="qa-btn"
-        title="Hide the browser"
-        onClick={() => api.setShowBrowser(false)}
-      >
-        <Icon name="close" size={13} />
-      </button>
-    </div>
-  );
-
   if (!snapshot) {
     return (
       <aside className="browser">
-        {head}
         <div className="empty">Loading…</div>
       </aside>
     );
   }
 
-  const { parts, links, joints, sketches, features, rollback_position } =
-    snapshot;
+  const {
+    parts,
+    links,
+    joints,
+    sketches,
+    features,
+    feature_groups,
+    rollback_position,
+  } = snapshot;
 
   const partName = (partId: string | null, linkId: string) =>
     (partId && parts.find((p) => p.id === partId)?.name) ||
@@ -75,6 +85,9 @@ export function BrowserPanel({ api }: { api: AppApi }) {
     if (depth > MAX_DEPTH) return [];
     const key = `link:${link.id}`;
     const outgoing = joints.filter((j) => j.parent_link === link.id);
+    const part = link.part_id
+      ? (parts.find((p) => p.id === link.part_id) ?? null)
+      : null;
     const rows: ReactNode[] = [
       <TreeRow
         key={key}
@@ -87,6 +100,7 @@ export function BrowserPanel({ api }: { api: AppApi }) {
         selected={!!link.part_id && link.part_id === api.selected}
         onToggle={() => toggle(key)}
         onClick={() => link.part_id && api.select(link.part_id)}
+        onMenu={part ? (x, y) => api.openMenu(x, y, partMenu(api, part)) : undefined}
       />,
     ];
     if (!isOpen(key)) return rows;
@@ -106,6 +120,7 @@ export function BrowserPanel({ api }: { api: AppApi }) {
         label={joint.name}
         tag={joint.joint_type}
         onClick={() => joint.child_part && api.select(joint.child_part)}
+        onMenu={(x, y) => api.openMenu(x, y, jointMenu(api, joint))}
       />,
     ];
     if (child) rows.push(...renderLink(child, depth + 1));
@@ -120,9 +135,100 @@ export function BrowserPanel({ api }: { api: AppApi }) {
     (p) => !links.some((l) => l.part_id === p.id),
   );
 
+  // ---- feature history, with groups folded in --------------------------
+
+  const orderOf = new Map(features.map((f, i) => [f.id, i]));
+  const rolledBack = (id: string) =>
+    rollback_position !== null && (orderOf.get(id) ?? 0) >= rollback_position;
+  /** The group each feature belongs to, keyed by the member drawn first */
+  const groupAt = new Map<string, FeatureGroupInfo>();
+  const grouped = new Set<string>();
+  for (const group of feature_groups) {
+    const first = features.find((f) => group.members.includes(f.id));
+    if (first) groupAt.set(first.id, group);
+    group.members.forEach((id) => grouped.add(id));
+  }
+
+  const clickFeature = (feature: FeatureInfo, additive: boolean) =>
+    setPicked((prev) => {
+      if (!additive) return prev.length === 1 && prev[0] === feature.id ? [] : [feature.id];
+      return prev.includes(feature.id)
+        ? prev.filter((id) => id !== feature.id)
+        : [...prev, feature.id];
+    });
+
+  const featureRow = (feature: FeatureInfo, depth: number) => (
+    <TreeRow
+      key={feature.id}
+      depth={depth}
+      icon="feature"
+      label={feature.name}
+      tag={feature.kind}
+      selected={picked.includes(feature.id)}
+      struck={feature.suppressed || rolledBack(feature.id)}
+      hint="Click to pick — Ctrl adds, then right-click to group"
+      onClick={(e) => clickFeature(feature, e.ctrlKey || e.metaKey || e.shiftKey)}
+      onMenu={(x, y) => api.openMenu(x, y, featureMenu(api, feature, picked))}
+      actions={
+        <>
+          <RowButton
+            icon="suppress"
+            title={feature.suppressed ? "Unsuppress" : "Suppress"}
+            onClick={() =>
+              void api.run([
+                setFeatureSuppressed(feature.id, !feature.suppressed),
+              ])
+            }
+          />
+          <RowButton
+            icon="rollback"
+            title="Roll back to just after this feature"
+            onClick={() => void api.run([rollbackTo(feature.id)])}
+          />
+          <RowButton
+            icon="close"
+            title="Delete feature"
+            onClick={() => void api.run([deleteFeature(feature.id)])}
+          />
+        </>
+      }
+    />
+  );
+
+  const featureRows: ReactNode[] = [];
+  for (const feature of features) {
+    const group = groupAt.get(feature.id);
+    if (group) {
+      featureRows.push(
+        <TreeRow
+          key={`group:${group.id}`}
+          depth={2}
+          icon="folder"
+          label={group.name}
+          tag={`${group.members.length}`}
+          hasChildren
+          open={!group.collapsed}
+          hint="A bundle of timeline features — the model is unaffected"
+          onToggle={() =>
+            void api.run([setFeatureGroupCollapsed(group.id, !group.collapsed)])
+          }
+          onMenu={(x, y) => api.openMenu(x, y, featureGroupMenu(api, group))}
+        />,
+      );
+      if (!group.collapsed) {
+        for (const id of group.members) {
+          const member = features.find((f) => f.id === id);
+          if (member) featureRows.push(featureRow(member, 3));
+        }
+      }
+      continue;
+    }
+    if (grouped.has(feature.id)) continue; // drawn under its group already
+    featureRows.push(featureRow(feature, 2));
+  }
+
   return (
     <aside className="browser">
-      {head}
       <div className="tree">
         <TreeRow
           depth={0}
@@ -151,6 +257,7 @@ export function BrowserPanel({ api }: { api: AppApi }) {
               label={`${plane} Plane`}
               hint="Start a sketch on this plane"
               onClick={() => void createSketchOnOrigin(api, plane)}
+              onMenu={(x, y) => api.openMenu(x, y, originPlaneMenu(api, plane))}
               // Hovering the row lights the matching quad in the 3D view
               onHover={(over) =>
                 api.viewport()?.setPlaneHighlight(over ? plane : null)
@@ -205,6 +312,7 @@ export function BrowserPanel({ api }: { api: AppApi }) {
               dim
               selected={part.id === api.selected}
               onClick={() => api.select(part.id)}
+              onMenu={(x, y) => api.openMenu(x, y, partMenu(api, part))}
             />
           ))}
 
@@ -235,6 +343,7 @@ export function BrowserPanel({ api }: { api: AppApi }) {
                 hint="Click to edit this sketch"
                 selected={editing}
                 onClick={() => api.activateSketch(editing ? null : sketch.id)}
+                onMenu={(x, y) => api.openMenu(x, y, sketchMenu(api, sketch))}
                 actions={
                   <RowButton
                     icon="close"
@@ -263,43 +372,7 @@ export function BrowserPanel({ api }: { api: AppApi }) {
             No features
           </div>
         )}
-        {isOpen("features") &&
-          features.map((feature, i) => (
-            <TreeRow
-              key={feature.id}
-              depth={2}
-              icon="feature"
-              label={feature.name}
-              tag={feature.kind}
-              struck={
-                feature.suppressed ||
-                (rollback_position !== null && i >= rollback_position)
-              }
-              actions={
-                <>
-                  <RowButton
-                    icon="suppress"
-                    title={feature.suppressed ? "Unsuppress" : "Suppress"}
-                    onClick={() =>
-                      void api.run([
-                        setFeatureSuppressed(feature.id, !feature.suppressed),
-                      ])
-                    }
-                  />
-                  <RowButton
-                    icon="rollback"
-                    title="Roll back to just after this feature"
-                    onClick={() => void api.run([rollbackTo(feature.id)])}
-                  />
-                  <RowButton
-                    icon="close"
-                    title="Delete feature"
-                    onClick={() => void api.run([deleteFeature(feature.id)])}
-                  />
-                </>
-              }
-            />
-          ))}
+        {isOpen("features") && featureRows}
         {isOpen("features") && (
           <TreeRow
             depth={2}
@@ -342,6 +415,7 @@ function PartRow({
       selected={part.id === api.selected}
       swatch={`rgb(${rgb})`}
       onClick={() => api.select(part.id === api.selected ? null : part.id)}
+      onMenu={(x, y) => api.openMenu(x, y, partMenu(api, part))}
       actions={
         <RowButton
           icon="close"
@@ -369,7 +443,9 @@ interface RowProps {
   struck?: boolean;
   swatch?: string;
   onToggle?: () => void;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent) => void;
+  /** Right-click, at the pointer */
+  onMenu?: (x: number, y: number) => void;
   /** Pointer entered (true) or left (false) the row */
   onHover?: (over: boolean) => void;
   actions?: ReactNode;
@@ -389,6 +465,7 @@ function TreeRow({
   swatch,
   onToggle,
   onClick,
+  onMenu,
   onHover,
   actions,
 }: RowProps) {
@@ -406,6 +483,15 @@ function TreeRow({
       style={{ paddingLeft: 4 + depth * 12 }}
       title={hint ?? label}
       onClick={onClick}
+      onContextMenu={
+        onMenu
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMenu(e.clientX, e.clientY);
+            }
+          : undefined
+      }
       onMouseEnter={onHover ? () => onHover(true) : undefined}
       onMouseLeave={onHover ? () => onHover(false) : undefined}
     >

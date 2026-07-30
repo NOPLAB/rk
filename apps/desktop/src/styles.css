@@ -459,55 +459,140 @@ body {
 .inspector {
   display: flex;
   flex-direction: column;
-  width: 232px;
-  flex-shrink: 0;
   background: var(--bg-panel);
   min-height: 0;
-}
-
-.browser {
-  border-right: 1px solid var(--line);
-}
-
-.inspector {
-  width: 262px;
-  border-left: 1px solid var(--line);
-  overflow-y: auto;
-}
-
-.dock-head {
-  display: flex;
-  align-items: center;
-  height: 23px;
-  padding-left: 2px;
-  background: var(--bg-panel-head);
-  border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-}
-
-.dock-tab {
-  padding: 0 9px;
-  height: 100%;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-dim);
-  font-size: 11.5px;
-  cursor: pointer;
-}
-
-.dock-tab.active {
-  color: #fff;
-  border-bottom-color: var(--accent);
-}
-
-.dock-head .spacer {
   flex: 1;
 }
 
-.dock-head .qa-btn {
-  width: 21px;
-  height: 21px;
+.inspector {
+  overflow-y: auto;
+}
+
+/* ---- docks ------------------------------------------------------------- */
+
+/* A dock is a tab strip and the panels under it. Only the one holding the
+   3D view stretches; the others keep to a readable column width. */
+.dock {
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line);
+}
+
+.dock:last-child {
+  border-right: none;
+  border-left: 1px solid var(--line);
+}
+
+.dock.grows {
+  flex: 1;
+  width: auto;
+}
+
+/* An emptied dock stays as a rail so a tab can always be dragged back in */
+.dock.rail {
+  width: 9px;
+  background: var(--bg-chrome);
+}
+
+.dock.drop-into {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 24px;
+  background: var(--bg-panel-head);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.panel-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px 0 9px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-right: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: grab;
+  touch-action: none;
+}
+
+.panel-tab.active {
+  color: #fff;
+  background: var(--bg-panel);
+  border-bottom-color: var(--accent);
+}
+
+.panel-tab .tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  opacity: 0;
+}
+
+.panel-tab:hover .tab-close,
+.panel-tab.active .tab-close {
+  opacity: 0.55;
+}
+
+.panel-tab .tab-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Follows the pointer while a tab is being dragged */
+.panel-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 400;
+  pointer-events: none;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  color: #fff;
+  background: var(--bg-panel-head);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* Past the window edge: letting go here opens the panel in its own window */
+.panel-ghost.tearing {
+  border-style: dashed;
+  border-color: var(--accent);
 }
 
 /* ---- browser tree ------------------------------------------------------ */
@@ -1139,4 +1224,250 @@ input[type="checkbox"] {
   color: var(--text-mute);
   font-family: Consolas, monospace;
   font-size: 11px;
+}
+
+/* ---- a single torn-off panel ------------------------------------------- */
+
+/* The floating window is the panel plus a status line; the ribbon and the
+   title bar belong to the window that owns the document */
+.app.solo {
+  grid-template-rows: 1fr auto;
+}
+
+.app.solo .dock {
+  border: none;
+}
+
+/* ---- context menus ----------------------------------------------------- */
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 301;
+  min-width: 186px;
+  max-width: 300px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px #000a;
+}
+
+.context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 25px;
+  padding: 0 8px 0 4px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu button:hover:not(:disabled) {
+  background: var(--sel);
+  color: #fff;
+}
+
+.context-menu button:disabled {
+  color: var(--text-mute);
+  cursor: default;
+}
+
+.context-menu button.danger:not(:disabled) {
+  color: #ff8b7a;
+}
+
+.context-menu button.danger:hover:not(:disabled) {
+  background: #6d2b25;
+  color: #fff;
+}
+
+/* A fixed gutter, so the labels line up whether or not an entry is ticked */
+.context-menu .tick,
+.context-menu .no-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.context-menu .tick {
+  width: 12px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.context-menu .no-icon {
+  width: 14px;
+}
+
+.context-menu .label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu .sep {
+  height: 1px;
+  background: var(--line-soft);
+  margin: 4px 6px;
+}
+
+.context-menu .menu-header {
+  padding: 3px 8px 5px;
+  color: var(--text-mute);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- rename prompt ----------------------------------------------------- */
+
+.text-prompt {
+  position: fixed;
+  z-index: 301;
+  left: 50%;
+  top: 32%;
+  transform: translateX(-50%);
+  width: 300px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  box-shadow: 0 14px 40px #000b;
+}
+
+.text-prompt .tp-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+
+.text-prompt input {
+  width: 100%;
+  height: 26px;
+  padding: 0 7px;
+}
+
+.text-prompt .tp-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.text-prompt .tp-buttons button {
+  height: 25px;
+  padding: 0 13px;
+  background: var(--bg-chrome);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.text-prompt .tp-buttons button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ---- ribbon split buttons ---------------------------------------------- */
+
+/* One button per shape with its variants on the caret. The list is fixed
+   rather than absolute: the ribbon clips its own overflow, so anchored
+   inside the scrolling row it would be cut off at the group's edge. */
+.rb-split {
+  display: flex;
+  align-items: stretch;
+}
+
+.rb-caret {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 12px;
+  padding-bottom: 4px;
+  background: none;
+  border: none;
+  border-radius: 0 3px 3px 0;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.rb-caret .icon {
+  transform: rotate(90deg);
+}
+
+.rb-caret:hover {
+  background: var(--bg-hover);
+  color: #fff;
+}
+
+.rb-split.big .rb-caret {
+  align-items: center;
+  padding-bottom: 0;
+}
+
+.rb-flyout {
+  position: fixed;
+  z-index: 301;
+  min-width: 170px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px #000a;
+}
+
+.rb-flyout button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 25px;
+  padding: 0 8px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rb-flyout button:hover:not(:disabled) {
+  background: var(--sel);
+  color: #fff;
+}
+
+.rb-flyout button.active {
+  color: var(--accent);
+}
+
+/* Shown instead of a blank window when the app cannot start */
+.startup-failure {
+  margin: 0;
+  padding: 16px;
+  height: 100%;
+  overflow: auto;
+  background: #2a1d1d;
+  color: #ffb4a8;
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
 }

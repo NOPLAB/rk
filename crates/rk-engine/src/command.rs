@@ -149,6 +149,10 @@ pub enum Command {
     DeleteSketch {
         sketch_id: Uuid,
     },
+    RenameSketch {
+        sketch_id: Uuid,
+        name: String,
+    },
     /// Add entities atomically (a rectangle is 4 points + 4 lines in one
     /// command and therefore one undo step)
     AddSketchEntities {
@@ -213,9 +217,34 @@ pub enum Command {
     DeleteFeature {
         feature_id: Uuid,
     },
+    RenameFeature {
+        feature_id: Uuid,
+        name: String,
+    },
     SetFeatureSuppressed {
         feature_id: Uuid,
         suppressed: bool,
+    },
+
+    // ---- Feature grouping (browser presentation only) ----
+    /// Bundle timeline features under one name. Features already in another
+    /// group move into this one; the build order is untouched.
+    GroupFeatures {
+        id: Option<Uuid>,
+        name: Option<String>,
+        feature_ids: Vec<Uuid>,
+    },
+    /// Dissolve a group, leaving its features in place
+    UngroupFeatures {
+        group_id: Uuid,
+    },
+    RenameFeatureGroup {
+        group_id: Uuid,
+        name: String,
+    },
+    SetFeatureGroupCollapsed {
+        group_id: Uuid,
+        collapsed: bool,
     },
     /// Roll back to just after the given feature (`None` = to the end)
     RollbackTo {
@@ -270,6 +299,8 @@ impl Command {
                 | Command::LoadDocument { .. }
                 // High-frequency runtime state (slider)
                 | Command::SetJointPosition { .. }
+                // Browser presentation state; undoing a fold is never wanted
+                | Command::SetFeatureGroupCollapsed { .. }
                 // Regenerates derived geometry only
                 | Command::RebuildFeatures
                 // Handled by the history mechanism itself
@@ -289,6 +320,7 @@ impl Command {
             | Command::SetJointPosition { .. }
             | Command::ResetJointPosition { .. }
             | Command::ResetAllJointPositions
+            | Command::SetFeatureGroupCollapsed { .. }
             | Command::RebuildFeatures
             | Command::Undo
             | Command::Redo => None,
@@ -330,6 +362,7 @@ impl Command {
             Command::SetCollisionGeometry { .. } => "Update Collision Geometry",
             Command::CreateSketch { .. } => "Create Sketch",
             Command::DeleteSketch { .. } => "Delete Sketch",
+            Command::RenameSketch { .. } => "Rename Sketch",
             Command::AddSketchEntities { .. } => "Add Sketch Entities",
             Command::UpdateSketchEntity { .. } => "Edit Sketch Entity",
             Command::DeleteSketchEntities { .. } => "Delete Sketch Entities",
@@ -346,7 +379,12 @@ impl Command {
             Command::AddExtrude { .. } => "Extrude",
             Command::AddRevolve { .. } => "Revolve",
             Command::DeleteFeature { .. } => "Delete Feature",
+            Command::RenameFeature { .. } => "Rename Feature",
             Command::SetFeatureSuppressed { .. } => "Suppress Feature",
+            Command::GroupFeatures { .. } => "Group Features",
+            Command::UngroupFeatures { .. } => "Ungroup Features",
+            Command::RenameFeatureGroup { .. } => "Rename Group",
+            Command::SetFeatureGroupCollapsed { .. } => "Collapse Group",
             Command::RollbackTo { .. } => "Rollback History",
             Command::RebuildFeatures => "Rebuild Features",
             Command::Undo => "Undo",

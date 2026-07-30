@@ -100,6 +100,20 @@ pub fn describe_scene(engine: &Engine) -> Value {
         })
         .collect();
 
+    let feature_groups: Vec<Value> = cad
+        .history
+        .groups()
+        .iter()
+        .map(|group| {
+            json!({
+                "id": group.id,
+                "name": group.name,
+                "members": group.members,
+                "collapsed": group.collapsed,
+            })
+        })
+        .collect();
+
     let bodies: Vec<Value> = cad
         .history
         .bodies()
@@ -128,6 +142,7 @@ pub fn describe_scene(engine: &Engine) -> Value {
         "joints": joints,
         "sketches": sketches,
         "features": features,
+        "feature_groups": feature_groups,
         "bodies": bodies,
     })
 }

@@ -44,6 +44,18 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn exec_rename_sketch(
+        &mut self,
+        sketch_id: Uuid,
+        name: String,
+        events: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let sketch = self.sketch_mut(sketch_id)?;
+        sketch.name = name.clone();
+        events.push(Event::SketchRenamed { sketch_id, name });
+        Ok(())
+    }
+
     pub(crate) fn exec_add_sketch_entities(
         &mut self,
         sketch_id: Uuid,

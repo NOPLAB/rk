@@ -3,7 +3,10 @@ import * as THREE from "three";
 import {
   applyCommands,
   applyInteractive,
+  closePanelWindow,
   endInteraction,
+  floatingPanels,
+  openPanelWindow,
   sceneSnapshot,
   type Command,
   type EngineEvent,
@@ -18,8 +21,9 @@ import {
   type StlUnit,
 } from "./engine/commands";
 import { applyAtomic, createCoalescer, newUuid } from "./engine/interaction";
-import { Viewport, type GizmoMode } from "./scene/viewport";
+import { Viewport, type CameraState, type GizmoMode } from "./scene/viewport";
 import type { RegionPick } from "./scene/idleSketches";
+import { familyOf } from "./scene/sketchToolInfo";
 import {
   DEFAULT_TOOL_OPTIONS,
   SketchDrawing,
@@ -27,15 +31,31 @@ import {
   type ToolOptions,
 } from "./scene/sketchTools";
 import { BrowserPanel } from "./components/BrowserPanel";
-import { DimensionEntry } from "./components/DimensionEntry";
-import { FeatureDialog } from "./components/FeatureDialog";
+import { ContextMenu, type MenuRequest } from "./components/ContextMenu";
+import { Dock } from "./components/Dock";
 import { Inspector } from "./components/Inspector";
-import { NavBar } from "./components/NavBar";
 import { Ribbon } from "./components/Ribbon";
 import { DocTabs, StatusBar } from "./components/StatusBar";
+import { TextPromptDialog } from "./components/TextPromptDialog";
 import { TitleBar } from "./components/TitleBar";
-import type { AppApi, DialogKind, PendingDimension } from "./ui/appApi";
+import { ViewportPanel } from "./components/ViewportPanel";
+import type { AppApi, DialogKind, PendingDimension, TextPrompt } from "./ui/appApi";
 import { fileActions } from "./ui/fileActions";
+import {
+  DOCK_IDS,
+  PANELS,
+  dockPanel,
+  floatPanel,
+  hidePanel,
+  loadLayout,
+  movePanel,
+  panelVisible,
+  saveLayout,
+  type Layout,
+  type PanelId,
+} from "./ui/layout";
+import { currentPanel, onDocumentChanged, onPanelClosed } from "./ui/panelWindows";
+import { regionMenu, partMenu, sketchEditMenu, viewportMenu } from "./ui/menus";
 import { createSketchOn } from "./ui/sketchActions";
 
 /** Click behaviour of the sketch select tool: shift accumulates, plain replaces */
@@ -81,19 +101,25 @@ const SKETCH_KEYS: Record<string, SketchTool> = {
 };
 
 export default function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  /** Set when this window was torn off and shows one panel only */
+  const solo = useMemo(currentPanel, []);
+
+  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
   const snapshotRef = useRef<SceneSnapshot | null>(null);
   const drawingRef = useRef(new SketchDrawing());
-  /** The viewport effect runs once; these keep its callbacks current */
+  /** The viewport effect runs once per canvas; these keep its callbacks current */
   const sketchSelectionRef = useRef<string[]>([]);
   const apiRef = useRef<AppApi | null>(null);
+  /** Survives the Viewport being rebuilt when the 3D view changes dock */
+  const cameraRef = useRef<CameraState | null>(null);
   const [snapshot, setSnapshot] = useState<SceneSnapshot | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("none");
   const [sketchId, setSketchId] = useState<string | null>(null);
-  const [sketchTool, setSketchTool] = useState<SketchTool>("select");
+  const [sketchTool, setSketchToolState] = useState<SketchTool>("select");
+  const [toolVariant, setToolVariant] = useState<Record<string, SketchTool>>({});
   const [sketchSelection, setSketchSelection] = useState<string[]>([]);
   const [sketchGeom, setSketchGeom] = useState<SketchGeometry | null>(null);
   const [toolOptions, setToolOptionsState] = useState<ToolOptions>(
@@ -107,8 +133,11 @@ export default function App() {
   const [showCollisions, setShowCollisions] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showSketches, setShowSketches] = useState(true);
-  const [showBrowser, setShowBrowser] = useState(true);
-  const [showInspector, setShowInspector] = useState(true);
+  const [layout, setLayoutState] = useState<Layout>(() =>
+    solo ? { docks: { left: [], main: [solo], right: [] }, active: { left: null, main: solo, right: null }, floating: [] } : loadLayout(),
+  );
+  const [menu, setMenu] = useState<MenuRequest | null>(null);
+  const [prompt, setPrompt] = useState<TextPrompt | null>(null);
   const [meshUnit, setMeshUnit] = useState<StlUnit>("Millimeters");
   const [status, setStatus] = useState("");
 
@@ -155,13 +184,78 @@ export default function App() {
     viewportRef.current?.setRegionSelection(selection);
   }, []);
 
+  /** Choosing a tool also decides what its ribbon family's button will run */
+  const setSketchTool = useCallback((tool: SketchTool) => {
+    setSketchToolState(tool);
+    const family = familyOf(tool);
+    if (family) setToolVariant((prev) => ({ ...prev, [family.id]: tool }));
+  }, []);
+
+  const updateLayout = useCallback(
+    (next: Layout) => {
+      setLayoutState(next);
+      if (!solo) saveLayout(next);
+    },
+    [solo],
+  );
+
+  // First read of the document. It lives outside the viewport effect because
+  // a floating browser or inspector window has no canvas at all, and would
+  // otherwise sit on "Loading…" forever.
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
+    void refresh();
+  }, [refresh]);
+
+  // ---- panels ------------------------------------------------------------
+
+  // The main window only draws tabs for panels that are not off in a window
+  // of their own; a reload would otherwise show the same panel twice
+  useEffect(() => {
+    if (solo) return;
+    void floatingPanels().then((floating) => {
+      if (floating.length === 0) return;
+      setLayoutState((prev) => {
+        let next = prev;
+        for (const panel of floating) {
+          if (panel in PANELS) next = floatPanel(next, panel as PanelId);
+        }
+        return next;
+      });
+    });
+  }, [solo]);
+
+  // A floating panel's window closed: take it back into the dock it came from
+  useEffect(() => {
+    if (solo) return;
+    const pending = onPanelClosed((panel) => {
+      setLayoutState((prev) =>
+        prev.floating.includes(panel) ? dockPanel(prev, panel) : prev,
+      );
+    });
+    return () => void pending.then((off) => off());
+  }, [solo]);
+
+  // Another window changed the document — the engine already has it, so this
+  // window rebuilds its scene from the snapshot
+  useEffect(() => {
+    const pending = onDocumentChanged(() => {
+      void (async () => {
+        const snap = await refresh();
+        await viewportRef.current?.rebuildFromSnapshot(snap);
+        viewportRef.current?.setCollisions(snap.links);
+      })();
+    });
+    return () => void pending.then((off) => off());
+  }, [refresh]);
+
+  // ---- the 3D view -------------------------------------------------------
+
+  useEffect(() => {
     if (!canvas || !container) return;
 
     const vp = new Viewport(canvas);
     viewportRef.current = vp;
+    if (cameraRef.current) vp.restoreCamera(cameraRef.current);
     vp.onPick = (id) => {
       setSelected(id);
       vp.setSelected(id);
@@ -272,6 +366,46 @@ export default function App() {
       });
     };
 
+    // Right-click: the menu is built from whatever the pointer was over, so
+    // a part offers the part's commands and open space offers the view's
+    vp.onContextMenu = (target, e) => {
+      const api = apiRef.current;
+      if (!api) return;
+      if (api.activeSketch) {
+        setMenu({ x: e.clientX, y: e.clientY, entries: sketchEditMenu(api) });
+        return;
+      }
+      if (target.region) {
+        // Right-clicking an unselected region selects it first, so the menu's
+        // Extrude acts on what was clicked
+        setRegionSelectionState((prev) => {
+          const already = prev.some(
+            (r) =>
+              r.sketchId === target.region!.sketchId &&
+              r.regionId === target.region!.regionId,
+          );
+          const next = already ? prev : [target.region!];
+          vp.setRegionSelection(next);
+          return next;
+        });
+        setMenu({
+          x: e.clientX,
+          y: e.clientY,
+          entries: regionMenu(api, target.region),
+        });
+        return;
+      }
+      const part =
+        target.partId &&
+        snapshotRef.current?.parts.find((p) => p.id === target.partId);
+      if (part) {
+        select(part.id);
+        setMenu({ x: e.clientX, y: e.clientY, entries: partMenu(api, part) });
+        return;
+      }
+      setMenu({ x: e.clientX, y: e.clientY, entries: viewportMenu(api) });
+    };
+
     const ro = new ResizeObserver(() =>
       vp.resize(container.clientWidth, container.clientHeight),
     );
@@ -288,34 +422,41 @@ export default function App() {
 
     return () => {
       ro.disconnect();
+      cameraRef.current = vp.cameraState();
       vp.dispose();
       viewportRef.current = null;
     };
-  }, [refresh, run]);
+  }, [canvas, container, refresh, run, select]);
+
+  // Everything the viewport shows but does not own. `canvas` is a dependency
+  // because moving the 3D view to another dock builds a fresh Viewport, and a
+  // fresh one knows nothing about the selection or what is toggled on.
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    vp.setGizmoMode(gizmoMode);
+    vp.setCollisionsVisible(showCollisions);
+    vp.setGridVisible(showGrid);
+    vp.setSketchesVisible(showSketches);
+    vp.setSketchSelection(sketchSelection);
+    vp.setSelected(selected);
+    vp.setPlanePick(pickingPlane);
+  }, [
+    canvas,
+    gizmoMode,
+    showCollisions,
+    showGrid,
+    showSketches,
+    sketchSelection,
+    selected,
+    pickingPlane,
+  ]);
 
   useEffect(() => {
-    viewportRef.current?.setGizmoMode(gizmoMode);
-  }, [gizmoMode]);
-
-  useEffect(() => {
-    viewportRef.current?.setCollisionsVisible(showCollisions);
-  }, [showCollisions]);
-
-  useEffect(() => {
-    viewportRef.current?.setGridVisible(showGrid);
-  }, [showGrid]);
-
-  useEffect(() => {
-    viewportRef.current?.setSketchSelection(sketchSelection);
     sketchSelectionRef.current = sketchSelection;
   }, [sketchSelection]);
 
   useEffect(() => {
-    viewportRef.current?.setSketchesVisible(showSketches);
-  }, [showSketches]);
-
-  useEffect(() => {
-    viewportRef.current?.setPlanePick(pickingPlane);
     if (!pickingPlane) setStatus("");
   }, [pickingPlane]);
 
@@ -340,10 +481,10 @@ export default function App() {
     setRegionSelection([]);
     if (!activeSketch) {
       setSketchGeom(null);
-      setSketchTool("select");
+      setSketchToolState("select");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSketch?.id]);
+  }, [activeSketch?.id, canvas]);
 
   useEffect(() => {
     drawingRef.current.setTool(sketchTool);
@@ -371,6 +512,7 @@ export default function App() {
     toolOptions,
     setToolOptions: (options) =>
       setToolOptionsState((prev) => ({ ...prev, ...options })),
+    toolVariant,
     pickingPlane,
     beginPlanePick: () => {
       setSketchId(null);
@@ -389,10 +531,41 @@ export default function App() {
     setShowGrid,
     showSketches,
     setShowSketches,
-    showBrowser,
-    setShowBrowser,
-    showInspector,
-    setShowInspector,
+    layout,
+    updateLayout,
+    movePanel: (panel, dock, index) =>
+      updateLayout(movePanel(layout, panel, dock, index)),
+    floatPanel: async (panel, screenX, screenY) => {
+      // The panel leaves the dock only once its window is actually up
+      try {
+        await openPanelWindow({
+          panel,
+          title: `RK — ${PANELS[panel].title}`,
+          x: screenX,
+          y: screenY,
+          width: panel === "viewport" ? 900 : 380,
+          height: panel === "viewport" ? 640 : 620,
+        });
+        updateLayout(floatPanel(layout, panel));
+      } catch (e) {
+        setStatus(`Error: ${e}`);
+      }
+    },
+    hidePanel: (panel) => {
+      // Hiding a floating panel means closing its window; the close handler
+      // would otherwise dock it straight back
+      if (layout.floating.includes(panel)) void closePanelWindow(panel);
+      updateLayout(hidePanel(layout, panel));
+    },
+    togglePanel: (panel) =>
+      updateLayout(
+        panelVisible(layout, panel)
+          ? hidePanel(layout, panel)
+          : dockPanel(layout, panel),
+      ),
+    soloPanel: solo,
+    openMenu: (x, y, entries) => setMenu({ x, y, entries }),
+    askText: setPrompt,
     meshUnit,
     setMeshUnit,
     viewport: () => viewportRef.current,
@@ -401,6 +574,18 @@ export default function App() {
   };
 
   apiRef.current = api;
+
+  // The webview's own menu has nothing to do with the model; every surface
+  // that wants one opens ours instead
+  useEffect(() => {
+    const block = (e: MouseEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName ?? "";
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+    };
+    window.addEventListener("contextmenu", block);
+    return () => window.removeEventListener("contextmenu", block);
+  }, []);
 
   useEffect(() => {
     const files = fileActions(api);
@@ -429,9 +614,11 @@ export default function App() {
       }
 
       if (e.key === "Escape") {
-        // Unwind whatever is most recent: a pick mode, a value entry, a
-        // dialog, the shape being drawn, the selection, then a gizmo drag
-        if (pickingPlane) setPickingPlane(false);
+        // Unwind whatever is most recent: a menu, a pick mode, a value entry,
+        // a dialog, the shape being drawn, the selection, then a gizmo drag
+        if (menu) setMenu(null);
+        else if (prompt) setPrompt(null);
+        else if (pickingPlane) setPickingPlane(false);
         else if (pendingDimension) setPendingDimension(null);
         else if (dialog) setDialog(null);
         else if (!sketchId) {
@@ -478,22 +665,62 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const renderPanel = (panel: PanelId) => {
+    switch (panel) {
+      case "browser":
+        return <BrowserPanel api={api} />;
+      case "inspector":
+        return <Inspector api={api} />;
+      case "viewport":
+        return (
+          <ViewportPanel
+            api={api}
+            canvasRef={setCanvas}
+            containerRef={setContainer}
+          />
+        );
+    }
+  };
+
+  const overlays = (
+    <>
+      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {prompt && (
+        <TextPromptDialog prompt={prompt} onClose={() => setPrompt(null)} />
+      )}
+    </>
+  );
+
+  // A torn-off window is the panel and nothing else — the ribbon and the
+  // title bar belong to the window that owns the document
+  if (solo) {
+    return (
+      <div className="app solo">
+        <div className="workspace">
+          <section className="dock grows" data-dock="main">
+            <div className="dock-body">
+              <div className="dock-slot">{renderPanel(solo)}</div>
+            </div>
+          </section>
+        </div>
+        <StatusBar api={api} status={status} />
+        {overlays}
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <TitleBar api={api} />
       <Ribbon api={api} />
       <div className="workspace">
-        {showBrowser && <BrowserPanel api={api} />}
-        <div className="viewport" ref={containerRef}>
-          <canvas ref={canvasRef} />
-          <NavBar api={api} />
-          {dialog && <FeatureDialog api={api} kind={dialog} />}
-          {pendingDimension && <DimensionEntry api={api} />}
-        </div>
-        {showInspector && <Inspector api={api} />}
+        {DOCK_IDS.map((dock) => (
+          <Dock key={dock} api={api} dock={dock} render={renderPanel} />
+        ))}
       </div>
       <DocTabs api={api} />
       <StatusBar api={api} status={status} />
+      {overlays}
     </div>
   );
 }
