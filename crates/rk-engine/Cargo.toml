@@ -6,7 +6,11 @@ license.workspace = true
 description = "Headless CAD engine: document model, commands, events"
 
 [dependencies]
-rk-core = { workspace = true }
+# `cad` is what lets rk-core read a STEP file through the kernel. It is on
+# here rather than in rk-core's own defaults because rk-core does not
+# otherwise know about rk-cad, and feature unification carries it to every
+# other crate that reaches rk-core through the engine
+rk-core = { workspace = true, features = ["cad"] }
 rk-cad = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }

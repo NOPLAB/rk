@@ -24,8 +24,31 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico"]
+    "publisher": "nop",
+    "category": "DeveloperTool",
+    "shortDescription": "A 3D CAD editor",
+    "longDescription": "RK is a 3D CAD editor for robotics, with a headless engine AI agents can drive.",
+    "licenseFile": "../../../TERMS_OF_SERVICE.txt",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "allowDowngrades": true,
+      "nsis": {
+        "installMode": "currentUser",
+        "compression": "lzma",
+        "languages": ["English", "Japanese"],
+        "installerIcon": "icons/icon.ico"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.13"
+    }
   }
 }

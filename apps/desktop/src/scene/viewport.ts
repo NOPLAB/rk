@@ -1,6 +1,7 @@
-// Three.js viewport: the desktop counterpart of the egui renderer glue.
+// Three.js viewport: everything the 3D view draws and everything it
+// resolves a click to.
 //
-// Scene sync mirrors rk-frontend/src/sync.rs — engine events drive
+// Scene sync is event-driven — engine events drive
 // incremental updates; document_reset triggers a full rebuild from a
 // snapshot. RK is Z-up; Three defaults to Y-up, so the grid is rotated
 // onto the XY plane and every camera/up vector is Z-up.
@@ -139,9 +140,11 @@ export class Viewport {
   /** What the pointer is over while picking a plane (`null` = nothing) */
   onPlaneHover: ((pick: PlanePick | null) => void) | null = null;
   /** A filled region of a finished sketch was clicked (`null` = empty space) */
-  onRegionPick: ((pick: RegionPick | null, additive: boolean) => void) | null = null;
+  onRegionPick: ((pick: RegionPick | null, additive: boolean) => void) | null =
+    null;
   /** Right-click, with whatever the pointer was over resolved for the menu */
-  onContextMenu: ((target: ViewportTarget, e: MouseEvent) => void) | null = null;
+  onContextMenu: ((target: ViewportTarget, e: MouseEvent) => void) | null =
+    null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -210,67 +213,83 @@ export class Viewport {
     // Click-select with a small drag threshold so orbiting never selects
     const { signal } = this.listeners;
     let downAt: [number, number] | null = null;
-    canvas.addEventListener("pointerdown", (e) => {
-      // The gizmo's own listener runs first, so a grabbed handle already
-      // shows up as an active axis — that press is not a selection gesture
-      if (e.button === 0 && this.gizmo.axis === null) {
-        downAt = [e.clientX, e.clientY];
-      }
-    }, { signal });
-    canvas.addEventListener("pointerup", (e) => {
-      if (!downAt || e.button !== 0) return;
-      const [x0, y0] = downAt;
-      downAt = null;
-      // A drag orbited the view; only a click edits
-      if (Math.hypot(e.clientX - x0, e.clientY - y0) > 4) return;
-      // The ViewCube sits on top of the scene, so it gets the click first
-      const onCube = this.cubeLocal(e);
-      if (onCube) {
-        const dir = this.cube.hit(onCube.x, onCube.y);
-        if (dir) this.lookFrom(dir);
-        return;
-      }
-      if (this.pickingPlane) {
-        const pick = this.planes.probe(this.rayThrough(e), this.solids(), false);
-        if (pick) {
-          this.setPlanePick(false);
-          this.onPlanePick?.(pick);
+    canvas.addEventListener(
+      "pointerdown",
+      (e) => {
+        // The gizmo's own listener runs first, so a grabbed handle already
+        // shows up as an active axis — that press is not a selection gesture
+        if (e.button === 0 && this.gizmo.axis === null) {
+          downAt = [e.clientX, e.clientY];
         }
-        return;
-      }
-      if (this.sketch.active) {
+      },
+      { signal },
+    );
+    canvas.addEventListener(
+      "pointerup",
+      (e) => {
+        if (!downAt || e.button !== 0) return;
+        const [x0, y0] = downAt;
+        downAt = null;
+        // A drag orbited the view; only a click edits
+        if (Math.hypot(e.clientX - x0, e.clientY - y0) > 4) return;
+        // The ViewCube sits on top of the scene, so it gets the click first
+        const onCube = this.cubeLocal(e);
+        if (onCube) {
+          const dir = this.cube.hit(onCube.x, onCube.y);
+          if (dir) this.lookFrom(dir);
+          return;
+        }
+        if (this.pickingPlane) {
+          const pick = this.planes.probe(
+            this.rayThrough(e),
+            this.solids(),
+            false,
+          );
+          if (pick) {
+            this.setPlanePick(false);
+            this.onPlanePick?.(pick);
+          }
+          return;
+        }
+        if (this.sketch.active) {
+          const hit = this.sketchHit(e);
+          if (hit) this.onSketchClick?.(hit, e.shiftKey);
+          return;
+        }
+        // A filled region wins over the solid behind it: clicking one is how a
+        // finished sketch is aimed at an extrude
+        const region = this.idle.pick(this.rayThrough(e));
+        if (region) {
+          this.onRegionPick?.(region, e.shiftKey);
+          return;
+        }
+        this.onRegionPick?.(null, e.shiftKey);
+        this.onPick?.(this.pick(e));
+      },
+      { signal },
+    );
+    canvas.addEventListener(
+      "pointermove",
+      (e) => {
+        const onCube = this.cubeLocal(e);
+        this.cube.setHover(onCube ? onCube.x : null, onCube?.y ?? 0);
+        if (this.pickingPlane) {
+          this.onPlaneHover?.(
+            this.planes.probe(this.rayThrough(e), this.solids(), true),
+          );
+          return;
+        }
+        if (!this.sketch.active) {
+          this.idle.setHovered(this.idle.pick(this.rayThrough(e)));
+          return;
+        }
         const hit = this.sketchHit(e);
-        if (hit) this.onSketchClick?.(hit, e.shiftKey);
-        return;
-      }
-      // A filled region wins over the solid behind it: clicking one is how a
-      // finished sketch is aimed at an extrude
-      const region = this.idle.pick(this.rayThrough(e));
-      if (region) {
-        this.onRegionPick?.(region, e.shiftKey);
-        return;
-      }
-      this.onRegionPick?.(null, e.shiftKey);
-      this.onPick?.(this.pick(e));
-    }, { signal });
-    canvas.addEventListener("pointermove", (e) => {
-      const onCube = this.cubeLocal(e);
-      this.cube.setHover(onCube ? onCube.x : null, onCube?.y ?? 0);
-      if (this.pickingPlane) {
-        this.onPlaneHover?.(
-          this.planes.probe(this.rayThrough(e), this.solids(), true),
-        );
-        return;
-      }
-      if (!this.sketch.active) {
-        this.idle.setHovered(this.idle.pick(this.rayThrough(e)));
-        return;
-      }
-      const hit = this.sketchHit(e);
-      if (!hit) return;
-      this.sketch.setCursor(hit.pointId ? hit.position : null);
-      this.onSketchMove?.(hit);
-    }, { signal });
+        if (!hit) return;
+        this.sketch.setCursor(hit.pointId ? hit.position : null);
+        this.onSketchMove?.(hit);
+      },
+      { signal },
+    );
     canvas.addEventListener("pointerleave", () => this.cube.setHover(null, 0), {
       signal,
     });
@@ -391,8 +410,11 @@ export class Viewport {
 
   /** Orbit to look from `dir` towards the current target, keeping the zoom */
   lookFrom(dir: THREE.Vector3 | readonly [number, number, number]) {
-    const v = (Array.isArray(dir) ? new THREE.Vector3(...dir) : (dir as THREE.Vector3).clone())
-      .normalize();
+    const v = (
+      Array.isArray(dir)
+        ? new THREE.Vector3(...dir)
+        : (dir as THREE.Vector3).clone()
+    ).normalize();
     const dist = Math.max(
       this.camera.position.distanceTo(this.controls.target),
       0.05,
@@ -450,7 +472,12 @@ export class Viewport {
     const mesh = this.selected ? this.partMeshes.get(this.selected) : undefined;
     // Sketch mode and plane picking own the pointer; a gizmo on top of them
     // would fight for clicks
-    if (this.gizmoMode === "none" || this.sketch.active || this.pickingPlane || !mesh) {
+    if (
+      this.gizmoMode === "none" ||
+      this.sketch.active ||
+      this.pickingPlane ||
+      !mesh
+    ) {
       this.gizmo.detach();
       this.gizmo.getHelper().visible = false;
       return;
@@ -590,7 +617,9 @@ export class Viewport {
     this.idle.setSelection(selection);
     const active = this.sketch.sketchId;
     this.sketch.setSelectedRegions(
-      active ? selection.filter((s) => s.sketchId === active).map((s) => s.regionId) : [],
+      active
+        ? selection.filter((s) => s.sketchId === active).map((s) => s.regionId)
+        : [],
     );
   }
 
@@ -745,15 +774,23 @@ export class Viewport {
   fitCamera(): boolean {
     const box = new THREE.Box3();
     let any = false;
-    for (const mesh of [...this.partMeshes.values(), ...this.bodyMeshes.values()]) {
+    for (const mesh of [
+      ...this.partMeshes.values(),
+      ...this.bodyMeshes.values(),
+    ]) {
       box.expandByObject(mesh);
       any = true;
     }
     if (!any || box.isEmpty()) return false;
     const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.05);
+    const radius = Math.max(
+      box.getSize(new THREE.Vector3()).length() / 2,
+      0.05,
+    );
     const dir = new THREE.Vector3(1, -1, 0.7).normalize();
-    this.camera.position.copy(center.clone().add(dir.multiplyScalar(radius * 2.5)));
+    this.camera.position.copy(
+      center.clone().add(dir.multiplyScalar(radius * 2.5)),
+    );
     this.controls.target.copy(center);
     return true;
   }
@@ -921,7 +958,10 @@ function buildGeometry(payload: MeshPayload): THREE.BufferGeometry {
         normals.push(n[0], n[1], n[2]);
       }
     }
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
     geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
   } else {
     geo.setAttribute(

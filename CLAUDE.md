@@ -11,9 +11,6 @@ cargo build
 # Build release
 cargo build --release
 
-# Run the application
-cargo run -p rk-frontend
-
 # Run the MCP server (stdio; logs go to stderr)
 cargo run -p rk-mcp
 
@@ -44,37 +41,49 @@ cargo fmt
 # Lint
 cargo clippy
 
-# Build with CAD kernel (Truck is default)
-cargo build                              # Uses Truck (default, Pure Rust B-Rep)
-cargo build --features rk-cad/opencascade  # Use OpenCASCADE instead (requires fixing)
-cargo build --no-default-features        # No CAD kernel (NullKernel)
+# Choosing a CAD kernel
+cargo build                              # OpenCASCADE, OCCT compiled from source (default)
+cargo build -p rk-cad --no-default-features --features truck   # Truck, pure Rust
+cargo build -p rk-cad --no-default-features                    # No kernel (NullKernel)
 ```
+
+The default build compiles OCCT out of `occt-sys`, so it needs CMake and a
+C++ toolchain, and the first build takes tens of minutes and about 1.5 GB
+under `target/`. Two things make it work at all: `.cargo/config.toml` sets
+`CMAKE_POLICY_VERSION_MINIMUM`, because OCCT's own CMakeLists asks for a
+minimum CMake 4 refuses outright; and `crates/rk-cad/build.rs` links
+`advapi32` on Windows, which OCCT's OSD layer needs and `opencascade-sys`
+never asks for.
+
+The kernel choice has to be made on `rk-cad` itself (`-p rk-cad`): every
+other crate depends on `rk-cad` with default features, so a plain
+`cargo build --no-default-features` at the workspace level unifies the
+default straight back on.
 
 ## Architecture
 
 RK is a 3D CAD editor built with Rust, evolving into an agentic platform
 where AI agents drive CAD (and later simulation) through a headless
-engine. The codebase is a Cargo workspace with six library/binary crates
+engine. The codebase is a Cargo workspace with five library/binary crates
 under `crates/`, plus two applications under `apps/`: the Tauri desktop
 app (`apps/desktop`) and the documentation site (`apps/docs`):
 
 ### Crate Dependencies
 
 ```
-rk-frontend (egui application; UI state + rendering glue only)
-    ├── rk-engine (headless engine: document, commands, events, undo)
-    │       ├── rk-core (data structures)
-    │       └── rk-cad (CAD kernel abstraction)
-    └── rk-renderer (wgpu rendering)
-            └── rk-core
+rk-desktop (apps/desktop/src-tauri: Tauri 2 shell; webview renders with Three.js)
+    └── rk-engine (headless engine: document, commands, events, undo)
+            ├── rk-core (data structures)
+            └── rk-cad (CAD kernel abstraction)
 
 rk-mcp (MCP server for agents; stdio transport)
     ├── rk-engine
-    └── rk-renderer (headless: offscreen texture + readback)
-
-rk-desktop (apps/desktop/src-tauri: Tauri 2 shell; webview renders with Three.js)
-    └── rk-engine
+    └── rk-renderer (wgpu rendering, headless: offscreen texture + readback)
+            └── rk-core
 ```
+
+`rk-renderer` is now reached only by `rk-mcp` — the desktop app draws with
+Three.js in the webview. It stays because an agent still needs eyes.
 
 ### rk-core
 
@@ -83,14 +92,26 @@ Core data structures and logic:
 - `Part`: Mesh with metadata and joint points
 - `Assembly`: Scene graph for hierarchical structure
 - `Project`: Serializable project file (RON format, `.rk` extension)
-- Import formats: STL, OBJ, DAE (Collada), URDF
+- Import formats: STL, OBJ, DAE (Collada), URDF, and STEP through the kernel
+  (the `cad` feature, which `rk-engine` turns on). STEP files declare their
+  own units and OpenCASCADE normalises them to millimetres, so `step.rs`
+  scales by 0.001 into the metre-based scene — the caller's `StlUnit` is for
+  formats that declare nothing. `import_mesh` goes through `load_mesh_multi`
+  because a STEP assembly is one part per solid
 - Export formats: URDF
 
 ### rk-cad
 
 CAD kernel abstraction and parametric modeling:
 
-- **Kernel abstraction** (`CadKernel` trait): Interface for geometry backends (OpenCASCADE, Truck, or NullKernel)
+- **Kernel abstraction** (`CadKernel` trait): interface for geometry
+  backends. OpenCASCADE is the default; truck and `NullKernel` are the
+  alternatives, and `default_kernel()` prefers OpenCASCADE whenever its
+  feature is on. The two real backends are not equals — truck cannot
+  subtract at all, so `BooleanOp::Cut` and any island in a revolve exist
+  only under OpenCASCADE. Nothing outside `kernel/opencascade.rs` may
+  assume which one is running; a message that names a kernel gets it from
+  `kernel.name()`
 - **Sketch system**: 2D sketches with entities (points, lines, arcs,
   circles, ellipses, splines) and constraints (coincident, parallel,
   perpendicular, dimensions). A sketch's plane is a free
@@ -110,16 +131,47 @@ CAD kernel abstraction and parametric modeling:
   (and left out of the DOF count) instead of being solved for
 - **Feature operations**: Extrude, revolve, boolean operations on sketches
   to create 3D solids. `Extrude`/`Revolve` carry `profiles: Vec<Uuid>` —
-  which regions to build, empty meaning all of them. `CadKernel::
-  extrude_region`/`revolve_region` take the holes with them: truck attaches
-  a face from outer + hole wires in one go, so a washer never needs the
-  boolean subtract that backend does not have
+  which regions to build, empty meaning all of them. The kernel's
+  `extrude_region`/`revolve_region` take the holes with them, by whichever
+  route their backend has: truck attaches a face from outer + hole wires in
+  one go, since it cannot subtract; OpenCASCADE's bindings expose no way to
+  give a face its islands, so it sweeps each island too and cuts that back
+  out. A washer comes out of both
 - **Parametric history**: Ordered feature list with rollback/rebuild support.
   `FeatureGroup` bundles timeline entries under one name for the browser and
   nothing else — the build order, the bodies and the rollback position are
   untouched, so grouping can never change the model. A feature belongs to at
   most one group (adding it to a second moves it) and a group that loses its
   last member is deleted with it
+
+**Working on `kernel/opencascade.rs`** — five traps, all of them silent:
+
+- A getter on a maker that has not succeeded **throws**, and a C++ exception
+  crossing the cxx bridge aborts the process rather than becoming an `Err`.
+  Check `IsDone()` before `Shape()`/`Face()`/`Edge()`, every time
+- …but `IsDone()` before anything has built is false for a perfectly good
+  shape. The sweeps (`MakePrism`, `MakeRevol`) and the booleans build in
+  their constructor; the primitives (`MakeBox`, `MakeCylinder`, `MakeSphere`)
+  and the modifiers (fillet, chamfer, shell, loft) need an explicit `Build`
+  first. `tests/primitives.rs` exists because guarding the first group like
+  the second made every primitive return an error
+- **`angle` is an `f32` and cannot hold 2π.** The nearest float, and what
+  anything asking for a full revolution sends, is 1.7e-7 rad _past_ a whole
+  turn — and OpenCASCADE dutifully sweeps a solid that laps itself, which
+  meshes to nothing at all. `full_turns_stay_full` snaps it back. A
+  revolution of _no_ angle throws out of the constructor, so it is rejected
+  before the call
+- `TopExp_Explorer` yields each edge once per face it borders — a box comes
+  back as 24 edges. `edge_key` collapses them by position, and `get_edges`,
+  `fillet` and `chamfer` must number them the same way or a fillet lands on
+  the wrong edge
+- The deflection `BRepMesh` wants is an absolute length, not a fraction, so
+  the app's one constant would be coarser than most parts are big.
+  `mesh_of` bounds it by the body's own diagonal, and takes OpenCASCADE's
+  surface normals rather than re-deriving them from the triangle soup
+- `tessellate` holds the kernel's lock across the meshing: copying a
+  `TopoDS_Shape` shares the topology underneath, and meshing writes the
+  triangulation into it
 
 ### rk-engine
 
@@ -152,25 +204,6 @@ WGPU-based 3D renderer with plugin architecture:
 - Built-in sub-renderers: Grid, Mesh, Axis, Marker, Gizmo, Collision, Sketch, PlaneSelector
 - Render priorities in `sub_renderers::priorities`: GRID(0) → SKETCH(50) → MESH(100) → AXIS(200) → MARKER(300) → COLLISION(350) → PLANE_SELECTOR(400) → GIZMO(1000)
 
-### rk-frontend
-
-egui-based GUI application. Owns UI state only — all domain state lives
-in the engine:
-
-- `AppState`: selection, `EditorMode` (Assembly/PlaneSelection/Sketch),
-  tools, dialogs, and a `SharedEngine` handle. `SharedAppState` =
-  `Arc<Mutex<AppState>>`
-- `AppAction`: UI-only variants (`SelectPart`, `SketchUi(...)`) plus
-  `Cmd(Command)`, `Interactive`/`EndInteraction` (drag sessions), and
-  `Composite(...)` (UI + command combos)
-- `actions/`: dispatch (`mod.rs`), UI handlers (`ui.rs`), composites
-  (`composite.rs`), constraint workflow (`constraints.rs`)
-- `sync.rs`: `apply_events` — the single place engine events become
-  renderer updates; `DocumentReset` triggers a full scene rebuild
-- `SketchModeState`: tools, selection, and coordinate-based
-  `InProgressEntity` previews (shapes commit as one atomic command)
-- Panels in `panels/` module for UI components
-
 ### rk-mcp
 
 MCP server (rmcp, stdio transport) that lets AI agents drive the engine.
@@ -185,12 +218,12 @@ stdout carries JSON-RPC — log to stderr only:
   lazily on first screenshot
 - `src/commands_reference.md` documents every command;
   `tests/reference_examples.rs` deserializes each ```json example and
-  fails compilation when a `Command` variant is added but undocumented
+fails compilation when a `Command` variant is added but undocumented
 
 ### rk-desktop (apps/desktop)
 
-Tauri 2 + React/TypeScript + Three.js desktop app (Phase 2; will replace
-the egui frontend once at feature parity):
+Tauri 2 + React/TypeScript + Three.js desktop app — the application. It
+replaced the egui frontend, which was deleted once it reached parity:
 
 - `src-tauri/` (`rk-desktop` crate): owns a `SharedEngine`; IPC commands
   mirror the MCP protocol shape — `engine_apply` (batch of `Command`s,
@@ -206,8 +239,8 @@ the egui frontend once at feature parity):
   command builders, `engine/constraints.ts` the sketch-constraint catalog,
   `engine/interaction.ts` drag-session helpers (latest-wins coalescing),
   `applyAtomic` and `newUuid`, `scene/viewport.ts` Three.js
-  scene manager (Z-up; event-driven sync mirroring
-  `rk-frontend/src/sync.rs`; TransformControls gizmo),
+  scene manager (Z-up; event-driven sync — engine events, never a poll;
+  TransformControls gizmo),
   `scene/sketchLayer.ts` + `scene/sketchTools.ts` sketch mode,
   `scene/viewCube.ts` viewport overlays, `ui/` shared state,
   `components/` chrome
@@ -359,33 +392,36 @@ Astro + Starlight documentation site, published to GitHub Pages at
 
 ## Key Patterns
 
-- **Command/Event**: panels queue `AppAction`s; per frame the dispatcher
-  applies engine commands and `sync::apply_events` updates the renderer.
-  Never mutate domain state directly — add a `Command` instead
-- **Interaction sessions**: continuous edits (gizmo drags, DragValue
-  bursts) use `apply_interactive` under one session ID so the whole
+- **Command/Event**: the UI sends `Command`s through `AppApi.run` — which
+  is `engine_apply` — and the events that come back drive the Three.js
+  scene. Never mutate domain state directly; add a `Command` instead
+- **Interaction sessions**: continuous edits (gizmo drags, dimension
+  spinners) use `apply_interactive` under one session ID so the whole
   gesture is a single undo step
-- **Engine reads**: lock briefly, clone what you need, release. Never
-  hold the engine guard while locking the viewport in panel code
+- **Engine reads**: lock briefly, clone what you need, release. Never hold
+  the engine guard across another lock or across an IPC reply
 - **Plugin Renderer**: New rendering features implement `SubRenderer` trait and register with `RendererRegistry`
-- **Editor Modes**: `EditorMode::Assembly` for 3D editing, `EditorMode::Sketch` for 2D sketch editing
+- **Editor modes**: the desktop app is in sketch mode when a sketch is being
+  edited (`SketchLayer` owns the plane and the tools) and in assembly mode
+  otherwise — the ribbon tab follows that state rather than setting it
 - **CAD Kernel Abstraction**: `CadKernel` trait allows switching between geometry backends via feature flags. The engine owns the kernel (`Engine::kernel()`)
 
 ## Platform Support
 
 - Native: Linux (X11/Wayland), Windows, macOS (WASM support was removed)
 
-## Roadmap (Phases 0-1 done, Phase 2 in progress)
+## Roadmap (Phases 0-2 done, Phase 3 next)
 
 - Phase 0: headless `rk-engine` extraction — done
 - Phase 1: MCP server (`rk-mcp`) + headless rendering — done
-- Phase 2: Tauri + React frontend (`apps/desktop`) — scaffold + viewer +
-  part editing + joint UI + mesh/URDF import-export + gizmo
-  (`apply_interactive`) + sketch/feature UI + collisions and mass/inertia
-  + sketch constraints and dimensions + the Inventor-style shell (ribbon,
-  model browser, ViewCube, navigation bar) + the Fusion sketching flow
+- Phase 2: Tauri + React frontend (`apps/desktop`) — done. Scaffold, viewer,
+  part editing, joint UI, mesh/URDF import-export, the gizmo on
+  `apply_interactive`, sketch/feature UI, collisions and mass/inertia,
+  sketch constraints and dimensions, the Inventor-style shell (ribbon,
+  model browser, ViewCube, navigation bar), the Fusion sketching flow
   (pick a plane or a face in the 3D view, the full tool set, sketches that
-  stay visible, click a region to extrude it) + dockable panel tabs that tear
-  off into their own window + feature groups + context menus throughout done;
-  egui retirement pending
+  stay visible, click a region to extrude it), dockable panel tabs that tear
+  off into their own window, feature groups, context menus throughout — and
+  finally the egui frontend deleted, with OpenCASCADE promoted to the
+  default kernel so `Cut` and STEP import work in an ordinary build
 - Phase 3: solver integrations (rigid-body dynamics -> FEM -> CFD)

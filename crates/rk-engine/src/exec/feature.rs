@@ -106,12 +106,15 @@ impl Engine {
         // feature actually produced a body
         let bodies_after = self.doc.cad.history.bodies().len();
         if bodies_after <= bodies_before {
-            let msg = if boolean_op == BooleanOp::Cut {
-                "Cut operation is not supported by the Truck kernel. Only 'New Body', 'Join', and 'Intersect' are available.".to_string()
-            } else if boolean_op != BooleanOp::New {
+            // Which operations exist at all depends on the kernel — truck has
+            // no subtraction, OpenCASCADE has all three — so say which one
+            // turned the request down rather than naming a kernel that may
+            // not be the one running
+            let msg = if boolean_op != BooleanOp::New {
                 format!(
-                    "Boolean operation '{:?}' failed. Please check the target body and try again.",
-                    boolean_op
+                    "Boolean operation '{:?}' failed on the {} kernel. Check the target body and try again.",
+                    boolean_op,
+                    self.kernel.name()
                 )
             } else {
                 "No body was created. Check if the sketch has valid closed profiles.".to_string()

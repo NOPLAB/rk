@@ -86,7 +86,7 @@ struct SketchUniform {
     plane_color: [f32; 4],
 }
 
-/// Data for a constraint icon to be rendered as egui overlay.
+/// Data for a constraint icon, to be drawn as a 2D overlay by the caller.
 #[derive(Debug, Clone)]
 pub struct ConstraintIconData {
     /// Constraint ID.
@@ -142,7 +142,7 @@ pub struct SketchRenderData {
     pub point_vertices: Vec<SketchVertex>,
     /// Whether this sketch is currently being edited.
     pub is_active: bool,
-    /// Constraint icons to be rendered as egui overlay.
+    /// Constraint icons, to be drawn as a 2D overlay by the caller.
     pub constraint_icons: Vec<ConstraintIconData>,
 }
 

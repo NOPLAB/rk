@@ -15,7 +15,9 @@ import {
 import type { AppApi } from "./appApi";
 
 const RK_FILTER = [{ name: "RK Project", extensions: ["rk"] }];
-const MESH_FILTER = [{ name: "Mesh", extensions: ["stl", "obj", "dae"] }];
+const MESH_FILTER = [
+  { name: "Mesh", extensions: ["stl", "obj", "dae", "step", "stp"] },
+];
 const URDF_FILTER = [{ name: "URDF", extensions: ["urdf", "xml"] }];
 
 export interface FileActions {

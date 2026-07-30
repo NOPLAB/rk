@@ -11,7 +11,7 @@ use rk_engine::Engine;
 /// Texture format used for offscreen rendering (maps directly to PNG bytes)
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-/// Default CAD body display color (matches the frontend viewport)
+/// Default CAD body display color (matches rk-desktop's viewport)
 const BODY_COLOR: [f32; 4] = [0.7, 0.7, 0.8, 1.0];
 
 #[derive(Debug, thiserror::Error)]
@@ -141,7 +141,7 @@ impl HeadlessRenderer {
         encode_png(&rgba, opts.width, opts.height)
     }
 
-    /// Mirror of the frontend's scene rebuild: parts with meshes, final
+    /// The same scene rk-desktop builds: parts with meshes, final
     /// render transforms (link world x part origin), and CAD bodies.
     /// Returns the scene bounding sphere (center, radius) if non-empty.
     fn populate_scene(

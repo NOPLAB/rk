@@ -12,7 +12,7 @@ use crate::part::Part;
 pub struct StepLoadOptions {
     /// Tessellation tolerance (lower = finer mesh, default 0.1)
     pub tessellation_tolerance: f32,
-    /// Unit scaling factor (default 1.0 for meters)
+    /// Unit scaling factor (default 0.001, since the kernel reads STEP in mm)
     pub unit_scale: f32,
 }
 
@@ -20,7 +20,12 @@ impl Default for StepLoadOptions {
     fn default() -> Self {
         Self {
             tessellation_tolerance: 0.1,
-            unit_scale: 1.0,
+            // STEP files carry their own units and OpenCASCADE's reader
+            // normalises whatever it finds to millimetres. The scene is in
+            // metres, so a 100 mm bracket imported at 1.0 would land 100 m
+            // across. This is not the caller's `StlUnit` choice — that is for
+            // formats which declare nothing.
+            unit_scale: 0.001,
         }
     }
 }
@@ -40,10 +45,12 @@ pub fn load_step_with_options(
     let path = path.as_ref();
     let kernel = default_kernel();
 
+    // Only a build that asked for no kernel at all lands here — and truck,
+    // which reports itself available and then declines the import
     if !kernel.is_available() {
         return Err(MeshError::UnsupportedFormat(
-            "STEP import requires OpenCASCADE kernel. \
-             Build with --features rk-cad/opencascade"
+            "STEP import needs the OpenCASCADE kernel, which this build was \
+             configured without"
                 .into(),
         ));
     }

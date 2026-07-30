@@ -22,7 +22,7 @@ const PANEL_CLOSED: &str = "rk://panel-closed";
 /// label to know which single panel to render
 const PANEL_PREFIX: &str = "panel-";
 
-/// Default CAD body display color (matches the egui viewport)
+/// Default CAD body display color (matches rk-mcp's headless renderer)
 const BODY_COLOR: [f32; 4] = [0.7, 0.7, 0.8, 1.0];
 
 struct EngineState {

@@ -15,8 +15,13 @@ Download from [Releases](https://github.com/NOPLAB/rk/releases) (Windows, macOS,
 
 ## Build
 
+Needs Rust, Node.js, CMake and a C++ toolchain — the CAD kernel is
+OpenCASCADE, compiled from source, so the first build takes a while.
+
 ```bash
-cargo run -p rk-frontend
+cd apps/desktop
+npm install
+npm run tauri dev
 ```
 
 ## License

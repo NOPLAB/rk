@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use rk_core::{ExportOptions, ImportOptions, StlUnit, export_urdf, import_urdf, load_mesh};
+use rk_core::{ExportOptions, ImportOptions, StlUnit, export_urdf, import_urdf, load_mesh_multi};
 
 use crate::document::Document;
 use crate::engine::Engine;
@@ -56,15 +56,19 @@ impl Engine {
         unit: StlUnit,
         events: &mut Vec<Event>,
     ) -> Result<(), EngineError> {
-        let part = load_mesh(&path, unit).map_err(|e| EngineError::Io(e.to_string()))?;
-        tracing::info!(
-            "imported mesh: {} ({} vertices, unit={:?})",
-            part.name,
-            part.vertices.len(),
-            unit
-        );
-        let part_id = self.doc.project.add_part(part);
-        events.push(Event::PartAdded { part_id });
+        // A STEP assembly arrives as one part per solid, and dropping all
+        // but the first is not an import. Every other format returns one.
+        let parts = load_mesh_multi(&path, unit).map_err(|e| EngineError::Io(e.to_string()))?;
+        for part in parts {
+            tracing::info!(
+                "imported mesh: {} ({} vertices, unit={:?})",
+                part.name,
+                part.vertices.len(),
+                unit
+            );
+            let part_id = self.doc.project.add_part(part);
+            events.push(Event::PartAdded { part_id });
+        }
         Ok(())
     }
 

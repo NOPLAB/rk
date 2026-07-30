@@ -27,18 +27,25 @@ cargo test
 cargo test -p rk-core
 cargo test -p rk-cad
 cargo test -p rk-renderer
-cargo test -p rk-frontend
+cargo test -p rk-engine
 
 # Run a single test
 cargo test test_name
 cargo test test_name --exact
 cargo test module_name::test_name
 
-# Build with CAD kernel (Truck is default)
-cargo build                              # Uses Truck (default)
-cargo build --features rk-cad/opencascade  # Use OpenCASCADE
-cargo build --no-default-features        # No CAD kernel (NullKernel)
+# Choosing a CAD kernel
+cargo build                              # OpenCASCADE, OCCT from source (default)
+cargo build -p rk-cad --no-default-features --features truck   # Truck, pure Rust
+cargo build -p rk-cad --no-default-features                    # No kernel (NullKernel)
 ```
+
+The default build compiles OCCT and needs CMake plus a C++ toolchain; the
+first one takes tens of minutes. The kernel must be selected on `rk-cad`
+itself — every other crate takes `rk-cad` with default features, so
+`--no-default-features` at the workspace level unifies the default back on.
+The pre-commit hook runs `cargo clippy --all-targets -- -D warnings`, which
+means the same OCCT build.
 
 After making changes, ALWAYS run `cargo clippy` and `cargo test` before submitting.
 
@@ -183,7 +190,7 @@ if matches!(self, SketchEntity::Point { .. }) {
 ### Concurrency
 
 - Use `parking_lot::Mutex` for locks (preferred over std)
-- Use `Arc<Mutex<T>>` (`SharedAppState`) for shared state
+- Use `Arc<Mutex<T>>` (`SharedEngine`) for shared state
 - Keep critical sections short
 
 ### Serialization
@@ -196,21 +203,23 @@ if matches!(self, SketchEntity::Point { .. }) {
 
 - `rk-core`: Core data structures (Part, Assembly, Project)
 - `rk-cad`: CAD kernel abstraction and parametric modeling
+- `rk-engine`: Headless engine — document, commands, events, undo
 - `rk-renderer`: WGPU-based 3D rendering with plugin architecture
-- `rk-frontend`: egui-based GUI application
+- `rk-mcp`: MCP server that lets agents drive the engine
+- `apps/desktop`: The Tauri 2 + React + Three.js application
 
 ### Architecture Patterns
 
-- **Action Queue**: UI queues `AppAction` variants, processed centrally
+- **Command/Event**: the UI sends `Command`s to the engine and syncs from the events it gets back
 - **Plugin Renderer**: Implement `SubRenderer` trait and register with `RendererRegistry`
-- **Shared State**: Pass `SharedAppState` (`Arc<Mutex<AppState>>`) to components
+- **Shared State**: Pass `SharedEngine` (`Arc<Mutex<Engine>>`) to components
 - **Kernel Abstraction**: Implement `CadKernel` trait for geometry backends
 
 When adding new features:
 
 1. Add data structures in appropriate crate (core/cad/renderer)
 2. Implement traits/interfaces
-3. Add UI panels/actions in frontend
+3. Add UI in `apps/desktop` (React)
 4. Write tests
 5. Run clippy and fix warnings
 6. Format with `cargo fmt`
