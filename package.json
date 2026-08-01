@@ -5,13 +5,13 @@
   "type": "module",
   "description": "",
   "workspaces": [
-    "docs"
+    "apps/docs"
   ],
   "scripts": {
     "prepare": "husky",
-    "docs:dev": "npm run dev --workspace=docs",
-    "docs:build": "npm run build --workspace=docs",
-    "docs:preview": "npm run preview --workspace=docs"
+    "docs:dev": "npm run dev --workspace=rk-docs",
+    "docs:build": "npm run build --workspace=rk-docs",
+    "docs:preview": "npm run preview --workspace=rk-docs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",

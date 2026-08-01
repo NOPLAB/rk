@@ -34,6 +34,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Fade out based on distance from camera
     let dist = length(in.world_pos - camera.eye.xyz);
-    let fade = 1.0 - smoothstep(5.0, 15.0, dist);
+    let fade = 1.0 - smoothstep(50.0, 200.0, dist);
     return vec4<f32>(in.color, fade * 0.8);
 }

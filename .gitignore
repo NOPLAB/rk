@@ -2,11 +2,9 @@
 
 node_modules/
 
-.cargo-packager/
 dist/
-dist_app/
 
 # Starlight docs build output
-docs/dist/
-docs/.astro/
+apps/docs/dist/
+apps/docs/.astro/
 

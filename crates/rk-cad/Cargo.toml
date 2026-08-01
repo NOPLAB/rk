@@ -6,26 +6,30 @@ license.workspace = true
 description = "CAD kernel abstraction and sketch system for RK"
 
 [features]
-default = []
-opencascade = ["opencascade-sys"]
-truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh"]
+# OpenCASCADE, with the OCCT that ships inside occt-sys compiled from source.
+# It costs a long first build and wants CMake and a C++ toolchain, and it is
+# still the right default: it is the kernel that can subtract, so a cut
+# extrude and a hole in a revolve exist at all.
+default = ["opencascade-builtin"]
+# The same kernel linked against an OCCT already installed on the machine
+opencascade = ["dep:opencascade-sys", "dep:cxx"]
+opencascade-builtin = ["opencascade", "opencascade-sys/builtin"]
+truck = ["dep:truck-modeling", "dep:truck-meshalgo", "dep:truck-topology", "dep:truck-polymesh", "dep:truck-shapeops"]
 
 [dependencies]
-# Workspace dependencies
 uuid = { workspace = true }
-glam = { workspace = true, features = ["serde"] }
+glam = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 
 # Optional: OpenCASCADE (C++ bindings)
-opencascade-sys = { version = "0.2", optional = true }
+opencascade-sys = { workspace = true, optional = true }
+cxx = { workspace = true, optional = true }
 
 # Optional: Truck (Pure Rust B-Rep)
-truck-modeling = { version = "0.4", optional = true }
-truck-meshalgo = { version = "0.4", optional = true }
-truck-topology = { version = "0.4", optional = true }
-truck-polymesh = { version = "0.4", optional = true }
-
-[dev-dependencies]
-approx = "0.5"
+truck-modeling = { workspace = true, optional = true }
+truck-meshalgo = { workspace = true, optional = true }
+truck-topology = { workspace = true, optional = true }
+truck-polymesh = { workspace = true, optional = true }
+truck-shapeops = { workspace = true, optional = true }

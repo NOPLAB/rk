@@ -5,10 +5,14 @@
 
 mod traits;
 
-// TODO: Implement kernel backends
-// #[cfg(feature = "opencascade")]
-// mod opencascade;
-// #[cfg(feature = "truck")]
-// mod truck;
+#[cfg(feature = "opencascade")]
+mod opencascade;
+#[cfg(feature = "truck")]
+mod truck;
 
 pub use traits::*;
+
+#[cfg(feature = "opencascade")]
+pub use opencascade::OpenCascadeKernel;
+#[cfg(feature = "truck")]
+pub use truck::TruckKernel;

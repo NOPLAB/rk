@@ -1,14 +1,18 @@
-name: Deploy to GitHub Pages
+name: Deploy Pages
 
 on:
   push:
     branches:
       - main
-      - develop
+    paths:
+      - "apps/docs/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -17,107 +21,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-wasm:
-    name: Build WASM
+  build:
+    name: Build docs
     runs-on: ubuntu-latest
-    outputs:
-      deploy-path: ${{ steps.deploy-path.outputs.path }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set deploy path
-        id: deploy-path
-        run: |
-          if [ "${{ github.ref_name }}" = "develop" ]; then
-            echo "path=dev" >> $GITHUB_OUTPUT
-          else
-            echo "path=app" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Trunk
-        run: cargo install trunk --locked
-
-      - name: Build WASM
-        working-directory: crates/rk-frontend
-        run: trunk build --release --public-url "/rk/${{ steps.deploy-path.outputs.path }}/"
-
-      - name: Upload WASM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-build
-          path: dist_app
-          retention-days: 1
-
-  build-docs:
-    name: Build Docs
-    runs-on: ubuntu-latest
-    # Only build docs on main branch
-    if: github.ref_name == 'main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "pnpm"
-          cache-dependency-path: docs/pnpm-lock.yaml
+          node-version: "22"
+          cache: "npm"
 
-      - name: Install docs dependencies
-        working-directory: docs
-        run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build Starlight docs
-        working-directory: docs
-        run: pnpm run build
+        run: npm run docs:build
 
-      - name: Upload docs artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: docs-build
-          path: docs/dist
-          retention-days: 1
+          path: apps/docs/dist
 
   deploy:
     name: Deploy
-    needs: [build-wasm, build-docs]
-    if: always() && needs.build-wasm.result == 'success'
+    needs: build
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download WASM artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: wasm-build
-          path: _site/${{ needs.build-wasm.outputs.deploy-path }}
-
-      - name: Download docs artifact
-        if: github.ref_name == 'main' && needs.build-docs.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: docs-build
-          path: _site_docs
-
-      - name: Merge docs into site
-        if: github.ref_name == 'main' && needs.build-docs.result == 'success'
-        run: |
-          # Copy docs to root, but preserve app/dev folders
-          cp -r _site_docs/* _site/
-
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./_site
-          keep_files: true
+        id: deployment
+        uses: actions/deploy-pages@v4

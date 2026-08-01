@@ -14,10 +14,11 @@ pub mod sketch;
 
 // Re-exports for convenience
 pub use feature::{BooleanOp, CadBody, ExtrudeDirection, Feature, FeatureError, FeatureResult};
-pub use history::{CadData, FeatureHistory, HistoryEntry};
+pub use history::{CadData, FeatureGroup, FeatureHistory, HistoryEntry};
 pub use kernel::{
-    Axis3D, BooleanType, CadError, CadKernel, CadResult, NullKernel, Solid, TessellatedMesh,
-    Wire2D, default_kernel,
+    Axis3D, BooleanType, CadError, CadKernel, CadResult, EdgeId, EdgeInfo, FaceId, FaceInfo,
+    NullKernel, Solid, StepExportOptions, StepImportOptions, StepImportResult, SweepCornerType,
+    TessellatedMesh, Wire2D, default_kernel,
 };
 pub use sketch::{
     ConstraintSolver, Sketch, SketchConstraint, SketchEntity, SketchError, SketchPlane, SolveResult,

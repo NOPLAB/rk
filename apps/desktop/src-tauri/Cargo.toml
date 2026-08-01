@@ -1,0 +1,29 @@
+[package]
+name = "rk-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "RK desktop app (Tauri 2 shell over the headless engine)"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+rk-cad = { workspace = true }
+rk-core = { workspace = true }
+rk-engine = { workspace = true }
+
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+glam = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

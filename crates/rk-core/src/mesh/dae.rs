@@ -1,6 +1,7 @@
 //! DAE (COLLADA) mesh file loading
 
 use std::path::Path;
+use std::str::FromStr;
 
 use dae_parser::{Document, Geometry, Primitive, Semantic, Source};
 
@@ -15,6 +16,13 @@ pub fn load_dae(path: impl AsRef<Path>) -> Result<Part, MeshError> {
     load_dae_with_unit(path, StlUnit::Meters)
 }
 
+/// Load a DAE from bytes with specified unit
+pub fn load_dae_from_bytes(name: &str, data: &[u8], unit: StlUnit) -> Result<Part, MeshError> {
+    let text = std::str::from_utf8(data)
+        .map_err(|e| MeshError::Parse(format!("Invalid UTF-8 in DAE file: {}", e)))?;
+    load_dae_from_str(name, text, unit)
+}
+
 /// Load a DAE (COLLADA) file with specified unit
 pub fn load_dae_with_unit(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part, MeshError> {
     let path = path.as_ref();
@@ -22,6 +30,25 @@ pub fn load_dae_with_unit(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part,
     let document = Document::from_file(path)
         .map_err(|e| MeshError::Parse(format!("DAE parse error: {:?}", e)))?;
 
+    let (name, mesh_path) = super::extract_name_and_path(path);
+    load_dae_from_document(&name, &document, unit, mesh_path)
+}
+
+/// Load a DAE from a string with specified unit
+fn load_dae_from_str(name: &str, text: &str, unit: StlUnit) -> Result<Part, MeshError> {
+    let document = Document::from_str(text)
+        .map_err(|e| MeshError::Parse(format!("DAE parse error: {:?}", e)))?;
+
+    load_dae_from_document(name, &document, unit, None)
+}
+
+/// Load a DAE from a parsed Document
+fn load_dae_from_document(
+    name: &str,
+    document: &Document,
+    unit: StlUnit,
+    mesh_path: Option<String>,
+) -> Result<Part, MeshError> {
     let scale = unit.scale_factor();
 
     let mut all_vertices: Vec<[f32; 3]> = Vec::new();
@@ -176,8 +203,7 @@ pub fn load_dae_with_unit(path: impl AsRef<Path>, unit: StlUnit) -> Result<Part,
         all_normals = calculate_face_normals(&all_vertices, &all_indices);
     }
 
-    let (name, mesh_path) = super::extract_name_and_path(path);
-    let mut part = Part::new(name);
+    let mut part = Part::new(name.to_string());
     super::finalize_part(
         &mut part,
         mesh_path,

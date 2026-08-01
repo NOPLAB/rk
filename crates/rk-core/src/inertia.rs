@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inertia tensor (symmetric 3x3 matrix)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct InertiaMatrix {
     pub ixx: f32,
     pub ixy: f32,

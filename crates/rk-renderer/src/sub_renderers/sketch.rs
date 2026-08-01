@@ -6,6 +6,7 @@
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use std::collections::HashMap;
 use uuid::Uuid;
+use wgpu::util::DeviceExt;
 
 use crate::context::RenderContext;
 use crate::pipeline::PipelineConfig;
@@ -85,6 +86,49 @@ struct SketchUniform {
     plane_color: [f32; 4],
 }
 
+/// Data for a constraint icon, to be drawn as a 2D overlay by the caller.
+#[derive(Debug, Clone)]
+pub struct ConstraintIconData {
+    /// Constraint ID.
+    pub id: Uuid,
+    /// Position in sketch coordinate space.
+    pub position: Vec2,
+    /// Constraint type name (e.g., "Coincident", "Horizontal").
+    pub constraint_type: String,
+    /// Dimensional value (if applicable).
+    pub value: Option<f32>,
+    /// Dimension line data for dimensional constraints (Distance, Angle, etc.).
+    pub dimension_line: Option<DimensionLine>,
+}
+
+/// Dimension line data for CAD-style dimension display.
+#[derive(Debug, Clone)]
+pub struct DimensionLine {
+    /// Start point of the dimension line (in sketch coordinates).
+    pub start: Vec2,
+    /// End point of the dimension line (in sketch coordinates).
+    pub end: Vec2,
+    /// Extension line start point (optional, for offset dimension lines).
+    pub extension_start: Option<Vec2>,
+    /// Extension line end point (optional, for offset dimension lines).
+    pub extension_end: Option<Vec2>,
+    /// Arc data for angle constraints.
+    pub arc_data: Option<ArcData>,
+}
+
+/// Arc data for angle dimension display.
+#[derive(Debug, Clone)]
+pub struct ArcData {
+    /// Center of the arc (in sketch coordinates).
+    pub center: Vec2,
+    /// Radius of the arc.
+    pub radius: f32,
+    /// Start angle in radians.
+    pub start_angle: f32,
+    /// End angle in radians.
+    pub end_angle: f32,
+}
+
 /// Data for a single sketch to be rendered.
 #[derive(Debug, Clone)]
 pub struct SketchRenderData {
@@ -98,6 +142,8 @@ pub struct SketchRenderData {
     pub point_vertices: Vec<SketchVertex>,
     /// Whether this sketch is currently being edited.
     pub is_active: bool,
+    /// Constraint icons, to be drawn as a 2D overlay by the caller.
+    pub constraint_icons: Vec<ConstraintIconData>,
 }
 
 impl Default for SketchRenderData {
@@ -108,6 +154,7 @@ impl Default for SketchRenderData {
             line_vertices: Vec::new(),
             point_vertices: Vec::new(),
             is_active: false,
+            constraint_icons: Vec::new(),
         }
     }
 }
@@ -121,13 +168,49 @@ impl SketchRenderData {
             line_vertices: Vec::new(),
             point_vertices: Vec::new(),
             is_active: false,
+            constraint_icons: Vec::new(),
         }
     }
 
-    /// Add a point to the sketch.
+    /// Half-size of point quad in sketch units
+    const POINT_HALF_SIZE: f32 = 0.008;
+
+    /// Add a point to the sketch (as a quad for visibility).
     pub fn add_point(&mut self, position: Vec2, color: Vec4, flags: u32) {
+        let hs = Self::POINT_HALF_SIZE;
+        let p = position;
+
+        // Create two triangles forming a quad (CCW winding)
+        // Triangle 1: bottom-left, bottom-right, top-right
         self.point_vertices.push(SketchVertex::new(
-            Vec3::new(position.x, position.y, 0.0),
+            Vec3::new(p.x - hs, p.y - hs, 0.0),
+            color,
+            flags,
+        ));
+        self.point_vertices.push(SketchVertex::new(
+            Vec3::new(p.x + hs, p.y - hs, 0.0),
+            color,
+            flags,
+        ));
+        self.point_vertices.push(SketchVertex::new(
+            Vec3::new(p.x + hs, p.y + hs, 0.0),
+            color,
+            flags,
+        ));
+
+        // Triangle 2: bottom-left, top-right, top-left
+        self.point_vertices.push(SketchVertex::new(
+            Vec3::new(p.x - hs, p.y - hs, 0.0),
+            color,
+            flags,
+        ));
+        self.point_vertices.push(SketchVertex::new(
+            Vec3::new(p.x + hs, p.y + hs, 0.0),
+            color,
+            flags,
+        ));
+        self.point_vertices.push(SketchVertex::new(
+            Vec3::new(p.x - hs, p.y + hs, 0.0),
             color,
             flags,
         ));
@@ -229,7 +312,7 @@ impl Default for SketchRenderer {
 }
 
 impl SketchRenderer {
-    /// Create a new sketch renderer.
+    /// Create a new sketch renderer (uninitialized).
     pub fn new() -> Self {
         Self {
             enabled: true,
@@ -241,6 +324,79 @@ impl SketchRenderer {
             sketch_resources: HashMap::new(),
             pending_sketches: Vec::new(),
         }
+    }
+
+    /// Initialize the sketch renderer with GPU resources.
+    ///
+    /// This follows the same pattern as other sub-renderers (GridRenderer, etc.)
+    pub fn init(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+        camera_bind_group_layout: &wgpu::BindGroupLayout,
+        camera_buffer: &wgpu::Buffer,
+    ) {
+        // Create sketch uniform bind group layout
+        let sketch_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Sketch Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // Create line pipeline
+        let line_pipeline = PipelineConfig::new(
+            "Sketch Lines",
+            include_str!("../shaders/sketch.wgsl"),
+            format,
+            depth_format,
+            &[camera_bind_group_layout, &sketch_bind_group_layout],
+        )
+        .with_vertex_layouts(vec![SketchVertex::layout()])
+        .with_topology(wgpu::PrimitiveTopology::LineList)
+        .with_blend(wgpu::BlendState::ALPHA_BLENDING)
+        .with_depth_write(false)
+        .build(device);
+
+        // Create point pipeline (using triangles to draw square points)
+        let point_pipeline = PipelineConfig::new(
+            "Sketch Points",
+            include_str!("../shaders/sketch.wgsl"),
+            format,
+            depth_format,
+            &[camera_bind_group_layout, &sketch_bind_group_layout],
+        )
+        .with_vertex_layouts(vec![SketchVertex::layout()])
+        .with_topology(wgpu::PrimitiveTopology::TriangleList)
+        .with_blend(wgpu::BlendState::ALPHA_BLENDING)
+        .with_depth_write(false)
+        .with_entry_point("vs_point", "fs_point")
+        .build(device);
+
+        // Create camera bind group
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Sketch Camera Bind Group"),
+            layout: camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
+        self.line_pipeline = Some(line_pipeline);
+        self.point_pipeline = Some(point_pipeline);
+        self.camera_bind_group = Some(camera_bind_group);
+        self.sketch_bind_group_layout = Some(sketch_bind_group_layout);
+        self.initialized = true;
     }
 
     /// Set sketch data to render.
@@ -257,94 +413,9 @@ impl SketchRenderer {
     pub fn clear_sketches(&mut self) {
         self.pending_sketches.clear();
     }
-}
 
-impl SubRenderer for SketchRenderer {
-    fn name(&self) -> &str {
-        "sketch"
-    }
-
-    fn priority(&self) -> i32 {
-        super::priorities::SKETCH
-    }
-
-    fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-
-    fn on_init(&mut self, ctx: &RenderContext) {
-        // Create sketch uniform bind group layout
-        let sketch_bind_group_layout =
-            ctx.device()
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("Sketch Bind Group Layout"),
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                });
-
-        // Create line pipeline
-        let line_pipeline = PipelineConfig::new(
-            "Sketch Lines",
-            include_str!("../shaders/sketch.wgsl"),
-            ctx.surface_format(),
-            ctx.depth_format(),
-            &[ctx.camera_bind_group_layout(), &sketch_bind_group_layout],
-        )
-        .with_vertex_layouts(vec![SketchVertex::layout()])
-        .with_topology(wgpu::PrimitiveTopology::LineList)
-        .with_blend(wgpu::BlendState::ALPHA_BLENDING)
-        .with_depth_write(false)
-        .build(ctx.device());
-
-        // Create point pipeline (using same shader but different topology)
-        let point_pipeline = PipelineConfig::new(
-            "Sketch Points",
-            include_str!("../shaders/sketch.wgsl"),
-            ctx.surface_format(),
-            ctx.depth_format(),
-            &[ctx.camera_bind_group_layout(), &sketch_bind_group_layout],
-        )
-        .with_vertex_layouts(vec![SketchVertex::layout()])
-        .with_topology(wgpu::PrimitiveTopology::PointList)
-        .with_blend(wgpu::BlendState::ALPHA_BLENDING)
-        .with_depth_write(false)
-        .with_entry_point("vs_point", "fs_point")
-        .build(ctx.device());
-
-        // Create camera bind group
-        let camera_bind_group = ctx.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Sketch Camera Bind Group"),
-            layout: ctx.camera_bind_group_layout(),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: ctx.camera_buffer().as_entire_binding(),
-            }],
-        });
-
-        self.line_pipeline = Some(line_pipeline);
-        self.point_pipeline = Some(point_pipeline);
-        self.camera_bind_group = Some(camera_bind_group);
-        self.sketch_bind_group_layout = Some(sketch_bind_group_layout);
-        self.initialized = true;
-    }
-
-    fn on_resize(&mut self, _ctx: &RenderContext, _width: u32, _height: u32) {
-        // Sketch renderer doesn't need to respond to resize
-    }
-
-    fn prepare(&mut self, ctx: &RenderContext, _scene: &Scene) {
+    /// Prepare GPU resources for rendering (standalone version without RenderContext).
+    pub fn prepare_with_device(&mut self, device: &wgpu::Device) {
         if !self.initialized {
             return;
         }
@@ -358,60 +429,56 @@ impl SubRenderer for SketchRenderer {
                 plane_color: [0.5, 0.5, 0.5, 0.2],
             };
 
-            // Create or update resources
-            let needs_update = !self.sketch_resources.contains_key(&sketch_data.id);
             let line_count = sketch_data.line_vertices.len() as u32;
             let point_count = sketch_data.point_vertices.len() as u32;
 
-            if needs_update || line_count > 0 || point_count > 0 {
-                // Create buffers
-                let line_buffer = ctx.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Sketch Line Buffer"),
-                    contents: if sketch_data.line_vertices.is_empty() {
-                        &[0u8; std::mem::size_of::<SketchVertex>()]
-                    } else {
-                        bytemuck::cast_slice(&sketch_data.line_vertices)
-                    },
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
+            // Create buffers
+            let line_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Sketch Line Buffer"),
+                contents: if sketch_data.line_vertices.is_empty() {
+                    &[0u8; std::mem::size_of::<SketchVertex>()]
+                } else {
+                    bytemuck::cast_slice(&sketch_data.line_vertices)
+                },
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
 
-                let point_buffer = ctx.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Sketch Point Buffer"),
-                    contents: if sketch_data.point_vertices.is_empty() {
-                        &[0u8; std::mem::size_of::<SketchVertex>()]
-                    } else {
-                        bytemuck::cast_slice(&sketch_data.point_vertices)
-                    },
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
+            let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Sketch Point Buffer"),
+                contents: if sketch_data.point_vertices.is_empty() {
+                    &[0u8; std::mem::size_of::<SketchVertex>()]
+                } else {
+                    bytemuck::cast_slice(&sketch_data.point_vertices)
+                },
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
 
-                let uniform_buffer = ctx.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Sketch Uniform Buffer"),
-                    contents: bytemuck::bytes_of(&uniform),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+            let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Sketch Uniform Buffer"),
+                contents: bytemuck::bytes_of(&uniform),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
-                let bind_group = ctx.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Sketch Bind Group"),
-                    layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffer.as_entire_binding(),
-                    }],
-                });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Sketch Bind Group"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                }],
+            });
 
-                self.sketch_resources.insert(
-                    sketch_data.id,
-                    SketchGpuResources {
-                        line_buffer,
-                        point_buffer,
-                        uniform_buffer,
-                        bind_group,
-                        line_count,
-                        point_count,
-                    },
-                );
-            }
+            self.sketch_resources.insert(
+                sketch_data.id,
+                SketchGpuResources {
+                    line_buffer,
+                    point_buffer,
+                    uniform_buffer,
+                    bind_group,
+                    line_count,
+                    point_count,
+                },
+            );
         }
 
         // Remove resources for sketches no longer being rendered
@@ -421,7 +488,8 @@ impl SubRenderer for SketchRenderer {
             .retain(|id, _| active_ids.contains(id));
     }
 
-    fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, _scene: &Scene) {
+    /// Render sketches (standalone version without Scene).
+    pub fn render_pass<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         if !self.initialized || self.pending_sketches.is_empty() {
             return;
         }
@@ -456,5 +524,45 @@ impl SubRenderer for SketchRenderer {
                 pass.draw(0..resources.point_count, 0..1);
             }
         }
+    }
+}
+
+impl SubRenderer for SketchRenderer {
+    fn name(&self) -> &str {
+        "sketch"
+    }
+
+    fn priority(&self) -> i32 {
+        super::priorities::SKETCH
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    fn on_init(&mut self, ctx: &RenderContext) {
+        self.init(
+            ctx.device(),
+            ctx.surface_format(),
+            ctx.depth_format(),
+            ctx.camera_bind_group_layout(),
+            ctx.camera_buffer(),
+        );
+    }
+
+    fn on_resize(&mut self, _ctx: &RenderContext, _width: u32, _height: u32) {
+        // Sketch renderer doesn't need to respond to resize
+    }
+
+    fn prepare(&mut self, ctx: &RenderContext, _scene: &Scene) {
+        self.prepare_with_device(ctx.device());
+    }
+
+    fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, _scene: &Scene) {
+        self.render_pass(pass);
     }
 }

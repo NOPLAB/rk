@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A constraint between sketch entities
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SketchConstraint {
     // ============== Geometric Constraints ==============
     /// Two points are at the same location
@@ -478,6 +478,53 @@ impl SketchConstraint {
             id: Uuid::new_v4(),
             line1,
             line2,
+            value,
+        }
+    }
+
+    /// Create a tangent constraint
+    pub fn tangent(curve1: Uuid, curve2: Uuid) -> Self {
+        SketchConstraint::Tangent {
+            id: Uuid::new_v4(),
+            curve1,
+            curve2,
+        }
+    }
+
+    /// Create an equal length constraint
+    pub fn equal_length(line1: Uuid, line2: Uuid) -> Self {
+        SketchConstraint::EqualLength {
+            id: Uuid::new_v4(),
+            line1,
+            line2,
+        }
+    }
+
+    /// Create an equal radius constraint
+    pub fn equal_radius(circle1: Uuid, circle2: Uuid) -> Self {
+        SketchConstraint::EqualRadius {
+            id: Uuid::new_v4(),
+            circle1,
+            circle2,
+        }
+    }
+
+    /// Create a horizontal distance constraint
+    pub fn horizontal_distance(point1: Uuid, point2: Uuid, value: f32) -> Self {
+        SketchConstraint::HorizontalDistance {
+            id: Uuid::new_v4(),
+            point1,
+            point2,
+            value,
+        }
+    }
+
+    /// Create a vertical distance constraint
+    pub fn vertical_distance(point1: Uuid, point2: Uuid, value: f32) -> Self {
+        SketchConstraint::VerticalDistance {
+            id: Uuid::new_v4(),
+            point1,
+            point2,
             value,
         }
     }

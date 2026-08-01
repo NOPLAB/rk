@@ -1,0 +1,571 @@
+// Sketch overlay for the viewport.
+//
+// Everything is built in sketch coordinates (z = 0) inside a group whose
+// matrix is the sketch plane's basis, so entity positions go in exactly as
+// the engine reports them. Picking works the other way: the pointer ray is
+// intersected with the plane and converted back to 2D.
+
+import * as THREE from "three";
+import type { SketchGeometry, SketchInfo, SketchRegion, Vec2 } from "../engine/api";
+import { ellipsePolyline, splinePolyline } from "./sketchGeom";
+import type { SketchPreview } from "./sketchTools";
+
+const CURVE_SEGMENTS = 72;
+/** Pixel radius for snapping onto an existing point / picking an entity */
+const SNAP_PX = 11;
+const PICK_PX = 8;
+
+const GRID_EXTENT = 0.5;
+const GRID_STEP = 0.025;
+
+export interface SnapResult {
+  /** Sketch coordinates, moved onto an existing point when one is in reach */
+  position: Vec2;
+  /** The point to reuse — sharing IDs is what makes a profile closed */
+  pointId: string | null;
+  /** Every point in reach, nearest first: a tool that needs a particular kind
+   *  of vertex (fillet wants one joining two lines) can look past the closest */
+  nearby: string[];
+}
+
+/** Sketch coordinates → canvas pixels */
+export type Projector = (u: number, v: number) => [number, number];
+
+export const EMPTY_GEOMETRY: SketchGeometry = {
+  points: [],
+  lines: [],
+  circles: [],
+  arcs: [],
+  ellipses: [],
+  splines: [],
+  regions: [],
+  constraints: [],
+};
+
+export class SketchLayer {
+  readonly group = new THREE.Group();
+
+  private fills = new RegionFills(0x4a7fc4, 0.16);
+  private grid = lineObject(0x363b42, true);
+  private curves = lineObject(0x8fb8ff, false);
+  private construction = lineObject(0x5d6570, false);
+  private highlight = lineObject(0xffa53c, false);
+  /** Entities of the constraint the pointer is over in the panel */
+  private hover = lineObject(0x4fd18b, false);
+  private preview = lineObject(0xffc857, false);
+  private points = pointObject(0xc8d2e0, 5);
+  /** Snap indicator under the pointer */
+  private cursor = pointObject(0xffc857, 9);
+  /** Selected and hovered entities that are bare points */
+  private marker = pointObject(0xffa53c, 9);
+  private hoverMarker = pointObject(0x4fd18b, 9);
+
+  private info: SketchInfo | null = null;
+  private geom: SketchGeometry = EMPTY_GEOMETRY;
+  private selection: string[] = [];
+  private hovered: string[] = [];
+  private plane = new THREE.Plane();
+  private toLocal = new THREE.Matrix4();
+  /** Hit-test polylines in sketch coordinates, one per curve entity */
+  private outlines: Outline[] = [];
+
+  constructor() {
+    this.group.matrixAutoUpdate = false;
+    this.group.visible = false;
+    const stack = [
+      this.grid,
+      this.fills.group,
+      this.curves,
+      this.construction,
+      this.hover,
+      this.highlight,
+      this.preview,
+      this.points,
+      this.hoverMarker,
+      this.marker,
+      this.cursor,
+    ];
+    this.group.add(...stack);
+    // These all skip the depth test and sit on the same plane, so nothing but
+    // an explicit order decides who wins — without it a selected line is drawn
+    // under the plain one and the highlight never shows
+    stack.forEach((obj, i) => {
+      obj.renderOrder = 10 + i;
+    });
+    setSegments(this.grid, gridSegments());
+  }
+
+  get active(): boolean {
+    return this.info !== null;
+  }
+
+  get sketchId(): string | null {
+    return this.info?.id ?? null;
+  }
+
+  get regions(): SketchRegion[] {
+    return this.geom.regions;
+  }
+
+  setSketch(info: SketchInfo | null) {
+    this.info = info;
+    this.group.visible = info !== null;
+    if (!info) {
+      this.selection = [];
+      this.hovered = [];
+      this.setGeometry(EMPTY_GEOMETRY);
+      this.setPreview(null);
+      this.setCursor(null);
+      return;
+    }
+    // The group carries the plane basis; children are built in 2D on z = 0
+    this.group.matrix.fromArray(info.transform);
+    this.group.matrixWorldNeedsUpdate = true;
+    this.toLocal.copy(this.group.matrix).invert();
+    const n = new THREE.Vector3(...info.plane.normal);
+    this.plane.setFromNormalAndCoplanarPoint(
+      n,
+      new THREE.Vector3(...info.plane.origin),
+    );
+  }
+
+  setGeometry(geom: SketchGeometry) {
+    this.geom = geom;
+    const solid: number[] = [];
+    const dashed: number[] = [];
+    this.outlines = outlinesOf(geom);
+
+    for (const outline of this.outlines) {
+      pushPolyline(outline.construction ? dashed : solid, outline.pts, outline.closed);
+    }
+
+    setSegments(this.curves, solid);
+    setSegments(this.construction, dashed);
+    setPoints(
+      this.points,
+      geom.points.flatMap((p) => [p.position[0], p.position[1], 0]),
+    );
+    this.fills.set(geom.regions);
+    // Re-apply against the rebuilt outlines; entities that were deleted or
+    // undone away simply stop matching
+    this.setHighlight(this.selection);
+    this.setHover(this.hovered);
+  }
+
+  setPreview(preview: SketchPreview | null) {
+    if (!preview) {
+      setSegments(this.preview, []);
+      return;
+    }
+    const out: number[] = [];
+    for (const stroke of preview.strokes) {
+      pushPolyline(out, stroke.pts, stroke.closed);
+    }
+    setSegments(this.preview, out);
+  }
+
+  /** Marker under the pointer; drawn only when it snapped onto a point */
+  setCursor(position: Vec2 | null) {
+    setPoints(this.cursor, position ? [position[0], position[1], 0] : []);
+  }
+
+  /** The current selection (constraints act on several entities at once) */
+  setHighlight(entityIds: string[]) {
+    this.selection = entityIds;
+    this.paint(this.highlight, this.marker, entityIds);
+  }
+
+  /** Entities of the constraint being pointed at, shown alongside the selection */
+  setHover(entityIds: string[]) {
+    this.hovered = entityIds;
+    this.paint(this.hover, this.hoverMarker, entityIds);
+  }
+
+  /** Regions the user has clicked, ready for an extrude */
+  setSelectedRegions(regionIds: string[]) {
+    this.fills.setSelected(regionIds);
+  }
+
+  setHoveredRegion(regionId: string | null) {
+    this.fills.setHovered(regionId);
+  }
+
+  private paint(
+    curves: THREE.LineSegments,
+    points: THREE.Points,
+    entityIds: string[],
+  ) {
+    const wanted = new Set(entityIds);
+    const out: number[] = [];
+    for (const outline of this.outlines) {
+      if (wanted.has(outline.id)) pushPolyline(out, outline.pts, outline.closed);
+    }
+    setSegments(curves, out);
+    setPoints(
+      points,
+      this.geom.points
+        .filter((p) => wanted.has(p.id))
+        .flatMap((p) => [p.position[0], p.position[1], 0]),
+    );
+  }
+
+  /** Where the pointer ray meets the sketch plane, in sketch coordinates */
+  planeHit(raycaster: THREE.Raycaster): Vec2 | null {
+    if (!this.info) return null;
+    const hit = raycaster.ray.intersectPlane(this.plane, new THREE.Vector3());
+    if (!hit) return null;
+    const local = hit.applyMatrix4(this.toLocal);
+    return [local.x, local.y];
+  }
+
+  /** Pull `position` onto a nearby existing point, reporting its ID */
+  snap(position: Vec2, project: Projector): SnapResult {
+    const near = this.pointsNear(position, project);
+    const best = near[0];
+    return best
+      ? { position: best.position, pointId: best.id, nearby: near.map((p) => p.id) }
+      : { position, pointId: null, nearby: [] };
+  }
+
+  /** Every point within snapping distance, nearest first */
+  private pointsNear(
+    position: Vec2,
+    project: Projector,
+  ): { id: string; position: Vec2; distance: number }[] {
+    const [px, py] = project(position[0], position[1]);
+    const out: { id: string; position: Vec2; distance: number }[] = [];
+    for (const p of this.geom.points) {
+      const [qx, qy] = project(p.position[0], p.position[1]);
+      const distance = Math.hypot(qx - px, qy - py);
+      if (distance < SNAP_PX) out.push({ id: p.id, position: p.position, distance });
+    }
+    out.sort((a, b) => a.distance - b.distance);
+    return out;
+  }
+
+  /** Entity under the pointer: points win over curves */
+  pick(px: number, py: number, project: Projector): string | null {
+    let bestId: string | null = null;
+    let bestDist = PICK_PX;
+    for (const o of this.outlines) {
+      const n = o.pts.length;
+      const last = o.closed ? n : n - 1;
+      for (let i = 0; i < last; i++) {
+        const a = project(o.pts[i][0], o.pts[i][1]);
+        const b = project(o.pts[(i + 1) % n][0], o.pts[(i + 1) % n][1]);
+        const d = distToSegment(px, py, a, b);
+        if (d < bestDist) {
+          bestDist = d;
+          bestId = o.id;
+        }
+      }
+    }
+    bestDist = SNAP_PX;
+    for (const p of this.geom.points) {
+      const [qx, qy] = project(p.position[0], p.position[1]);
+      const d = Math.hypot(qx - px, qy - py);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = p.id;
+      }
+    }
+    return bestId;
+  }
+
+  /** Innermost region containing `p`, in sketch coordinates */
+  pickRegion(p: Vec2): string | null {
+    return pickRegionAt(this.geom.regions, p);
+  }
+
+  dispose() {
+    this.fills.dispose();
+    for (const obj of [
+      this.grid,
+      this.curves,
+      this.construction,
+      this.highlight,
+      this.hover,
+      this.preview,
+      this.points,
+      this.cursor,
+      this.marker,
+      this.hoverMarker,
+    ]) {
+      obj.geometry.dispose();
+      (obj.material as THREE.Material).dispose();
+    }
+  }
+}
+
+// ---- region fills -------------------------------------------------------
+
+/**
+ * Translucent patches over the areas a sketch encloses. They are what the
+ * user clicks before extruding, so they are meshes rather than lines: Three's
+ * ShapeGeometry triangulates the outer loop with its holes cut out.
+ */
+export class RegionFills {
+  readonly group = new THREE.Group();
+  private meshes = new Map<string, THREE.Mesh>();
+  private base: THREE.MeshBasicMaterial;
+  private selected: THREE.MeshBasicMaterial;
+  private hovered: THREE.MeshBasicMaterial;
+  private picked = new Set<string>();
+  private under: string | null = null;
+
+  constructor(color: number, opacity: number) {
+    const material = (hex: number, alpha: number) =>
+      new THREE.MeshBasicMaterial({
+        color: hex,
+        transparent: true,
+        opacity: alpha,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+    this.base = material(color, opacity);
+    this.selected = material(0xffa53c, 0.34);
+    this.hovered = material(0x7fc4ff, 0.28);
+  }
+
+  set(regions: SketchRegion[]) {
+    this.clear();
+    for (const region of regions) {
+      const shape = new THREE.Shape(
+        region.outer.map((p) => new THREE.Vector2(p[0], p[1])),
+      );
+      shape.holes = region.holes.map(
+        (hole) => new THREE.Path(hole.map((p) => new THREE.Vector2(p[0], p[1]))),
+      );
+      const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), this.base);
+      mesh.userData.regionId = region.id;
+      this.meshes.set(region.id, mesh);
+      this.group.add(mesh);
+    }
+    this.repaint();
+  }
+
+  setSelected(regionIds: string[]) {
+    this.picked = new Set(regionIds);
+    this.repaint();
+  }
+
+  setHovered(regionId: string | null) {
+    if (this.under === regionId) return;
+    this.under = regionId;
+    this.repaint();
+  }
+
+  setVisible(visible: boolean) {
+    this.group.visible = visible;
+  }
+
+  private repaint() {
+    for (const [id, mesh] of this.meshes) {
+      mesh.material = this.picked.has(id)
+        ? this.selected
+        : id === this.under
+          ? this.hovered
+          : this.base;
+    }
+  }
+
+  private clear() {
+    for (const mesh of this.meshes.values()) {
+      this.group.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.meshes.clear();
+  }
+
+  dispose() {
+    this.clear();
+    this.base.dispose();
+    this.selected.dispose();
+    this.hovered.dispose();
+  }
+}
+
+/** Innermost (smallest) region containing `p` */
+export function pickRegionAt(regions: SketchRegion[], p: Vec2): string | null {
+  let best: SketchRegion | null = null;
+  for (const region of regions) {
+    if (!insideLoop(region.outer, p)) continue;
+    if (region.holes.some((hole) => insideLoop(hole, p))) continue;
+    if (!best || region.area < best.area) best = region;
+  }
+  return best?.id ?? null;
+}
+
+function insideLoop(loop: Vec2[], p: Vec2): boolean {
+  let inside = false;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+    const a = loop[i];
+    const b = loop[j];
+    if (
+      a[1] > p[1] !== b[1] > p[1] &&
+      p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// ---- geometry helpers ---------------------------------------------------
+
+export interface Outline {
+  id: string;
+  pts: Vec2[];
+  closed: boolean;
+  construction: boolean;
+}
+
+/** Every curve as a polyline, for drawing and for hit-testing */
+export function outlinesOf(geom: SketchGeometry): Outline[] {
+  const out: Outline[] = [];
+  for (const l of geom.lines) {
+    out.push({
+      id: l.id,
+      pts: [l.start, l.end],
+      closed: false,
+      construction: l.construction,
+    });
+  }
+  for (const c of geom.circles) {
+    out.push({
+      id: c.id,
+      pts: arcPoints(c.center, c.radius, 0, Math.PI * 2),
+      closed: true,
+      construction: c.construction,
+    });
+  }
+  for (const a of geom.arcs) {
+    out.push({
+      id: a.id,
+      pts: arcPoints(a.center, a.radius, a.start_angle, a.end_angle),
+      closed: false,
+      construction: a.construction,
+    });
+  }
+  for (const e of geom.ellipses) {
+    out.push({
+      id: e.id,
+      pts: ellipsePolyline(e.center, e.major_radius, e.minor_radius, e.rotation),
+      closed: true,
+      construction: e.construction,
+    });
+  }
+  for (const s of geom.splines) {
+    out.push({
+      id: s.id,
+      pts: splinePolyline(s.points, s.closed),
+      closed: s.closed,
+      construction: s.construction,
+    });
+  }
+  return out;
+}
+
+/** Sketch geometry sits on top of solids so it stays visible while drawing */
+function lineObject(color: number, depthTest: boolean): THREE.LineSegments {
+  const obj = new THREE.LineSegments(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color, depthTest, transparent: !depthTest }),
+  );
+  // SketchLayer's constructor assigns the real order; this is just a floor
+  obj.renderOrder = depthTest ? 1 : 10;
+  obj.frustumCulled = false;
+  return obj;
+}
+
+function pointObject(color: number, size: number): THREE.Points {
+  const obj = new THREE.Points(
+    new THREE.BufferGeometry(),
+    new THREE.PointsMaterial({
+      color,
+      size,
+      sizeAttenuation: false,
+      depthTest: false,
+      transparent: true,
+    }),
+  );
+  obj.renderOrder = 11;
+  obj.frustumCulled = false;
+  return obj;
+}
+
+export function setSegments(obj: THREE.LineSegments, positions: number[]) {
+  obj.geometry.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  obj.geometry = geo;
+  obj.visible = positions.length > 0;
+}
+
+function setPoints(obj: THREE.Points, positions: number[]) {
+  obj.geometry.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  obj.geometry = geo;
+  obj.visible = positions.length > 0;
+}
+
+/** Append a polyline as line-segment pairs (`closed` adds the wrap-around) */
+export function pushPolyline(out: number[], pts: Vec2[], closed: boolean) {
+  const n = pts.length;
+  const last = closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    out.push(a[0], a[1], 0, b[0], b[1], 0);
+  }
+}
+
+function arcPoints(
+  center: Vec2,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+): Vec2[] {
+  let sweep = endAngle - startAngle;
+  // Normalize to a positive (counter-clockwise) sweep; a full circle is
+  // passed in as 0 → 2π and must not collapse to nothing
+  while (sweep <= 1e-6) sweep += Math.PI * 2;
+  const steps = Math.max(8, Math.round((CURVE_SEGMENTS * sweep) / (Math.PI * 2)));
+  const pts: Vec2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = startAngle + (sweep * i) / steps;
+    pts.push([center[0] + radius * Math.cos(a), center[1] + radius * Math.sin(a)]);
+  }
+  return pts;
+}
+
+function gridSegments(): number[] {
+  const out: number[] = [];
+  const n = Math.round(GRID_EXTENT / GRID_STEP);
+  for (let i = -n; i <= n; i++) {
+    const t = i * GRID_STEP;
+    out.push(t, -GRID_EXTENT, 0, t, GRID_EXTENT, 0);
+    out.push(-GRID_EXTENT, t, 0, GRID_EXTENT, t, 0);
+  }
+  return out;
+}
+
+function distToSegment(
+  px: number,
+  py: number,
+  a: [number, number],
+  b: [number, number],
+): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lenSq = dx * dx + dy * dy;
+  const t =
+    lenSq === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / lenSq),
+        );
+  return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
+}

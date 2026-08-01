@@ -1,0 +1,63 @@
+---
+title: RK
+description: A visual 3D CAD editor
+template: splash
+hero:
+  tagline: A fast, cross-platform, and open source 3D CAD editor.
+  image:
+    file: ../../assets/hero.svg
+  actions:
+    - text: Get Started
+      link: /rk/getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/NOPLAB/rk
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What is RK?
+
+RK is a 3D CAD editor built in Rust. Sketch a profile, turn it into a solid, and
+keep every step editable — the feature history is the model.
+
+## Features
+
+<CardGrid stagger>
+  <Card title="Parametric Sketching" icon="pencil">
+    Draw lines, arcs, circles and splines on any plane or on a face of an
+    existing solid, then pin the shape down with constraints and dimensions.
+  </Card>
+  <Card title="Feature-based Modeling" icon="setting">
+    Extrude and revolve the regions a sketch encloses, combine them with boolean
+    operations, and roll the history back to any earlier step.
+  </Card>
+  <Card title="Cross-Platform" icon="rocket">
+    Runs natively on Windows, macOS, and Linux.
+  </Card>
+  <Card title="Mesh and URDF" icon="document">
+    Import STL, OBJ, DAE and URDF; export URDF for robotics toolchains.
+  </Card>
+</CardGrid>
+
+## Quick Links
+
+<CardGrid>
+  <LinkCard
+    title="Installation"
+    description="Get RK running on your system"
+    href="/rk/getting-started/installation/"
+  />
+  <LinkCard
+    title="Quick Start"
+    description="Model your first part"
+    href="/rk/getting-started/quick-start/"
+  />
+</CardGrid>
+
+## Open Source
+
+RK is open source and available on [GitHub](https://github.com/NOPLAB/rk). Contributions, bug reports, and feature requests are welcome.

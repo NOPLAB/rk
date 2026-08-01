@@ -1,5 +1,6 @@
-[target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
-
-[target.wasm32-unknown-unknown]
-rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+[env]
+# OCCT's CMakeLists still asks for a `cmake_minimum_required` below 3.5, which
+# CMake 4 refuses outright. Without this the default build dies in
+# occt-sys' configure step on any machine with a current CMake — and the
+# default build is the OpenCASCADE one.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

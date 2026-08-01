@@ -4,7 +4,7 @@ use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Pose (position and orientation)
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Pose {
     pub xyz: [f32; 3],
     pub rpy: [f32; 3], // roll, pitch, yaw in radians

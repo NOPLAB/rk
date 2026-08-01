@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/rk-core",
-    "crates/rk-cad",
-    "crates/rk-renderer",
-    "crates/rk-frontend",
-]
+members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,19 +11,9 @@ authors = ["nop"]
 [workspace.dependencies]
 # Graphics
 wgpu = "27.0"
-egui = "0.33"
-eframe = { version = "0.33", default-features = false, features = ["wgpu", "default_fonts"] }
-egui_dock = "0.18"
-egui-wgpu = "0.33"
-
-# WASM
-web-sys = "0.3"
-wasm-bindgen-futures = "0.4"
-getrandom = { version = "0.3", features = ["wasm_js"] }
-log = "0.4"
 
 # Math
-glam = "0.29"
+glam = { version = "0.29", features = ["serde"] }
 bytemuck = { version = "1", features = ["derive"] }
 
 # Mesh formats
@@ -42,19 +27,45 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ron = "0.8"
 
+# CAD kernels
+# OpenCASCADE: `default-features = false` links against a pre-installed OCCT.
+# rk-cad's default feature turns `builtin` back on, which compiles the OCCT
+# that ships inside occt-sys instead — no system install to arrange
+opencascade-sys = { git = "https://github.com/NOPLAB/opencascade-rs", default-features = false }
+cxx = "1.0"
+truck-modeling = "0.6"
+truck-meshalgo = "0.4"
+truck-topology = "0.6"
+truck-polymesh = "0.6"
+truck-shapeops = "0.4"
+
+# Tauri desktop app
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+
+# MCP server
+rmcp = { version = "0.9", default-features = false, features = ["base64", "server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+schemars = "1"
+png = "0.18"
+base64 = "0.22"
+anyhow = "1"
+pollster = "0.4"
+
 # Utilities
-uuid = { version = "1", features = ["v4", "serde", "js"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
-rfd = "0.15"
-ureq = { version = "3", features = ["json"] }
-semver = "1"
-open = "5"
+
+# Build / test
+approx = "0.5"
+tempfile = "3"
 
 # Internal crates
 rk-core = { path = "crates/rk-core" }
 rk-cad = { path = "crates/rk-cad" }
+rk-engine = { path = "crates/rk-engine" }
 rk-renderer = { path = "crates/rk-renderer" }
-rk-frontend = { path = "crates/rk-frontend" }

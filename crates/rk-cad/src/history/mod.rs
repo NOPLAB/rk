@@ -39,6 +39,23 @@ impl HistoryEntry {
     }
 }
 
+/// A named bundle of timeline features.
+///
+/// Grouping is presentation only — it never changes the order features are
+/// rebuilt in, so a group can be added, renamed or dissolved without the
+/// model changing shape. Members are listed in history order by the client;
+/// a group is drawn where its first member sits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeatureGroup {
+    pub id: Uuid,
+    pub name: String,
+    /// Feature IDs belonging to this group
+    pub members: Vec<Uuid>,
+    /// Whether the browser shows the group folded up
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
 /// Manages the parametric feature history
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FeatureHistory {
@@ -48,6 +65,9 @@ pub struct FeatureHistory {
     rollback_position: Option<usize>,
     /// All sketches in the model
     sketches: HashMap<Uuid, Sketch>,
+    /// Named bundles of features, for the browser tree only
+    #[serde(default)]
+    groups: Vec<FeatureGroup>,
     /// All bodies in the model
     #[serde(skip)]
     bodies: HashMap<Uuid, CadBody>,
@@ -115,6 +135,12 @@ impl FeatureHistory {
     pub fn remove_feature(&mut self, id: Uuid) -> Option<Feature> {
         let index = self.index_of(id)?;
         let entry = self.entries.remove(index);
+        // A group that lost its last member would otherwise linger in the
+        // browser as an empty folder nothing can be dropped into
+        for group in &mut self.groups {
+            group.members.retain(|m| *m != id);
+        }
+        self.groups.retain(|g| !g.members.is_empty());
         Some(entry.feature)
     }
 
@@ -140,6 +166,44 @@ impl FeatureHistory {
     /// Get all history entries
     pub fn entries(&self) -> &[HistoryEntry] {
         &self.entries
+    }
+
+    // ============== Grouping ==============
+
+    /// All feature groups
+    pub fn groups(&self) -> &[FeatureGroup] {
+        &self.groups
+    }
+
+    /// Add a group. Members already in another group are moved into this one,
+    /// so a feature is never listed twice in the browser.
+    pub fn add_group(&mut self, group: FeatureGroup) {
+        for existing in &mut self.groups {
+            existing.members.retain(|m| !group.members.contains(m));
+        }
+        self.groups.retain(|g| !g.members.is_empty());
+        self.groups.push(group);
+    }
+
+    /// Dissolve a group; its features stay in the history untouched
+    pub fn remove_group(&mut self, id: Uuid) -> Option<FeatureGroup> {
+        let index = self.groups.iter().position(|g| g.id == id)?;
+        Some(self.groups.remove(index))
+    }
+
+    /// Get a group by ID
+    pub fn get_group(&self, id: Uuid) -> Option<&FeatureGroup> {
+        self.groups.iter().find(|g| g.id == id)
+    }
+
+    /// Get a mutable group by ID
+    pub fn get_group_mut(&mut self, id: Uuid) -> Option<&mut FeatureGroup> {
+        self.groups.iter_mut().find(|g| g.id == id)
+    }
+
+    /// The group a feature belongs to, if any
+    pub fn group_of(&self, feature_id: Uuid) -> Option<&FeatureGroup> {
+        self.groups.iter().find(|g| g.members.contains(&feature_id))
     }
 
     // ============== Sketch Management ==============
@@ -186,6 +250,11 @@ impl FeatureHistory {
     /// Get all bodies
     pub fn bodies(&self) -> &HashMap<Uuid, CadBody> {
         &self.bodies
+    }
+
+    /// Get mutable access to all bodies
+    pub fn bodies_mut(&mut self) -> &mut HashMap<Uuid, CadBody> {
+        &mut self.bodies
     }
 
     // ============== Rollback ==============
@@ -238,10 +307,15 @@ impl FeatureHistory {
 
             match entry.feature.execute(kernel, &self.sketches, &solids) {
                 Ok(solid) => {
-                    // Create a new body for the result
-                    let mut body = CadBody::new(entry.feature.name());
+                    // Reuse the previous body ID so references to this body
+                    // (e.g. Boolean target_body) stay valid across rebuilds
+                    let body_id = entry
+                        .created_bodies
+                        .first()
+                        .copied()
+                        .unwrap_or_else(Uuid::new_v4);
+                    let mut body = CadBody::with_id(body_id, entry.feature.name());
                     body.source_feature = Some(entry.feature.id());
-                    let body_id = body.id;
 
                     // Store the solid
                     solids.insert(body_id, solid.clone());
@@ -261,13 +335,66 @@ impl FeatureHistory {
     }
 
     /// Rebuild a single feature and all dependent features
+    ///
+    /// This is optimized to only rebuild features from the specified feature onwards,
+    /// rather than rebuilding the entire history.
     pub fn rebuild_from(&mut self, id: Uuid, kernel: &dyn CadKernel) -> FeatureResult<()> {
-        // Verify the feature exists
-        let _start_index = self.index_of(id).ok_or(FeatureError::FeatureNotFound(id))?;
+        let start_index = self.index_of(id).ok_or(FeatureError::FeatureNotFound(id))?;
+        let end = self.effective_len();
 
-        // For now, just do a full rebuild
-        // TODO: Optimize to only rebuild affected features
-        self.rebuild(kernel)
+        // If start_index is 0, just do a full rebuild
+        if start_index == 0 {
+            return self.rebuild(kernel);
+        }
+
+        // Remove bodies created by features from start_index onwards
+        for entry in &self.entries[start_index..end] {
+            for body_id in &entry.created_bodies {
+                self.bodies.remove(body_id);
+            }
+        }
+
+        // Build solids map from existing bodies (before start_index)
+        let mut solids: HashMap<Uuid, Solid> = self
+            .bodies
+            .iter()
+            .filter_map(|(id, body)| body.solid.clone().map(|s| (*id, s)))
+            .collect();
+
+        // Re-execute features from start_index onwards
+        for entry in &mut self.entries[start_index..end] {
+            if entry.feature.is_suppressed() {
+                continue;
+            }
+
+            // Clear previous results for this entry (created_bodies is kept so
+            // the body ID can be reused on success)
+            entry.modified_bodies.clear();
+            entry.deleted_bodies.clear();
+
+            match entry.feature.execute(kernel, &self.sketches, &solids) {
+                Ok(solid) => {
+                    let body_id = entry
+                        .created_bodies
+                        .first()
+                        .copied()
+                        .unwrap_or_else(Uuid::new_v4);
+                    let mut body = CadBody::with_id(body_id, entry.feature.name());
+                    body.source_feature = Some(entry.feature.id());
+
+                    solids.insert(body_id, solid.clone());
+                    body.solid = Some(solid);
+
+                    self.bodies.insert(body_id, body);
+                    entry.created_bodies = vec![body_id];
+                }
+                Err(e) => {
+                    tracing::warn!("Feature {} failed: {}", entry.feature.name(), e);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -294,6 +421,8 @@ impl CadData {
 mod tests {
     use super::*;
     use crate::feature::ExtrudeDirection;
+    use crate::sketch::SketchPlane;
+    use glam::Vec2;
 
     #[test]
     fn test_add_feature() {
@@ -332,5 +461,85 @@ mod tests {
         // Roll forward
         history.rollback_to_end();
         assert_eq!(history.effective_len(), 3);
+    }
+
+    #[test]
+    fn a_group_never_lists_a_feature_twice() {
+        let mut history = FeatureHistory::new();
+        let ids: Vec<Uuid> = (0..3)
+            .map(|i| {
+                let f = Feature::extrude(
+                    format!("F{i}"),
+                    Uuid::new_v4(),
+                    1.0,
+                    ExtrudeDirection::Positive,
+                );
+                let id = f.id();
+                history.add_feature(f);
+                id
+            })
+            .collect();
+
+        history.add_group(FeatureGroup {
+            id: Uuid::new_v4(),
+            name: "First two".into(),
+            members: vec![ids[0], ids[1]],
+            collapsed: false,
+        });
+        let second = Uuid::new_v4();
+        history.add_group(FeatureGroup {
+            id: second,
+            name: "Last two".into(),
+            members: vec![ids[1], ids[2]],
+            collapsed: false,
+        });
+
+        // The middle feature moved to the newer group rather than appearing
+        // in both
+        assert_eq!(history.groups().len(), 2);
+        assert_eq!(history.groups()[0].members, vec![ids[0]]);
+        assert_eq!(history.group_of(ids[1]).map(|g| g.id), Some(second));
+
+        // Deleting the features a group holds takes the group with them
+        history.remove_feature(ids[1]);
+        history.remove_feature(ids[2]);
+        assert_eq!(history.groups().len(), 1);
+        assert!(history.get_group(second).is_none());
+    }
+
+    #[test]
+    fn test_rebuild_keeps_body_ids_stable() {
+        let kernel = crate::kernel::default_kernel();
+        if !kernel.is_available() {
+            return; // NullKernel build; nothing to execute
+        }
+
+        let mut history = FeatureHistory::new();
+        let mut sketch = Sketch::new("Profile", SketchPlane::xy());
+        sketch.add_rectangle(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0));
+        let sketch_id = history.add_sketch(sketch);
+
+        let f1 = Feature::extrude("E1", sketch_id, 5.0, ExtrudeDirection::Positive);
+        let f2 = Feature::extrude("E2", sketch_id, 2.0, ExtrudeDirection::Negative);
+        let f2_id = f2.id();
+        history.add_feature(f1);
+        history.add_feature(f2);
+
+        history.rebuild(&*kernel).unwrap();
+        let mut first: Vec<Uuid> = history.bodies().keys().copied().collect();
+        first.sort();
+        assert_eq!(first.len(), 2, "each extrude should create a body");
+
+        // Full rebuild must not change body IDs
+        history.rebuild(&*kernel).unwrap();
+        let mut second: Vec<Uuid> = history.bodies().keys().copied().collect();
+        second.sort();
+        assert_eq!(first, second);
+
+        // Partial rebuild must not change body IDs either
+        history.rebuild_from(f2_id, &*kernel).unwrap();
+        let mut third: Vec<Uuid> = history.bodies().keys().copied().collect();
+        third.sort();
+        assert_eq!(first, third);
     }
 }

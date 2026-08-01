@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::kernel::{Axis3D, BooleanType, CadKernel, Solid, TessellatedMesh};
+use crate::kernel::{Axis3D, BooleanType, CadKernel, EdgeId, FaceId, Solid, TessellatedMesh};
 use crate::sketch::Sketch;
 
 /// Feature-related errors
@@ -81,6 +81,10 @@ pub enum Feature {
         name: String,
         /// Reference to the sketch
         sketch_id: Uuid,
+        /// Which of the sketch's regions to extrude ([`crate::sketch::Profile::id`]);
+        /// empty means every one of them
+        #[serde(default)]
+        profiles: Vec<Uuid>,
         /// Extrusion distance
         distance: f32,
         /// Extrusion direction
@@ -104,6 +108,10 @@ pub enum Feature {
         name: String,
         /// Reference to the sketch
         sketch_id: Uuid,
+        /// Which of the sketch's regions to revolve ([`crate::sketch::Profile::id`]);
+        /// empty means every one of them
+        #[serde(default)]
+        profiles: Vec<Uuid>,
         /// Axis origin
         axis_origin: Vec3,
         /// Axis direction
@@ -147,7 +155,7 @@ pub enum Feature {
         /// Fillet radius
         radius: f32,
         /// Edge IDs to fillet
-        edges: Vec<Uuid>,
+        edges: Vec<EdgeId>,
         /// Whether the feature is suppressed
         #[serde(default)]
         suppressed: bool,
@@ -164,7 +172,64 @@ pub enum Feature {
         /// Chamfer distance
         distance: f32,
         /// Edge IDs to chamfer
-        edges: Vec<Uuid>,
+        edges: Vec<EdgeId>,
+        /// Whether the feature is suppressed
+        #[serde(default)]
+        suppressed: bool,
+    },
+
+    /// Shell (hollow out a solid)
+    Shell {
+        /// Unique identifier
+        id: Uuid,
+        /// Name of the feature
+        name: String,
+        /// Body to modify
+        body_id: Uuid,
+        /// Wall thickness
+        thickness: f32,
+        /// Faces to remove (create openings)
+        faces_to_remove: Vec<FaceId>,
+        /// Whether the feature is suppressed
+        #[serde(default)]
+        suppressed: bool,
+    },
+
+    /// Sweep a profile along a path
+    Sweep {
+        /// Unique identifier
+        id: Uuid,
+        /// Name of the feature
+        name: String,
+        /// Profile sketch ID
+        profile_sketch_id: Uuid,
+        /// Path sketch ID
+        path_sketch_id: Uuid,
+        /// Boolean operation with existing body
+        boolean_op: BooleanOp,
+        /// Target body ID (for boolean operations)
+        target_body: Option<Uuid>,
+        /// Whether the feature is suppressed
+        #[serde(default)]
+        suppressed: bool,
+    },
+
+    /// Loft between multiple profiles
+    Loft {
+        /// Unique identifier
+        id: Uuid,
+        /// Name of the feature
+        name: String,
+        /// Profile sketch IDs (in order)
+        profile_sketch_ids: Vec<Uuid>,
+        /// Whether to create a solid (vs shell)
+        create_solid: bool,
+        /// Whether to use ruled surfaces
+        ruled: bool,
+        /// Boolean operation with existing body
+        boolean_op: BooleanOp,
+        /// Target body ID (for boolean operations)
+        target_body: Option<Uuid>,
         /// Whether the feature is suppressed
         #[serde(default)]
         suppressed: bool,
@@ -180,6 +245,9 @@ impl Feature {
             Feature::Boolean { id, .. } => *id,
             Feature::Fillet { id, .. } => *id,
             Feature::Chamfer { id, .. } => *id,
+            Feature::Shell { id, .. } => *id,
+            Feature::Sweep { id, .. } => *id,
+            Feature::Loft { id, .. } => *id,
         }
     }
 
@@ -191,6 +259,24 @@ impl Feature {
             Feature::Boolean { name, .. } => name,
             Feature::Fillet { name, .. } => name,
             Feature::Chamfer { name, .. } => name,
+            Feature::Shell { name, .. } => name,
+            Feature::Sweep { name, .. } => name,
+            Feature::Loft { name, .. } => name,
+        }
+    }
+
+    /// Rename this feature
+    pub fn set_name(&mut self, value: impl Into<String>) {
+        let value = value.into();
+        match self {
+            Feature::Extrude { name, .. } => *name = value,
+            Feature::Revolve { name, .. } => *name = value,
+            Feature::Boolean { name, .. } => *name = value,
+            Feature::Fillet { name, .. } => *name = value,
+            Feature::Chamfer { name, .. } => *name = value,
+            Feature::Shell { name, .. } => *name = value,
+            Feature::Sweep { name, .. } => *name = value,
+            Feature::Loft { name, .. } => *name = value,
         }
     }
 
@@ -202,6 +288,9 @@ impl Feature {
             Feature::Boolean { .. } => "Boolean",
             Feature::Fillet { .. } => "Fillet",
             Feature::Chamfer { .. } => "Chamfer",
+            Feature::Shell { .. } => "Shell",
+            Feature::Sweep { .. } => "Sweep",
+            Feature::Loft { .. } => "Loft",
         }
     }
 
@@ -213,6 +302,9 @@ impl Feature {
             Feature::Boolean { suppressed, .. } => *suppressed,
             Feature::Fillet { suppressed, .. } => *suppressed,
             Feature::Chamfer { suppressed, .. } => *suppressed,
+            Feature::Shell { suppressed, .. } => *suppressed,
+            Feature::Sweep { suppressed, .. } => *suppressed,
+            Feature::Loft { suppressed, .. } => *suppressed,
         }
     }
 
@@ -224,6 +316,9 @@ impl Feature {
             Feature::Boolean { suppressed, .. } => *suppressed = value,
             Feature::Fillet { suppressed, .. } => *suppressed = value,
             Feature::Chamfer { suppressed, .. } => *suppressed = value,
+            Feature::Shell { suppressed, .. } => *suppressed = value,
+            Feature::Sweep { suppressed, .. } => *suppressed = value,
+            Feature::Loft { suppressed, .. } => *suppressed = value,
         }
     }
 
@@ -238,10 +333,34 @@ impl Feature {
             id: Uuid::new_v4(),
             name: name.into(),
             sketch_id,
+            profiles: Vec::new(),
             distance,
             direction,
             boolean_op: BooleanOp::New,
             target_body: None,
+            draft_angle: 0.0,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new extrude feature with boolean operation
+    pub fn extrude_with_boolean(
+        name: impl Into<String>,
+        sketch_id: Uuid,
+        distance: f32,
+        direction: ExtrudeDirection,
+        boolean_op: BooleanOp,
+        target_body: Option<Uuid>,
+    ) -> Self {
+        Feature::Extrude {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            sketch_id,
+            profiles: Vec::new(),
+            distance,
+            direction,
+            boolean_op,
+            target_body,
             draft_angle: 0.0,
             suppressed: false,
         }
@@ -253,9 +372,88 @@ impl Feature {
             id: Uuid::new_v4(),
             name: name.into(),
             sketch_id,
+            profiles: Vec::new(),
             axis_origin: axis.origin,
             axis_direction: axis.direction,
             angle,
+            boolean_op: BooleanOp::New,
+            target_body: None,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new fillet feature
+    pub fn fillet(name: impl Into<String>, body_id: Uuid, edges: Vec<EdgeId>, radius: f32) -> Self {
+        Feature::Fillet {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            body_id,
+            radius,
+            edges,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new chamfer feature
+    pub fn chamfer(
+        name: impl Into<String>,
+        body_id: Uuid,
+        edges: Vec<EdgeId>,
+        distance: f32,
+    ) -> Self {
+        Feature::Chamfer {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            body_id,
+            distance,
+            edges,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new shell feature
+    pub fn shell(
+        name: impl Into<String>,
+        body_id: Uuid,
+        thickness: f32,
+        faces_to_remove: Vec<FaceId>,
+    ) -> Self {
+        Feature::Shell {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            body_id,
+            thickness,
+            faces_to_remove,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new sweep feature
+    pub fn sweep(name: impl Into<String>, profile_sketch_id: Uuid, path_sketch_id: Uuid) -> Self {
+        Feature::Sweep {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            profile_sketch_id,
+            path_sketch_id,
+            boolean_op: BooleanOp::New,
+            target_body: None,
+            suppressed: false,
+        }
+    }
+
+    /// Create a new loft feature
+    pub fn loft(
+        name: impl Into<String>,
+        profile_sketch_ids: Vec<Uuid>,
+        create_solid: bool,
+        ruled: bool,
+    ) -> Self {
+        Feature::Loft {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            profile_sketch_ids,
+            create_solid,
+            ruled,
             boolean_op: BooleanOp::New,
             target_body: None,
             suppressed: false,
@@ -276,6 +474,7 @@ impl Feature {
         match self {
             Feature::Extrude {
                 sketch_id,
+                profiles,
                 distance,
                 direction,
                 boolean_op,
@@ -290,14 +489,7 @@ impl Feature {
                             sketch_id
                         )))?;
 
-                // Extract profiles from sketch
-                let profiles = sketch.extract_profiles()?;
-
-                if profiles.is_empty() {
-                    return Err(FeatureError::InvalidFeature(
-                        "No closed profiles found".into(),
-                    ));
-                }
+                let regions = sketch.regions(profiles)?;
 
                 // Calculate extrusion direction and distance
                 let (extrude_dir, extrude_dist) = match direction {
@@ -306,26 +498,29 @@ impl Feature {
                     ExtrudeDirection::Symmetric => (sketch.plane.normal, *distance / 2.0),
                 };
 
-                // Extrude the first profile (for now)
-                let profile = &profiles[0];
-                let mut solid = kernel.extrude(
-                    profile,
-                    sketch.plane.origin,
-                    sketch.plane.normal,
-                    extrude_dir,
-                    extrude_dist,
-                )?;
+                let sweep = |dir: Vec3| -> FeatureResult<Solid> {
+                    let mut solids = regions.iter().map(|region| {
+                        kernel.extrude_region(
+                            region,
+                            sketch.plane.origin,
+                            sketch.plane.x_axis,
+                            sketch.plane.y_axis,
+                            dir,
+                            extrude_dist,
+                        )
+                    });
+                    let first = solids.next().expect("regions is never empty")?;
+                    solids.try_fold(first, |acc, next| {
+                        Ok(kernel.boolean(&acc, &next?, BooleanType::Union)?)
+                    })
+                };
+
+                let mut solid = sweep(extrude_dir)?;
 
                 // For symmetric, extrude in the other direction and union
                 if matches!(direction, ExtrudeDirection::Symmetric) {
-                    let solid2 = kernel.extrude(
-                        profile,
-                        sketch.plane.origin,
-                        sketch.plane.normal,
-                        -extrude_dir,
-                        extrude_dist,
-                    )?;
-                    solid = kernel.boolean(&solid, &solid2, BooleanType::Union)?;
+                    let other = sweep(-extrude_dir)?;
+                    solid = kernel.boolean(&solid, &other, BooleanType::Union)?;
                 }
 
                 // Apply boolean operation with target body
@@ -341,6 +536,7 @@ impl Feature {
 
             Feature::Revolve {
                 sketch_id,
+                profiles,
                 axis_origin,
                 axis_direction,
                 angle,
@@ -356,24 +552,23 @@ impl Feature {
                             sketch_id
                         )))?;
 
-                let profiles = sketch.extract_profiles()?;
-
-                if profiles.is_empty() {
-                    return Err(FeatureError::InvalidFeature(
-                        "No closed profiles found".into(),
-                    ));
-                }
-
+                let regions = sketch.regions(profiles)?;
                 let axis = Axis3D::new(*axis_origin, *axis_direction);
-                let profile = &profiles[0];
 
-                let mut solid = kernel.revolve(
-                    profile,
-                    sketch.plane.origin,
-                    sketch.plane.normal,
-                    &axis,
-                    *angle,
-                )?;
+                let mut swept = regions.iter().map(|region| {
+                    kernel.revolve_region(
+                        region,
+                        sketch.plane.origin,
+                        sketch.plane.x_axis,
+                        sketch.plane.y_axis,
+                        &axis,
+                        *angle,
+                    )
+                });
+                let first = swept.next().expect("regions is never empty")?;
+                let mut solid = swept.try_fold(first, |acc, next| {
+                    kernel.boolean(&acc, &next?, BooleanType::Union)
+                })?;
 
                 // Apply boolean operation
                 if let (Some(op), Some(target_id)) =
@@ -407,9 +602,158 @@ impl Feature {
                 kernel.boolean(target, tool, op).map_err(|e| e.into())
             }
 
-            Feature::Fillet { .. } | Feature::Chamfer { .. } => Err(FeatureError::InvalidFeature(
-                "Fillet/Chamfer not yet implemented".into(),
-            )),
+            Feature::Fillet {
+                body_id,
+                radius,
+                edges,
+                ..
+            } => {
+                let body = existing_bodies
+                    .get(body_id)
+                    .ok_or(FeatureError::InvalidFeature("Body not found".into()))?;
+
+                kernel.fillet(body, edges, *radius).map_err(|e| e.into())
+            }
+
+            Feature::Chamfer {
+                body_id,
+                distance,
+                edges,
+                ..
+            } => {
+                let body = existing_bodies
+                    .get(body_id)
+                    .ok_or(FeatureError::InvalidFeature("Body not found".into()))?;
+
+                kernel.chamfer(body, edges, *distance).map_err(|e| e.into())
+            }
+
+            Feature::Shell {
+                body_id,
+                thickness,
+                faces_to_remove,
+                ..
+            } => {
+                let body = existing_bodies
+                    .get(body_id)
+                    .ok_or(FeatureError::InvalidFeature("Body not found".into()))?;
+
+                kernel
+                    .shell(body, *thickness, faces_to_remove)
+                    .map_err(|e| e.into())
+            }
+
+            Feature::Sweep {
+                profile_sketch_id,
+                path_sketch_id,
+                boolean_op,
+                target_body,
+                ..
+            } => {
+                let profile_sketch =
+                    sketches
+                        .get(profile_sketch_id)
+                        .ok_or(FeatureError::InvalidFeature(format!(
+                            "Profile sketch {} not found",
+                            profile_sketch_id
+                        )))?;
+
+                let path_sketch =
+                    sketches
+                        .get(path_sketch_id)
+                        .ok_or(FeatureError::InvalidFeature(format!(
+                            "Path sketch {} not found",
+                            path_sketch_id
+                        )))?;
+
+                // Extract profiles
+                let profiles = profile_sketch.extract_profiles()?;
+                if profiles.is_empty() {
+                    return Err(FeatureError::InvalidFeature(
+                        "No closed profiles found in profile sketch".into(),
+                    ));
+                }
+
+                // Extract path (can be open)
+                let path_profiles = path_sketch.extract_profiles()?;
+                if path_profiles.is_empty() {
+                    return Err(FeatureError::InvalidFeature(
+                        "No path found in path sketch".into(),
+                    ));
+                }
+
+                let mut solid = kernel.sweep(
+                    &profiles[0],
+                    profile_sketch.plane.origin,
+                    profile_sketch.plane.normal,
+                    &path_profiles[0],
+                    path_sketch.plane.origin,
+                    path_sketch.plane.normal,
+                )?;
+
+                // Apply boolean operation
+                if let (Some(op), Some(target_id)) =
+                    (Option::<BooleanType>::from(*boolean_op), target_body)
+                    && let Some(target) = existing_bodies.get(target_id)
+                {
+                    solid = kernel.boolean(target, &solid, op)?;
+                }
+
+                Ok(solid)
+            }
+
+            Feature::Loft {
+                profile_sketch_ids,
+                create_solid,
+                ruled,
+                boolean_op,
+                target_body,
+                ..
+            } => {
+                if profile_sketch_ids.len() < 2 {
+                    return Err(FeatureError::InvalidFeature(
+                        "Loft requires at least 2 profiles".into(),
+                    ));
+                }
+
+                // Collect all profiles with their planes
+                let mut profiles_with_planes = Vec::new();
+                for sketch_id in profile_sketch_ids {
+                    let sketch =
+                        sketches
+                            .get(sketch_id)
+                            .ok_or(FeatureError::InvalidFeature(format!(
+                                "Sketch {} not found",
+                                sketch_id
+                            )))?;
+
+                    let sketch_profiles = sketch.extract_profiles()?;
+                    if sketch_profiles.is_empty() {
+                        return Err(FeatureError::InvalidFeature(format!(
+                            "No closed profiles found in sketch {}",
+                            sketch_id
+                        )));
+                    }
+
+                    profiles_with_planes.push((
+                        sketch_profiles[0].clone(),
+                        sketch.plane.origin,
+                        sketch.plane.normal,
+                    ));
+                }
+
+                let mut solid = kernel.loft(&profiles_with_planes, *create_solid, *ruled)?;
+
+                // Apply boolean operation
+                if let (Some(op), Some(target_id)) =
+                    (Option::<BooleanType>::from(*boolean_op), target_body)
+                    && let Some(target) = existing_bodies.get(target_id)
+                {
+                    solid = kernel.boolean(target, &solid, op)?;
+                }
+
+                Ok(solid)
+            }
         }
     }
 }
@@ -446,8 +790,13 @@ impl Default for CadBody {
 impl CadBody {
     /// Create a new body with the given name
     pub fn new(name: impl Into<String>) -> Self {
+        Self::with_id(Uuid::new_v4(), name)
+    }
+
+    /// Create a body with a specific ID, so IDs stay stable across rebuilds
+    pub fn with_id(id: Uuid, name: impl Into<String>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id,
             name: name.into(),
             solid: None,
             mesh_cache: None,

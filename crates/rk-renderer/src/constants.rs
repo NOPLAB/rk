@@ -30,7 +30,7 @@ pub mod gizmo {
     /// Number of segments for cylindrical geometry
     pub const SEGMENTS: u32 = 8;
     /// Hit test cylinder radius multiplier
-    pub const HIT_RADIUS_MULTIPLIER: f32 = 0.08;
+    pub const HIT_RADIUS_MULTIPLIER: f32 = 0.20;
 
     /// Rotation gizmo ring radius
     pub const RING_RADIUS: f32 = 0.8;

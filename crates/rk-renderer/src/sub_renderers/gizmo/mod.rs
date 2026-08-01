@@ -685,3 +685,44 @@ fn ray_sphere_intersection(
     let t = (-b - discriminant.sqrt()) / (2.0 * a);
     if t > 0.0 { Some(t) } else { None }
 }
+
+// SubRenderer trait implementation for GizmoRenderer
+// Note: GizmoRenderer uses direct initialization pattern, not lazy init
+use crate::context::RenderContext;
+use crate::scene::Scene;
+use crate::traits::SubRenderer;
+
+impl SubRenderer for GizmoRenderer {
+    fn name(&self) -> &str {
+        "gizmo"
+    }
+
+    fn priority(&self) -> i32 {
+        super::priorities::GIZMO
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.visible
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.visible = enabled;
+    }
+
+    fn on_init(&mut self, _ctx: &RenderContext) {
+        // GizmoRenderer uses direct initialization in new()
+        // This is a no-op as the renderer is already initialized
+    }
+
+    fn on_resize(&mut self, _ctx: &RenderContext, _width: u32, _height: u32) {
+        // Gizmo doesn't need to respond to resize
+    }
+
+    fn prepare(&mut self, _ctx: &RenderContext, _scene: &Scene) {
+        // Gizmo data is updated externally
+    }
+
+    fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, _scene: &Scene) {
+        GizmoRenderer::render(self, pass);
+    }
+}
