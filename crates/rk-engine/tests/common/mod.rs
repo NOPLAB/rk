@@ -37,6 +37,11 @@ pub fn part_added_id(events: &[Event]) -> Uuid {
 
 /// Create a sketch with a closed rectangle profile, returning its ID
 pub fn create_rect_sketch(engine: &mut Engine) -> Uuid {
+    rect_sketch(engine, Vec2::ZERO, Vec2::new(10.0, 10.0))
+}
+
+/// Create a sketch on XY holding one closed rectangle, returning its ID
+pub fn rect_sketch(engine: &mut Engine, min: Vec2, max: Vec2) -> Uuid {
     let sketch_id = Uuid::new_v4();
     engine
         .apply(Command::CreateSketch {
@@ -47,7 +52,7 @@ pub fn create_rect_sketch(engine: &mut Engine) -> Uuid {
         .unwrap();
 
     let mut sketch = rk_cad::Sketch::new("tmp", rk_cad::SketchPlane::xy());
-    sketch.add_rectangle(Vec2::ZERO, Vec2::new(10.0, 10.0));
+    sketch.add_rectangle(min, max);
     let entities: Vec<_> = sketch.entities().values().cloned().collect();
     engine
         .apply(Command::AddSketchEntities {
@@ -56,4 +61,20 @@ pub fn create_rect_sketch(engine: &mut Engine) -> Uuid {
         })
         .unwrap();
     sketch_id
+}
+
+/// Volume enclosed by a body's display mesh, by the divergence theorem
+pub fn body_volume(engine: &mut Engine, body: Uuid) -> f32 {
+    let mesh = engine.body_mesh(body).unwrap();
+    mesh.indices
+        .chunks(3)
+        .filter_map(|tri| match tri {
+            [i, j, k] => {
+                let at = |n: &u32| glam::Vec3::from_array(mesh.vertices[*n as usize]);
+                Some(at(i).dot(at(j).cross(at(k))) / 6.0)
+            }
+            _ => None,
+        })
+        .sum::<f32>()
+        .abs()
 }

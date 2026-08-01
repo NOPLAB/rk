@@ -515,8 +515,13 @@ extraction, so it never becomes a face:
 
 Extrude the regions a sketch encloses. `direction` is `"Positive" | "Negative" |
 "Symmetric"` (relative to the sketch plane normal); `boolean_op` is `"New" |
-"Join" | "Cut" | "Intersect"` (`target_body` required for anything but New).
+"Join" | "Cut" | "Intersect"` (`target_body` required for anything but New —
+naming a body that does not exist is an error, not a fallback to New).
 Emits `feature_added` and `bodies_rebuilt` with the resulting body IDs.
+
+Only `New` adds a body. `Join`, `Cut` and `Intersect` rewrite `target_body` in
+place, keeping its ID, so the body count does not grow and the ID you cut stays
+the one to cut again. `bodies_rebuilt` lists bodies in timeline order.
 
 `profiles` names the regions to use — the IDs `describe_scene` reports for the
 sketch. Leave it empty to take every region the sketch encloses. A region's

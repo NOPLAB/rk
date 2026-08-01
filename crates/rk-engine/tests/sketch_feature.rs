@@ -7,7 +7,7 @@ use rk_cad::{BooleanOp, ExtrudeDirection, SketchPlane};
 use rk_engine::{Command, Event, ExtrudePreviewRequest};
 use uuid::Uuid;
 
-use common::{create_rect_sketch, engine};
+use common::{body_volume, create_rect_sketch, engine, rect_sketch};
 
 fn kernel_available() -> bool {
     rk_cad::default_kernel().is_available()
@@ -276,6 +276,187 @@ fn extrude_cuts_the_holes_out_of_the_region() {
         "plate volume {} is not {want} — the hole was dropped",
         volume.abs(),
     );
+}
+
+/// A Cut has to leave one body with the material gone — not the pre-cut shape
+/// sitting next to the result, which is what "Cut does nothing" looked like
+#[test]
+fn cut_replaces_the_body_it_acts_on() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+
+    let block = rect_sketch(&mut eng, Vec2::ZERO, Vec2::new(10.0, 10.0));
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id: block,
+        profiles: Vec::new(),
+        distance: 5.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::New,
+        target_body: None,
+    })
+    .unwrap();
+
+    let bodies = eng.body_ids();
+    assert_eq!(bodies.len(), 1);
+    let body = bodies[0];
+    assert!((body_volume(&mut eng, body) - 500.0).abs() < 1.0);
+
+    // A 4×4 pocket through the whole block
+    let pocket = rect_sketch(&mut eng, Vec2::new(3.0, 3.0), Vec2::new(7.0, 7.0));
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id: pocket,
+        profiles: Vec::new(),
+        distance: 5.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::Cut,
+        target_body: Some(body),
+    })
+    .unwrap();
+
+    let after = eng.body_ids();
+    assert_eq!(
+        after,
+        vec![body],
+        "the cut rewrites the block in place rather than adding a body beside it",
+    );
+    let volume = body_volume(&mut eng, body);
+    assert!(
+        (volume - 420.0).abs() < 1.0,
+        "10×10×5 less a 4×4×5 pocket is 420, got {volume}",
+    );
+}
+
+/// Join is the same story: one body out, not two overlapping ones
+#[test]
+fn join_merges_into_the_target_body() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+
+    let first = rect_sketch(&mut eng, Vec2::ZERO, Vec2::new(10.0, 10.0));
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id: first,
+        profiles: Vec::new(),
+        distance: 5.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::New,
+        target_body: None,
+    })
+    .unwrap();
+    let body = eng.body_ids()[0];
+
+    // Butts up against the first block, sharing the x = 10 face
+    let second = rect_sketch(&mut eng, Vec2::new(10.0, 0.0), Vec2::new(14.0, 10.0));
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id: second,
+        profiles: Vec::new(),
+        distance: 5.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::Join,
+        target_body: Some(body),
+    })
+    .unwrap();
+
+    assert_eq!(eng.body_ids(), vec![body]);
+    let volume = body_volume(&mut eng, body);
+    assert!(
+        (volume - 700.0).abs() < 1.0,
+        "500 joined to 200 is 700, got {volume}",
+    );
+}
+
+/// Undoing a cut has to bring the material back
+#[test]
+fn undoing_a_cut_restores_the_block() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+
+    let block = rect_sketch(&mut eng, Vec2::ZERO, Vec2::new(10.0, 10.0));
+    eng.apply(Command::AddExtrude {
+        id: None,
+        name: None,
+        sketch_id: block,
+        profiles: Vec::new(),
+        distance: 5.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::New,
+        target_body: None,
+    })
+    .unwrap();
+    let body = eng.body_ids()[0];
+
+    let pocket = rect_sketch(&mut eng, Vec2::new(3.0, 3.0), Vec2::new(7.0, 7.0));
+    let cut = Uuid::new_v4();
+    eng.apply(Command::AddExtrude {
+        id: Some(cut),
+        name: None,
+        sketch_id: pocket,
+        profiles: Vec::new(),
+        distance: 5.0,
+        direction: ExtrudeDirection::Positive,
+        boolean_op: BooleanOp::Cut,
+        target_body: Some(body),
+    })
+    .unwrap();
+    assert!((body_volume(&mut eng, body) - 420.0).abs() < 1.0);
+
+    eng.apply(Command::DeleteFeature { feature_id: cut })
+        .unwrap();
+    assert_eq!(eng.body_ids(), vec![body], "body ID survives the rebuild");
+    assert!(
+        (body_volume(&mut eng, body) - 500.0).abs() < 1.0,
+        "the pocket is gone again",
+    );
+}
+
+/// A Cut aimed at nothing is an error, not a quietly-created second body
+#[test]
+fn cut_without_a_target_is_rejected() {
+    if !kernel_available() {
+        return;
+    }
+    let mut eng = engine();
+    let sketch_id = create_rect_sketch(&mut eng);
+
+    for target_body in [None, Some(Uuid::new_v4())] {
+        let err = eng
+            .apply(Command::AddExtrude {
+                id: None,
+                name: None,
+                sketch_id,
+                profiles: Vec::new(),
+                distance: 5.0,
+                direction: ExtrudeDirection::Positive,
+                boolean_op: BooleanOp::Cut,
+                target_body,
+            })
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("Cut"),
+            "the message should name the operation: {err}",
+        );
+        assert!(
+            eng.body_ids().is_empty(),
+            "a rejected cut leaves no body behind",
+        );
+        assert!(
+            eng.document().cad.history.is_empty(),
+            "and no feature in the timeline",
+        );
+    }
 }
 
 #[test]

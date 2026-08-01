@@ -60,7 +60,11 @@ export function FeatureDialog({
     .filter((r) => r.sketchId === sketchId)
     .map((r) => r.regionId);
 
-  const targetBody = op === "New" ? null : target || body_ids[0] || null;
+  // A rebuild can retire the body that was picked — a Cut consumes the one it
+  // acts on — so the stored choice is checked against what is there now rather
+  // than sent on to fail
+  const chosen = body_ids.includes(target) ? target : "";
+  const targetBody = op === "New" ? null : chosen || body_ids[0] || null;
   // Cut/Join need a body to act on, and there has to be something enclosed
   const blocked = !sketch
     ? "Pick a sketch to build from"
@@ -217,7 +221,7 @@ export function FeatureDialog({
         {op !== "New" && (
           <label className="field">
             <span>Body</span>
-            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+            <select value={chosen} onChange={(e) => setTarget(e.target.value)}>
               <option value="">first</option>
               {body_ids.map((id, i) => (
                 <option key={id} value={id}>

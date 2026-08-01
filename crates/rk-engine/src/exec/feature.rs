@@ -46,7 +46,7 @@ impl Engine {
             draft_angle: 0.0,
             suppressed: false,
         };
-        self.add_feature_and_rebuild(feature, boolean_op, events)
+        self.add_feature_and_rebuild(feature, events)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -81,19 +81,18 @@ impl Engine {
             target_body,
             suppressed: false,
         };
-        self.add_feature_and_rebuild(feature, boolean_op, events)
+        self.add_feature_and_rebuild(feature, events)
     }
 
-    /// Add a feature, rebuild, and verify that a body actually appeared.
+    /// Add a feature, rebuild, and verify that it actually built something.
     /// On failure the caller's snapshot rollback undoes the added feature.
     fn add_feature_and_rebuild(
         &mut self,
         feature: Feature,
-        boolean_op: BooleanOp,
         events: &mut Vec<Event>,
     ) -> Result<(), EngineError> {
         let feature_id = feature.id();
-        let bodies_before = self.doc.cad.history.bodies().len();
+        let type_name = feature.type_name();
         self.doc.cad.history.add_feature(feature);
 
         self.doc
@@ -102,24 +101,22 @@ impl Engine {
             .rebuild(&*self.kernel)
             .map_err(|e| EngineError::Feature(e.to_string()))?;
 
-        // rebuild logs-and-continues on per-feature failure, so verify the
-        // feature actually produced a body
-        let bodies_after = self.doc.cad.history.bodies().len();
-        if bodies_after <= bodies_before {
+        // rebuild logs-and-continues on per-feature failure, so verify this
+        // feature produced a body. Counting bodies would not do: a Join or a
+        // Cut rewrites the body it acts on instead of adding one
+        if self.doc.cad.history.body_of_feature(feature_id).is_none() {
             // Which operations exist at all depends on the kernel — truck has
-            // no subtraction, OpenCASCADE has all three — so say which one
-            // turned the request down rather than naming a kernel that may
-            // not be the one running
-            let msg = if boolean_op != BooleanOp::New {
-                format!(
-                    "Boolean operation '{:?}' failed on the {} kernel. Check the target body and try again.",
-                    boolean_op,
-                    self.kernel.name()
-                )
-            } else {
-                "No body was created. Check if the sketch has valid closed profiles.".to_string()
-            };
-            return Err(EngineError::Feature(msg));
+            // no subtraction, OpenCASCADE has all three — so quote the reason
+            // the kernel gave rather than naming a kernel that may not be the
+            // one running
+            let why = self
+                .doc
+                .cad
+                .history
+                .failure_of(feature_id)
+                .map(str::to_owned)
+                .unwrap_or_else(|| "the sketch encloses no region to build from".to_string());
+            return Err(EngineError::Feature(format!("{type_name} failed: {why}")));
         }
 
         events.push(Event::FeatureAdded { feature_id });

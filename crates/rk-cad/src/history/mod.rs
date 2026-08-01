@@ -71,6 +71,11 @@ pub struct FeatureHistory {
     /// All bodies in the model
     #[serde(skip)]
     bodies: HashMap<Uuid, CadBody>,
+    /// Why a feature built nothing on the last rebuild, keyed by feature ID.
+    /// Rebuilding logs-and-continues so one bad feature cannot wedge the whole
+    /// timeline; this is how a caller finds out which one failed, and why.
+    #[serde(skip)]
+    failures: HashMap<Uuid, String>,
 }
 
 impl FeatureHistory {
@@ -257,6 +262,50 @@ impl FeatureHistory {
         &mut self.bodies
     }
 
+    /// Body IDs in timeline order.
+    ///
+    /// [`Self::bodies`] is a hash map, and its iteration order changes from
+    /// run to run — enough to shuffle the target-body list a client offers and
+    /// make "the first body" a different body each time the dialog opens.
+    pub fn ordered_body_ids(&self) -> Vec<Uuid> {
+        let end = self.effective_len();
+        let mut ids: Vec<Uuid> = Vec::new();
+        for entry in &self.entries[..end] {
+            for id in entry.created_bodies.iter().chain(&entry.modified_bodies) {
+                if self.bodies.contains_key(id) && !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+        }
+        // Nothing should reach here, but a body the timeline cannot account
+        // for still has to be drawn rather than silently vanish
+        let mut orphans: Vec<Uuid> = self
+            .bodies
+            .keys()
+            .copied()
+            .filter(|id| !ids.contains(id))
+            .collect();
+        orphans.sort();
+        ids.append(&mut orphans);
+        ids
+    }
+
+    /// The body a feature produced on the last rebuild, if it produced one.
+    ///
+    /// A feature that combines with an existing body rewrites that body rather
+    /// than adding one, so counting bodies cannot tell whether it worked —
+    /// this can.
+    pub fn body_of_feature(&self, feature_id: Uuid) -> Option<&CadBody> {
+        self.bodies
+            .values()
+            .find(|b| b.source_feature == Some(feature_id))
+    }
+
+    /// Why a feature built nothing on the last rebuild
+    pub fn failure_of(&self, feature_id: Uuid) -> Option<&str> {
+        self.failures.get(&feature_id).map(String::as_str)
+    }
+
     // ============== Rollback ==============
 
     /// Roll back to a specific feature (features after it are hidden)
@@ -294,6 +343,7 @@ impl FeatureHistory {
     pub fn rebuild(&mut self, kernel: &dyn CadKernel) -> FeatureResult<()> {
         // Clear existing bodies
         self.bodies.clear();
+        self.failures.clear();
 
         // Convert bodies to solids for feature execution
         let mut solids: HashMap<Uuid, Solid> = HashMap::new();
@@ -306,27 +356,11 @@ impl FeatureHistory {
             }
 
             match entry.feature.execute(kernel, &self.sketches, &solids) {
-                Ok(solid) => {
-                    // Reuse the previous body ID so references to this body
-                    // (e.g. Boolean target_body) stay valid across rebuilds
-                    let body_id = entry
-                        .created_bodies
-                        .first()
-                        .copied()
-                        .unwrap_or_else(Uuid::new_v4);
-                    let mut body = CadBody::with_id(body_id, entry.feature.name());
-                    body.source_feature = Some(entry.feature.id());
-
-                    // Store the solid
-                    solids.insert(body_id, solid.clone());
-                    body.solid = Some(solid);
-
-                    self.bodies.insert(body_id, body);
-                    entry.created_bodies = vec![body_id];
-                }
+                Ok(solid) => place_result(entry, solid, &mut self.bodies, &mut solids),
                 Err(e) => {
                     // Log error but continue with other features
                     tracing::warn!("Feature {} failed: {}", entry.feature.name(), e);
+                    self.failures.insert(entry.feature.id(), e.to_string());
                 }
             }
         }
@@ -347,8 +381,21 @@ impl FeatureHistory {
             return self.rebuild(kernel);
         }
 
+        // A feature that consumes an earlier body has already overwritten it
+        // with its own result, and the shape it started from is gone — cutting
+        // the same body a second time would eat the hole twice. Resuming
+        // part-way is only sound while every remaining feature builds its own
+        // body, so anything else falls back to the full rebuild.
+        if self.entries[start_index..end]
+            .iter()
+            .any(|e| !e.feature.consumed_bodies().is_empty())
+        {
+            return self.rebuild(kernel);
+        }
+
         // Remove bodies created by features from start_index onwards
         for entry in &self.entries[start_index..end] {
+            self.failures.remove(&entry.feature.id());
             for body_id in &entry.created_bodies {
                 self.bodies.remove(body_id);
             }
@@ -373,29 +420,68 @@ impl FeatureHistory {
             entry.deleted_bodies.clear();
 
             match entry.feature.execute(kernel, &self.sketches, &solids) {
-                Ok(solid) => {
-                    let body_id = entry
-                        .created_bodies
-                        .first()
-                        .copied()
-                        .unwrap_or_else(Uuid::new_v4);
-                    let mut body = CadBody::with_id(body_id, entry.feature.name());
-                    body.source_feature = Some(entry.feature.id());
-
-                    solids.insert(body_id, solid.clone());
-                    body.solid = Some(solid);
-
-                    self.bodies.insert(body_id, body);
-                    entry.created_bodies = vec![body_id];
-                }
+                Ok(solid) => place_result(entry, solid, &mut self.bodies, &mut solids),
                 Err(e) => {
                     tracing::warn!("Feature {} failed: {}", entry.feature.name(), e);
+                    self.failures.insert(entry.feature.id(), e.to_string());
                 }
             }
         }
 
         Ok(())
     }
+}
+
+/// File the solid a feature just built, and retire whatever it ate.
+///
+/// A feature that combines with existing bodies rewrites the first of them in
+/// place — keeping its ID, so later features and the client still point at the
+/// same body — and swallows the rest. Leaving the target behind is what made a
+/// Cut look like it did nothing: the pre-cut shape stayed in the scene, drawn
+/// over the result.
+fn place_result(
+    entry: &mut HistoryEntry,
+    solid: Solid,
+    bodies: &mut HashMap<Uuid, CadBody>,
+    solids: &mut HashMap<Uuid, Solid>,
+) {
+    let mut consumed = entry.feature.consumed_bodies();
+    consumed.retain(|id| solids.contains_key(id));
+
+    let body_id = match consumed.first().copied() {
+        Some(target) => {
+            for id in &consumed[1..] {
+                bodies.remove(id);
+                solids.remove(id);
+            }
+            // Not `created_bodies`: leaving the ID there would let a later
+            // rebuild — after the op is switched back to `New` — hand the
+            // target's ID to a second, independent body
+            entry.created_bodies.clear();
+            entry.modified_bodies = vec![target];
+            entry.deleted_bodies = consumed[1..].to_vec();
+            target
+        }
+        None => {
+            // Reuse the previous body ID so references to this body
+            // (e.g. Boolean target_body) stay valid across rebuilds
+            let id = entry
+                .created_bodies
+                .first()
+                .copied()
+                .unwrap_or_else(Uuid::new_v4);
+            entry.created_bodies = vec![id];
+            entry.modified_bodies.clear();
+            entry.deleted_bodies.clear();
+            id
+        }
+    };
+
+    let mut body = CadBody::with_id(body_id, entry.feature.name());
+    body.source_feature = Some(entry.feature.id());
+    solids.insert(body_id, solid.clone());
+    body.solid = Some(solid);
+    bodies.insert(body_id, body);
 }
 
 /// CAD data that can be stored in a project
@@ -541,5 +627,76 @@ mod tests {
         let mut third: Vec<Uuid> = history.bodies().keys().copied().collect();
         third.sort();
         assert_eq!(first, third);
+    }
+
+    /// A partial rebuild cannot resume over a feature that ate an earlier body:
+    /// that body already holds the result, so cutting it again would take the
+    /// pocket out twice. It has to fall back to the full rebuild.
+    #[test]
+    fn a_partial_rebuild_over_a_cut_rebuilds_everything() {
+        let kernel = crate::kernel::default_kernel();
+        if !kernel.is_available() {
+            return; // NullKernel build; nothing to execute
+        }
+
+        let mut history = FeatureHistory::new();
+        let mut block = Sketch::new("Block", SketchPlane::xy());
+        block.add_rectangle(Vec2::ZERO, Vec2::new(10.0, 10.0));
+        let block_id = history.add_sketch(block);
+        let mut pocket = Sketch::new("Pocket", SketchPlane::xy());
+        pocket.add_rectangle(Vec2::new(3.0, 3.0), Vec2::new(7.0, 7.0));
+        let pocket_id = history.add_sketch(pocket);
+
+        let pad = Feature::extrude("Pad", block_id, 5.0, ExtrudeDirection::Positive);
+        history.add_feature(pad);
+        history.rebuild(&*kernel).unwrap();
+        let body = history.ordered_body_ids()[0];
+
+        let cut = Feature::extrude_with_boolean(
+            "Pocket",
+            pocket_id,
+            5.0,
+            ExtrudeDirection::Positive,
+            crate::feature::BooleanOp::Cut,
+            Some(body),
+        );
+        let cut_id = cut.id();
+        history.add_feature(cut);
+        history.rebuild(&*kernel).unwrap();
+
+        assert_eq!(
+            history.ordered_body_ids(),
+            vec![body],
+            "the cut rewrote the pad's body rather than adding one",
+        );
+        let volume = |h: &mut FeatureHistory| {
+            let mesh = h
+                .get_body_mut(body)
+                .unwrap()
+                .get_mesh(&*kernel, 0.05)
+                .unwrap();
+            mesh.indices
+                .chunks(3)
+                .filter_map(|t| match t {
+                    [i, j, k] => {
+                        let at = |n: &u32| glam::Vec3::from_array(mesh.vertices[*n as usize]);
+                        Some(at(i).dot(at(j).cross(at(k))) / 6.0)
+                    }
+                    _ => None,
+                })
+                .sum::<f32>()
+                .abs()
+        };
+        assert!((volume(&mut history) - 420.0).abs() < 1.0);
+
+        // Resuming at the cut must not cut the already-cut body a second time
+        history.get_body_mut(body).unwrap().invalidate_cache();
+        history.rebuild_from(cut_id, &*kernel).unwrap();
+        assert_eq!(history.ordered_body_ids(), vec![body]);
+        let again = volume(&mut history);
+        assert!(
+            (again - 420.0).abs() < 1.0,
+            "still one pocket, not two: {again}",
+        );
     }
 }

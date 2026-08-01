@@ -308,6 +308,64 @@ impl Feature {
         }
     }
 
+    /// Bodies this feature eats.
+    ///
+    /// A `Cut`, `Join` or `Intersect` does not add a body — it rewrites the
+    /// one it acts on. The first ID is the body the result takes the place
+    /// of (and whose ID it inherits); any others disappear into it. Left in
+    /// the model, the pre-cut shape would be drawn on top of the result and
+    /// the operation would look like it never happened.
+    ///
+    /// `New` consumes nothing, and neither does a feature whose target is
+    /// unset.
+    pub fn consumed_bodies(&self) -> Vec<Uuid> {
+        let (op, target) = match self {
+            Feature::Extrude {
+                boolean_op,
+                target_body,
+                ..
+            }
+            | Feature::Revolve {
+                boolean_op,
+                target_body,
+                ..
+            }
+            | Feature::Sweep {
+                boolean_op,
+                target_body,
+                ..
+            }
+            | Feature::Loft {
+                boolean_op,
+                target_body,
+                ..
+            } => (*boolean_op, *target_body),
+
+            Feature::Boolean {
+                operation,
+                target_body,
+                tool_body,
+                ..
+            } => {
+                return match operation {
+                    // Both operands go into the result; the target keeps its ID
+                    BooleanOp::New => Vec::new(),
+                    _ => vec![*target_body, *tool_body],
+                };
+            }
+
+            // These modify a body in place rather than combining two
+            Feature::Fillet { body_id, .. }
+            | Feature::Chamfer { body_id, .. }
+            | Feature::Shell { body_id, .. } => return vec![*body_id],
+        };
+
+        match (op, target) {
+            (BooleanOp::New, _) | (_, None) => Vec::new(),
+            (_, Some(id)) => vec![id],
+        }
+    }
+
     /// Set the suppressed state
     pub fn set_suppressed(&mut self, value: bool) {
         match self {
@@ -523,15 +581,7 @@ impl Feature {
                     solid = kernel.boolean(&solid, &other, BooleanType::Union)?;
                 }
 
-                // Apply boolean operation with target body
-                if let (Some(op), Some(target_id)) =
-                    (Option::<BooleanType>::from(*boolean_op), target_body)
-                    && let Some(target) = existing_bodies.get(target_id)
-                {
-                    solid = kernel.boolean(target, &solid, op)?;
-                }
-
-                Ok(solid)
+                combine_with_target(kernel, solid, *boolean_op, *target_body, existing_bodies)
             }
 
             Feature::Revolve {
@@ -566,19 +616,11 @@ impl Feature {
                     )
                 });
                 let first = swept.next().expect("regions is never empty")?;
-                let mut solid = swept.try_fold(first, |acc, next| {
+                let solid = swept.try_fold(first, |acc, next| {
                     kernel.boolean(&acc, &next?, BooleanType::Union)
                 })?;
 
-                // Apply boolean operation
-                if let (Some(op), Some(target_id)) =
-                    (Option::<BooleanType>::from(*boolean_op), target_body)
-                    && let Some(target) = existing_bodies.get(target_id)
-                {
-                    solid = kernel.boolean(target, &solid, op)?;
-                }
-
-                Ok(solid)
+                combine_with_target(kernel, solid, *boolean_op, *target_body, existing_bodies)
             }
 
             Feature::Boolean {
@@ -682,7 +724,7 @@ impl Feature {
                     ));
                 }
 
-                let mut solid = kernel.sweep(
+                let solid = kernel.sweep(
                     &profiles[0],
                     profile_sketch.plane.origin,
                     profile_sketch.plane.normal,
@@ -691,15 +733,7 @@ impl Feature {
                     path_sketch.plane.normal,
                 )?;
 
-                // Apply boolean operation
-                if let (Some(op), Some(target_id)) =
-                    (Option::<BooleanType>::from(*boolean_op), target_body)
-                    && let Some(target) = existing_bodies.get(target_id)
-                {
-                    solid = kernel.boolean(target, &solid, op)?;
-                }
-
-                Ok(solid)
+                combine_with_target(kernel, solid, *boolean_op, *target_body, existing_bodies)
             }
 
             Feature::Loft {
@@ -742,20 +776,41 @@ impl Feature {
                     ));
                 }
 
-                let mut solid = kernel.loft(&profiles_with_planes, *create_solid, *ruled)?;
+                let solid = kernel.loft(&profiles_with_planes, *create_solid, *ruled)?;
 
-                // Apply boolean operation
-                if let (Some(op), Some(target_id)) =
-                    (Option::<BooleanType>::from(*boolean_op), target_body)
-                    && let Some(target) = existing_bodies.get(target_id)
-                {
-                    solid = kernel.boolean(target, &solid, op)?;
-                }
-
-                Ok(solid)
+                combine_with_target(kernel, solid, *boolean_op, *target_body, existing_bodies)
             }
         }
     }
+}
+
+/// Fold a freshly swept solid into the body it was aimed at.
+///
+/// `New` hands the solid straight back. Every other operation needs a target
+/// that exists at this point in the history, and says so when there is none:
+/// quietly returning the tool instead would drop a second body where the user
+/// asked for a cut, which reads as "Cut did nothing" rather than as an error.
+fn combine_with_target(
+    kernel: &dyn CadKernel,
+    solid: Solid,
+    boolean_op: BooleanOp,
+    target_body: Option<Uuid>,
+    existing_bodies: &std::collections::HashMap<Uuid, Solid>,
+) -> FeatureResult<Solid> {
+    let Some(op) = Option::<BooleanType>::from(boolean_op) else {
+        return Ok(solid);
+    };
+
+    let target_id = target_body.ok_or_else(|| {
+        FeatureError::InvalidFeature(format!("{boolean_op:?} needs a target body to act on"))
+    })?;
+    let target = existing_bodies.get(&target_id).ok_or_else(|| {
+        FeatureError::InvalidFeature(format!(
+            "{boolean_op:?} target body {target_id} does not exist at this point in the history"
+        ))
+    })?;
+
+    Ok(kernel.boolean(target, &solid, op)?)
 }
 
 /// A body produced by features

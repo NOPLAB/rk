@@ -444,8 +444,10 @@ impl Engine {
         self.doc.cad.history.entries()
     }
 
+    /// Body IDs in timeline order, so "the first body" means the same body
+    /// every time a client asks
     pub fn body_ids(&self) -> Vec<Uuid> {
-        self.doc.cad.history.bodies().keys().copied().collect()
+        self.doc.cad.history.ordered_body_ids()
     }
 
     /// Get (and lazily tessellate) a body's display mesh
